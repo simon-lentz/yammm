@@ -2,7 +2,6 @@ package schema
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/parse"
@@ -60,22 +59,26 @@ func (p *schemaParser) Parse(source []byte) *model {
 	return m
 }
 
-// importDecl resolves an import's alias and returns nil for a reserved one,
-// dropping the declaration. The parser records only an alias the source wrote,
-// because deriving one from the path is a loading decision; the reserved-word
-// refusal belongs with it for the same reason.
+// importDecl resolves an import's alias and returns nil when the path derives a
+// reserved one, dropping the declaration. The parser records only an alias the
+// source wrote, and its grammar refuses a reserved word there. Deriving one from
+// the path is a loading decision, so its refusal belongs here.
 func (p *schemaParser) importDecl(imp *parse.Import) *importDecl {
 	alias := imp.Alias
 	if !imp.HasAlias {
+		// A path with no value derives no alias.
+		if imp.PathRefused {
+			return &importDecl{PathRefused: true, Span: imp.Span}
+		}
 		alias = deriveAliasFromPath(imp.Path)
+		if parse.IsReserved(alias) {
+			p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
+				fmt.Sprintf("import alias %q is a reserved keyword; use 'as <alias>' to choose another", alias)).
+				WithSpan(imp.Span).Build())
+			return nil
+		}
 	}
-	if isReservedKeyword(alias) {
-		p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
-			fmt.Sprintf("import alias %q is a reserved keyword; use 'as <alias>' to choose another", alias)).
-			WithSpan(imp.Span).Build())
-		return nil
-	}
-	return &importDecl{Path: imp.Path, Alias: alias, Span: imp.Span}
+	return &importDecl{Path: imp.Path, PathRefused: imp.PathRefused, PathRaw: imp.PathRaw, Alias: alias, Span: imp.Span}
 }
 
 func (p *schemaParser) typeDecl(t *parse.TypeDecl) *typeDecl {
@@ -84,6 +87,7 @@ func (p *schemaParser) typeDecl(t *parse.TypeDecl) *typeDecl {
 		NameSpan:      t.NameSpan,
 		IsAbstract:    t.IsAbstract,
 		IsPart:        t.IsPart,
+		LostMember:    t.LostMember,
 		Documentation: t.Doc,
 		Span:          t.Span,
 	}
@@ -101,6 +105,8 @@ func (p *schemaParser) typeDecl(t *parse.TypeDecl) *typeDecl {
 		out.Invariants = append(out.Invariants, &invariantDecl{
 			Name:          inv.Message,
 			Expr:          inv.Expr,
+			Text:          inv.Text,
+			NoValue:       inv.NoValue,
 			Documentation: inv.Doc,
 			Span:          inv.Span,
 		})
@@ -225,71 +231,30 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 	case parse.ConstraintFloat:
 		return floatConstraint(c), DataTypeRef{}
 	case parse.ConstraintBoolean:
-		return NewBooleanConstraint(), DataTypeRef{}
+		return newBooleanConstraint(), DataTypeRef{}
 	case parse.ConstraintString:
 		return stringConstraint(c), DataTypeRef{}
 	case parse.ConstraintEnum:
-		return NewEnumConstraint(c.EnumValues()), DataTypeRef{}
+		return parsedEnumConstraint(c.EnumValues()), DataTypeRef{}
 	case parse.ConstraintPattern:
-		return NewPatternConstraint(c.PatternRegexps()), DataTypeRef{}
+		return parsedPatternConstraint(c.PatternRegexp()), DataTypeRef{}
 	case parse.ConstraintTimestamp:
-		if format, ok := c.Format(); ok {
-			p.warnLossyTimestampFormat(format, c.FormatLit.Span)
-			return NewTimestampConstraintFormatted(format), DataTypeRef{}
-		}
-		return NewTimestampConstraint(), DataTypeRef{}
+		return newTimestampConstraint(), DataTypeRef{}
 	case parse.ConstraintDate:
-		return NewDateConstraint(), DataTypeRef{}
+		return newDateConstraint(), DataTypeRef{}
 	case parse.ConstraintUUID:
-		return NewUUIDConstraint(), DataTypeRef{}
+		return newUUIDConstraint(), DataTypeRef{}
 	case parse.ConstraintVector:
 		if c.VectorDims == nil {
 			return nil, DataTypeRef{}
 		}
-		return NewVectorConstraint(*c.VectorDims), DataTypeRef{}
+		return newVectorConstraint(*c.VectorDims), DataTypeRef{}
 	case parse.ConstraintList:
 		return p.listConstraint(c)
 	case parse.ConstraintAlias:
 		return aliasConstraint(c)
 	}
 	return nil, DataTypeRef{} // unreachable: ConstraintKind has exactly the twelve forms above
-}
-
-// warnLossyTimestampFormat reports a declared layout that cannot reproduce an
-// instant. Values of the kind are stored as text rendered through the layout,
-// so whatever the layout omits is dropped from every value written under it,
-// and the round trip back through the same layout names a different moment.
-//
-// A wall-clock layout is a legitimate domain choice — an upstream feed emits
-// what it emits — so the declaration is accepted and the author is told once,
-// here, where the layout is written.
-func (p *schemaParser) warnLossyTimestampFormat(format string, span location.Span) {
-	if !lossyTimestampFormat(format) {
-		return
-	}
-	p.collector.Collect(diag.NewIssue(diag.Warning, diag.W_TIMESTAMP_LOSSY_FORMAT,
-		fmt.Sprintf("timestamp format %q cannot represent an instant: a value stored through it loses its UTC offset, its fractional second, or both", format)).
-		WithSpan(span).
-		WithHint("declare Timestamp without a format to store RFC 3339 with nanoseconds, which round-trips exactly").
-		Build())
-}
-
-// lossyTimestampFormat reports whether rendering an instant through format and
-// parsing it back changes the instant. The test is the round trip itself
-// rather than a scan for zone and fraction directives, so a layout is judged
-// by what it does rather than by how it is spelled.
-func lossyTimestampFormat(format string) bool {
-	// The probe zone carries a name: a layout with the MST directive renders
-	// an unnamed zone as a numeric offset, which time.Parse then refuses, and
-	// the error arm would call exactly the lossiest layouts "not lossy".
-	probe := time.Date(2026, 8, 19, 12, 34, 56, 789000000, time.FixedZone("XYZ", 2*60*60))
-	back, err := time.Parse(format, probe.Format(format))
-	if err != nil {
-		// A layout Go cannot parse its own output under is not something this
-		// warning can speak to; it is either exotic or already an E_SYNTAX.
-		return false
-	}
-	return !back.Equal(probe)
 }
 
 // aliasConstraint is the one form yielding two outputs from one node: the
@@ -305,43 +270,43 @@ func aliasConstraint(c *parse.Constraint) (Constraint, DataTypeRef) {
 	if ref.Qualifier != "" {
 		fullName = ref.Qualifier + "." + ref.Name
 	}
-	return NewAliasConstraint(fullName, nil), NewDataTypeRef(ref.Qualifier, ref.Name, ref.Span)
+	return newAliasConstraint(fullName, nil), DataTypeRef{qualifier: ref.Qualifier, name: ref.Name, span: ref.Span}
 }
 
 func integerConstraint(c *parse.Constraint) Constraint {
 	switch {
 	case c.IntMin != nil && c.IntMax != nil:
-		return IntegerBetween(*c.IntMin, *c.IntMax)
+		return integerBetween(*c.IntMin, *c.IntMax)
 	case c.IntMin != nil:
-		return IntegerMin(*c.IntMin)
+		return integerMin(*c.IntMin)
 	case c.IntMax != nil:
-		return IntegerMax(*c.IntMax)
+		return integerMax(*c.IntMax)
 	}
-	return NewIntegerConstraint()
+	return newIntegerConstraint()
 }
 
 func floatConstraint(c *parse.Constraint) Constraint {
 	switch {
 	case c.FloatMin != nil && c.FloatMax != nil:
-		return FloatBetween(*c.FloatMin, *c.FloatMax)
+		return floatBetween(*c.FloatMin, *c.FloatMax)
 	case c.FloatMin != nil:
-		return FloatMin(*c.FloatMin)
+		return floatMin(*c.FloatMin)
 	case c.FloatMax != nil:
-		return FloatMax(*c.FloatMax)
+		return floatMax(*c.FloatMax)
 	}
-	return NewFloatConstraint()
+	return newFloatConstraint()
 }
 
 func stringConstraint(c *parse.Constraint) Constraint {
 	switch {
 	case c.LenMin != nil && c.LenMax != nil:
-		return StringLenBetween(*c.LenMin, *c.LenMax)
+		return stringLenBetween(*c.LenMin, *c.LenMax)
 	case c.LenMin != nil:
-		return StringMinLen(*c.LenMin)
+		return stringMinLen(*c.LenMin)
 	case c.LenMax != nil:
-		return StringMaxLen(*c.LenMax)
+		return stringMaxLen(*c.LenMax)
 	}
-	return NewStringConstraint()
+	return newStringConstraint()
 }
 
 // listConstraint returns nil when the element type is unusable, because a list
@@ -355,11 +320,11 @@ func (p *schemaParser) listConstraint(c *parse.Constraint) (Constraint, DataType
 	}
 	switch {
 	case c.LenMin != nil && c.LenMax != nil:
-		return ListLenBetween(elem, *c.LenMin, *c.LenMax), ref
+		return listLenBetween(elem, *c.LenMin, *c.LenMax), ref
 	case c.LenMin != nil:
-		return ListMinLen(elem, *c.LenMin), ref
+		return listMinLen(elem, *c.LenMin), ref
 	case c.LenMax != nil:
-		return ListMaxLen(elem, *c.LenMax), ref
+		return listMaxLen(elem, *c.LenMax), ref
 	}
-	return NewListConstraint(elem), ref
+	return newListConstraint(elem), ref
 }

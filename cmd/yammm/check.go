@@ -9,16 +9,12 @@ import (
 
 func newCheckCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "check <schema.yammm> <data-file>",
+		Use:   "check <schema.yammm> <data-file> [data-file...]",
 		Short: "Validate data against a schema",
-		Long:  "Validate JSON or CSV data against a yammm schema: every instance, primary-key uniqueness, and every required association's target, as load does. A target the data holds but refuses is reported by its own refusal, not as missing. Nothing is written. Input format is auto-detected from file extension.",
-		Args:  cobra.ExactArgs(2),
+		Long:  "Validate JSON data against a yammm schema: every instance, primary-key uniqueness, and every required association's target. Several data files are one document, as snapshot save reads them. A target the data holds but refuses is reported by its own refusal, not as missing. Nothing is written.",
+		Args:  cobra.MinimumNArgs(2),
 		RunE:  withDiagnostics(runCheck),
 	}
-
-	cmd.Flags().String("from", "", "input format override: json or csv")
-	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
-	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
 
 	registerModuleRootFlag(cmd)
 	return cmd
@@ -26,9 +22,8 @@ func newCheckCmd() *cobra.Command {
 
 func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	schemaPath := args[0]
-	dataPath := args[1]
-	in, err := dataInputOf(cmd, dataPath)
-	if err != nil {
+	dataPaths := args[1:]
+	if err := checkDataOperands(dataPaths...); err != nil {
 		return err
 	}
 
@@ -42,18 +37,14 @@ func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error
 	if err != nil {
 		return err
 	}
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+	s, loadErr := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, loadErr); err != nil {
 		return err
 	}
 
-	if _, err := assembleGraph(cmd, sink, s, in, nil); err != nil {
+	if _, err := assembleGraph(cmd, sink, s, dataPaths, nil); err != nil {
 		return err
 	}
 
-	exitCode := cli.ExitForResult(sink.Result())
-	if exitCode != cli.ExitOK {
-		return &cli.ExitError{Code: exitCode}
-	}
-	return nil
+	return cli.Exit(cli.ExitForResult(sink.Result()))
 }

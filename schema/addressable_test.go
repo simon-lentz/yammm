@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -46,25 +47,25 @@ type Beacon {
 }
 `
 
-func loadAddrSchema(t *testing.T) *schema.Schema {
+func loadAddrSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(addrEntrySource),
 		"base.yammm":  []byte(addrBaseSource),
 		"deep.yammm":  []byte(addrDeepSource),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load addressability fixture: %s", result)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load addressability fixture: %s", err)
 	}
 	return s
 }
 
 // closureTypes returns every type of every closure member, so the sweep below
 // reaches the transitively imported ones no entry-relative name can reach.
-func closureTypes(s *schema.Schema) []*schema.Type {
-	var out []*schema.Type
-	for _, member := range s.Closure() {
-		out = append(out, member.TypesSlice()...)
+func closureTypes(s schema.Schema) []schema.Type {
+	var out []schema.Type
+	for member := range s.Closure() {
+		out = append(out, slices.Collect(member.Types())...)
 	}
 	return out
 }
@@ -83,9 +84,6 @@ func TestAddressableTag_IsResolveTypeNameInverse(t *testing.T) {
 	for _, typ := range closureTypes(s) {
 		id := typ.ID()
 		tag, ok := schema.AddressableTag(s, id)
-		if ok != schema.Addressable(s, id) {
-			t.Errorf("%s: AddressableTag reports %t, Addressable reports %t", id, ok, schema.Addressable(s, id))
-		}
 		if !ok {
 			refused++
 			if tag != "" {
@@ -123,11 +121,11 @@ func TestAddressableTag_RefusesATransitivelyImportedType(t *testing.T) {
 	s := loadAddrSchema(t)
 
 	base, ok := s.ImportByAlias("base")
-	if !ok || base.Schema() == nil {
+	if !ok || base.Schema().IsZero() {
 		t.Fatal("import alias base did not resolve")
 	}
 	deep, ok := base.Schema().ImportByAlias("deep")
-	if !ok || deep.Schema() == nil {
+	if !ok || deep.Schema().IsZero() {
 		t.Fatal("import alias deep did not resolve")
 	}
 	probe, ok := deep.Schema().Type("Probe")
@@ -138,16 +136,16 @@ func TestAddressableTag_RefusesATransitivelyImportedType(t *testing.T) {
 	if tag, ok := schema.AddressableTag(s, probe.ID()); ok {
 		t.Errorf("a transitively imported type is addressable as %q", tag)
 	}
-	// TagForm still renders it, and that difference is the reason both exist.
-	if got := schema.TagForm(s, probe.ID()); got != "Probe" {
-		t.Errorf("TagForm(deep.Probe) = %q, want the bare name %q", got, "Probe")
+	// TagForm still renders it, by its declaring schema's name.
+	if got := schema.TagForm(s, probe.ID()); got != "deep#Probe" {
+		t.Errorf("TagForm(deep.Probe) = %q, want %q", got, "deep#Probe")
 	}
 }
 
 // TestAddressableTag_RefusesANameTheAliasedSchemaDoesNotDeclare drives the arm a
-// caller reaches by building a TypeID itself. [schema.NewTypeID] is exported, so
-// the schema path may be one this schema imports while the name is one that
-// schema never declared, and the alias alone must not be taken as proof.
+// caller reaches with a TypeID from another load of an imported path: the schema
+// path may be one this schema imports while the name is one that schema never
+// declared, and the alias alone must not be taken as proof.
 //
 // Mutation: dropping the name-exists check in the alias arm turns this red.
 func TestAddressableTag_RefusesANameTheAliasedSchemaDoesNotDeclare(t *testing.T) {
@@ -155,7 +153,7 @@ func TestAddressableTag_RefusesANameTheAliasedSchemaDoesNotDeclare(t *testing.T)
 	s := loadAddrSchema(t)
 
 	base, ok := s.ImportByAlias("base")
-	if !ok || base.Schema() == nil {
+	if !ok || base.Schema().IsZero() {
 		t.Fatal("import alias base did not resolve")
 	}
 	// The path resolves through the alias; the name is declared nowhere.
@@ -166,9 +164,6 @@ func TestAddressableTag_RefusesANameTheAliasedSchemaDoesNotDeclare(t *testing.T)
 
 	if tag, ok := schema.AddressableTag(s, forged); ok {
 		t.Errorf("a name the aliased schema does not declare is addressable as %q", tag)
-	}
-	if schema.Addressable(s, forged) {
-		t.Error("Addressable accepted a name the aliased schema does not declare")
 	}
 }
 
@@ -204,5 +199,57 @@ func TestAddressableTag_SeparatesOneNameThreeSchemasDeclare(t *testing.T) {
 	}
 	if _, ok := schema.AddressableTag(s, transitive.ID()); ok {
 		t.Error("the transitively imported Beacon is addressable")
+	}
+}
+
+// TestTagForm_DenotesOneTypeWithinALoad pins TagForm's three forms over a
+// closure where three schemas declare a Beacon: each type's rendering is its
+// own, and a rendering the entry schema resolves resolves back to that type.
+func TestTagForm_DenotesOneTypeWithinALoad(t *testing.T) {
+	t.Parallel()
+	s := loadAddrSchema(t)
+
+	want := map[string]bool{
+		"Beacon": true, "base.Basin": true, "base.Beacon": true,
+		"deep#Probe": true, "deep#Beacon": true,
+	}
+	seen := map[string]schema.TypeID{}
+	for member := range s.Closure() {
+		for typ := range member.Types() {
+			name := schema.TagForm(s, typ.ID())
+			if other, ok := seen[name]; ok {
+				t.Errorf("%s and %s both render as %q", other, typ.ID(), name)
+			}
+			seen[name] = typ.ID()
+			if !want[name] {
+				t.Errorf("%s renders as %q, not one of the expected forms", typ.ID(), name)
+			}
+			if resolved, ok := s.ResolveTypeName(name); ok && resolved.ID() != typ.ID() {
+				t.Errorf("%q resolves to %s, want %s", name, resolved.ID(), typ.ID())
+			}
+		}
+	}
+	if len(seen) != len(want) {
+		t.Errorf("rendered %d types, want %d: %v", len(seen), len(want), seen)
+	}
+}
+
+// TestTagForm_RendersAnIdentityByItsSchemaPath pins that TagForm reads only an
+// identity's schema path, so an identity of a name its schema does not declare,
+// as another load's can be, renders in its schema's form.
+func TestTagForm_RendersAnIdentityByItsSchemaPath(t *testing.T) {
+	t.Parallel()
+	s := loadAddrSchema(t)
+	base, _ := s.ImportByAlias("base")
+	deep, _ := base.Schema().ImportByAlias("deep")
+
+	for want, id := range map[string]schema.TypeID{
+		"NoSuchType":      schema.NewTypeID(s.SourceID(), "NoSuchType"),
+		"base.NoSuchType": schema.NewTypeID(base.Schema().SourceID(), "NoSuchType"),
+		"deep#NoSuchType": schema.NewTypeID(deep.Schema().SourceID(), "NoSuchType"),
+	} {
+		if got := schema.TagForm(s, id); got != want {
+			t.Errorf("TagForm(%s) = %q, want %q", id, got, want)
+		}
 	}
 }

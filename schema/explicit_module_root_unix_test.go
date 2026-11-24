@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -105,7 +106,9 @@ func TestLoadSourcesWithEntry_AFIFORootNeverBlocks(t *testing.T) {
 	sources := map[string][]byte{entry: []byte(importingSchema)}
 	done := make(chan diag.Result, 1)
 	go func() {
-		_, res := schema.LoadSourcesWithEntry(context.Background(), sources, entry, fifo)
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(context.Background(), sources, entry, schema.WithModuleRoot(fifo), schema.WithWarnings(warn))
+		})
 		done <- res
 	}()
 	select {

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/value"
 )
 
 // One classifier for a check error, at every check site: a recovered panic
@@ -17,11 +17,11 @@ func TestCheckIssue_ClassifiesEveryKind(t *testing.T) {
 	if is.Code() != diag.E_INTERNAL || is.Severity() != diag.Fatal {
 		t.Errorf("a recovered panic is %s %s, want Fatal E_INTERNAL", is.Severity(), is.Code())
 	}
-	cf := checkIssue(&eval.CheckError{Kind: eval.KindConstraintFail, Msg: "too big"}, "FK field \"x\"").Build()
+	cf := checkIssue(&value.CheckError{Kind: value.KindConstraintFail, Msg: "too big"}, "FK field \"x\"").Build()
 	if cf.Code() != diag.E_CONSTRAINT_FAIL {
 		t.Errorf("a constraint failure is %s, want E_CONSTRAINT_FAIL", cf.Code())
 	}
-	tm := checkIssue(&eval.CheckError{Kind: eval.KindTypeMismatch, Msg: "wrong"}, "FK field \"x\"").Build()
+	tm := checkIssue(&value.CheckError{Kind: value.KindTypeMismatch, Msg: "wrong"}, "FK field \"x\"").Build()
 	if tm.Code() != diag.E_TYPE_MISMATCH {
 		t.Errorf("a type mismatch is %s, want E_TYPE_MISMATCH", tm.Code())
 	}

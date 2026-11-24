@@ -1,0 +1,11 @@
+schema "test"
+
+type T {
+	a String [1, 255]
+	b Integer [0, _]
+	c Float [0.0, 100.0]
+	d Enum ["x", "y", "z"]
+	e Pattern ["^[a-z]+$"]
+	g Vector [128]
+	h List <String> [1, 5]
+}

@@ -6,18 +6,21 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/hostpath"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // seedValidYS writes a well-formed .ys file at path and returns the path.
 // The payload is produced by Marshal against testSchema(t)'s fixtures so
-// it round-trips cleanly through HeaderOnlyRead.
+// it round-trips cleanly through ReadHeader.
 func seedValidYS(t *testing.T, path string) {
 	t.Helper()
 	s := testSchema(t)
@@ -25,12 +28,12 @@ func seedValidYS(t *testing.T, path string) {
 		map[string]any{"id": "c1", "title": "Acme"})
 	snap := buildSnapshot(t, s, company)
 
-	data, result := snapshot.Marshal(context.Background(), snap)
-	require.NoError(t, result.Err(), "seed: Marshal should not error")
+	data, err := snapshot.Marshal(context.Background(), snap)
+	require.NoError(t, err, "seed: Marshal should not error")
 	require.NoError(t, snapshot.WriteFile(path, data), "seed: WriteFile should not error")
 }
 
-// seedCorruptYS writes junk bytes at path so HeaderOnlyRead fails with
+// seedCorruptYS writes junk bytes at path so ReadHeader fails with
 // E_SNAPSHOT_MALFORMED on it.
 func seedCorruptYS(t *testing.T, path string) {
 	t.Helper()
@@ -53,6 +56,45 @@ func collectScanDir(ctx context.Context, dir string) (entries []snapshot.ScanEnt
 
 // ---------- ScanDir (iterator form) ----------
 
+// An empty dir names no directory, so it fails as a missing one does and never
+// reads the working directory.
+func TestScanDir_EmptyDirFailsAsAMissingDirectory(t *testing.T) {
+	entries, err := collectScanDir(context.Background(), "")
+	assert.Empty(t, entries)
+	require.ErrorIs(t, err, fs.ErrNotExist)
+}
+
+// A dir that names a regular file fails as not a directory on every host, and
+// never as a missing path, which is how Windows answers the read.
+func TestScanDir_ARegularFileFailsAsNotADirectory(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "a.ys")
+	seedValidYS(t, file)
+
+	entries, err := collectScanDir(t.Context(), file)
+	assert.Empty(t, entries)
+	require.ErrorIs(t, err, hostpath.ErrNotDirectory)
+	require.ErrorIs(t, err, syscall.ENOTDIR)
+	require.NotErrorIs(t, err, fs.ErrNotExist)
+	var pathErr *fs.PathError
+	require.ErrorAs(t, err, &pathErr, "the refusal names the path it opened")
+	assert.Equal(t, "open", pathErr.Op)
+	assert.Equal(t, file, pathErr.Path)
+}
+
+// A path under a regular file names no directory either, at any depth.
+func TestScanDir_APathUnderARegularFileFailsAsNotADirectory(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "a.ys")
+	seedValidYS(t, file)
+
+	for _, dir := range []string{filepath.Join(file, "sub"), filepath.Join(file, "sub", "deeper")} {
+		entries, err := collectScanDir(t.Context(), dir)
+		assert.Empty(t, entries, dir)
+		require.ErrorIs(t, err, hostpath.ErrNotDirectory, dir)
+		require.ErrorIs(t, err, syscall.ENOTDIR, dir)
+		assert.NotErrorIs(t, err, fs.ErrNotExist, dir)
+	}
+}
+
 func TestScanDir_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	seedValidYS(t, filepath.Join(dir, "a.ys"))
@@ -64,7 +106,7 @@ func TestScanDir_HappyPath(t *testing.T) {
 	require.Len(t, entries, 3, "should yield exactly the three valid files")
 
 	for _, entry := range entries {
-		assert.False(t, entry.Result.HasErrors(), "%s: expected OK result", entry.Name)
+		require.NoError(t, entry.Err, "%s: expected OK result", entry.Name)
 		assert.NotNil(t, entry.Header, "%s: expected non-nil Header", entry.Name)
 		assert.NotEmpty(t, entry.Name, "Name must be populated on every yield")
 		assert.Equal(t, filepath.Join(dir, entry.Name), entry.Path,
@@ -170,23 +212,16 @@ func TestScanDir_CorruptFileAmongValid(t *testing.T) {
 		byName[e.Name] = e
 	}
 
-	assert.False(t, byName["a.ys"].Result.HasErrors(), "a.ys should parse cleanly")
+	require.NoError(t, byName["a.ys"].Err, "a.ys should parse cleanly")
 	assert.NotNil(t, byName["a.ys"].Header)
 
 	corrupt := byName["b.ys"]
-	require.True(t, corrupt.Result.HasErrors(), "b.ys should report an error")
+	require.Error(t, corrupt.Err, "b.ys should report an error")
 	assert.Nil(t, corrupt.Header, "corrupt entry must have Header==nil")
 
-	var sawMalformed bool
-	for iss := range corrupt.Result.Errors() {
-		if iss.Code() == diag.E_SNAPSHOT_MALFORMED {
-			sawMalformed = true
-			break
-		}
-	}
-	assert.True(t, sawMalformed, "corrupt file should surface E_SNAPSHOT_MALFORMED")
+	require.ErrorIs(t, corrupt.Err, diag.E_SNAPSHOT_MALFORMED, "corrupt file should surface E_SNAPSHOT_MALFORMED")
 
-	assert.False(t, byName["c.ys"].Result.HasErrors(), "c.ys should parse cleanly")
+	require.NoError(t, byName["c.ys"].Err, "c.ys should parse cleanly")
 	assert.NotNil(t, byName["c.ys"].Header)
 }
 
@@ -216,22 +251,14 @@ func TestScanDir_PerFileIOFailure(t *testing.T) {
 	}
 
 	ok := byName["ok.ys"]
-	assert.False(t, ok.Result.HasErrors(), "ok.ys should succeed")
+	require.NoError(t, ok.Err, "ok.ys should succeed")
 	assert.NotNil(t, ok.Header)
 
 	bad := byName["denied.ys"]
-	require.True(t, bad.Result.HasErrors(), "denied.ys should report Fatal E_SNAPSHOT_IO")
+	require.Error(t, bad.Err, "denied.ys should report Fatal E_SNAPSHOT_IO")
 	assert.Nil(t, bad.Header, "denied entry must have Header==nil")
-	assert.True(t, bad.Result.HasFatal(), "open-denied must be Fatal, not Error")
-
-	var sawIO bool
-	for iss := range bad.Result.Errors() {
-		if iss.Code() == diag.E_SNAPSHOT_IO {
-			sawIO = true
-			break
-		}
-	}
-	assert.True(t, sawIO, "denied file should surface E_SNAPSHOT_IO")
+	assert.True(t, diagtest.Failures(t, bad.Err).HasFatal(), "open-denied must be Fatal, not Error")
+	assert.ErrorIs(t, bad.Err, diag.E_SNAPSHOT_IO, "denied file should surface E_SNAPSHOT_IO")
 }
 
 func TestScanDir_ContextCancelledMidIteration(t *testing.T) {
@@ -347,113 +374,12 @@ func TestScanDir_EarlyBreakDoesNotParseRemainingFiles(t *testing.T) {
 	var count int
 	for entry, err := range snapshot.ScanDir(context.Background(), dir) {
 		require.NoError(t, err)
-		assert.False(t, entry.Result.HasErrors(),
+		assert.NoError(t, entry.Err,
 			"early-break path should only visit readable aaa.ys")
 		count++
 		break
 	}
 	assert.Equal(t, 1, count, "early break must short-circuit iteration before remaining files are opened")
-}
-
-// ---------- ScanDirSlice (slice form) ----------
-
-func TestScanDirSlice_HappyPath(t *testing.T) {
-	dir := t.TempDir()
-	seedValidYS(t, filepath.Join(dir, "a.ys"))
-	seedValidYS(t, filepath.Join(dir, "b.ys"))
-	seedValidYS(t, filepath.Join(dir, "c.ys"))
-
-	entries, result := snapshot.ScanDirSlice(context.Background(), dir)
-	require.NoError(t, result.Err(), "happy path should produce OK outer Result")
-	assert.Len(t, entries, 3)
-}
-
-func TestScanDirSlice_DirDoesNotExist(t *testing.T) {
-	entries, result := snapshot.ScanDirSlice(context.Background(), "/does/not/exist/yammm-scan-slice-test")
-
-	assert.Empty(t, entries, "no entries on dir-level failure")
-	require.True(t, result.HasFatal(), "dir-level failure must surface as Fatal")
-
-	var sawIO bool
-	for iss := range result.Errors() {
-		if iss.Code() == diag.E_SNAPSHOT_IO {
-			sawIO = true
-			break
-		}
-	}
-	assert.True(t, sawIO, "dir-level failure should use E_SNAPSHOT_IO on the outer Result")
-}
-
-func TestScanDirSlice_CtxCancelMidIteration(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range []string{"a.ys", "b.ys", "c.ys", "d.ys"} {
-		seedValidYS(t, filepath.Join(dir, name))
-	}
-
-	// Pre-cancelled ctx: the iterator yields its cancellation pair on
-	// first check, so the slice comes back empty. The
-	// cancellation-mid-stream shape is indistinguishable from "already
-	// cancelled" at this granularity — both valid, both map onto Fatal
-	// E_CONTEXT_CANCELLED on the outer Result.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	entries, result := snapshot.ScanDirSlice(ctx, dir)
-	require.True(t, result.HasFatal())
-
-	var sawCancel bool
-	for iss := range result.Errors() {
-		if iss.Code() == diag.E_CONTEXT_CANCELLED {
-			sawCancel = true
-			break
-		}
-	}
-	assert.True(t, sawCancel, "cancellation must surface as E_CONTEXT_CANCELLED on outer Result")
-	assert.Empty(t, entries, "entries processed before cancel land in the slice (here: zero)")
-}
-
-func TestScanDirSlice_AlreadyCancelledAtEntry(t *testing.T) {
-	dir := t.TempDir()
-	seedValidYS(t, filepath.Join(dir, "a.ys"))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	entries, result := snapshot.ScanDirSlice(ctx, dir)
-	assert.Empty(t, entries)
-	require.True(t, result.HasFatal())
-
-	var sawCancel bool
-	for iss := range result.Errors() {
-		if iss.Code() == diag.E_CONTEXT_CANCELLED {
-			sawCancel = true
-			break
-		}
-	}
-	assert.True(t, sawCancel)
-}
-
-func TestScanDirSlice_PerFileErrorIsNotDirLevel(t *testing.T) {
-	dir := t.TempDir()
-	seedValidYS(t, filepath.Join(dir, "a.ys"))
-	seedCorruptYS(t, filepath.Join(dir, "b.ys"))
-
-	entries, result := snapshot.ScanDirSlice(context.Background(), dir)
-	require.NoError(t, result.Err(),
-		"per-file errors must NOT bubble to the outer Result in slice form")
-	require.Len(t, entries, 2)
-
-	var sawCorrupt, sawValid bool
-	for _, e := range entries {
-		switch e.Name {
-		case "a.ys":
-			sawValid = !e.Result.HasErrors()
-		case "b.ys":
-			sawCorrupt = e.Result.HasErrors()
-		}
-	}
-	assert.True(t, sawValid, "valid file's per-entry Result must be OK")
-	assert.True(t, sawCorrupt, "corrupt file's per-entry Result must carry errors")
 }
 
 // ---------- Cross-primitive contract ----------

@@ -1,5 +1,5 @@
 # validate: success on a valid schema, failure on invalid or missing input,
-# and the --format json rendering of failures.
+# and the --json rendering of failures.
 
 exec yammm validate valid.yammm
 
@@ -14,7 +14,7 @@ exec yammm validate marked.yammm
 ! exec yammm validate nonexistent.yammm
 
 # JSON diagnostics format still fails and renders structured output.
-! exec yammm validate --format json invalid.yammm
+! exec yammm validate --json invalid.yammm
 
 # A module-style import resolves against --module-root, not against the
 # schema's own directory: without the flag the import misses, with it the

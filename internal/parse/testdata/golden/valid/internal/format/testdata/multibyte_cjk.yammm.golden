@@ -1,0 +1,52 @@
+{
+  "name": "\"cjk\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "User",
+      "name_span": {
+        "s": 44,
+        "e": 48
+      },
+      "doc": "日本語テスト",
+      "props": [
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 57,
+              "e": 63
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 52,
+            "e": 72
+          }
+        },
+        {
+          "name": "age",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 111,
+              "e": 118
+            }
+          },
+          "span": {
+            "s": 107,
+            "e": 118
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 120
+      }
+    }
+  ]
+}

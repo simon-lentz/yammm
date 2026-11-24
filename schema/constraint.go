@@ -1,7 +1,9 @@
 package schema
 
 import (
+	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -10,11 +12,12 @@ import (
 	"github.com/simon-lentz/yammm/internal/parse"
 )
 
-// ConstraintKind identifies the kind of constraint.
+// ConstraintKind identifies the kind of constraint. The zero ConstraintKind
+// names no kind.
 type ConstraintKind uint8
 
 const (
-	KindString ConstraintKind = iota
+	KindString ConstraintKind = iota + 1
 	KindInteger
 	KindFloat
 	KindBoolean
@@ -70,32 +73,35 @@ type Constraint interface {
 	// String returns a human-readable representation.
 	String() string
 
-	// Equal reports whether two constraints are structurally equal.
+	// equal reports whether two constraints are structurally equal.
 	// For AliasConstraint, compares the resolved underlying constraint.
-	Equal(other Constraint) bool
+	equal(other Constraint) bool
 
-	// NarrowsTo reports whether the child constraint is a valid narrowing of
-	// this (parent) constraint. Returns true when every value accepted by child
-	// would also be accepted by this constraint (child's valid set is a subset
-	// of parent's valid set).
+	// narrowsTo reports whether the child constraint is a valid narrowing of
+	// this (parent) constraint. It returns true only when every value accepted
+	// by child would also be accepted by this constraint (child's valid set is
+	// a subset of parent's valid set), and may return false for such a pair
+	// the rules below do not read, as a child of another kind. That reading holds for constraints
+	// [CheckConstraint] accepts; a value is never checked against one it
+	// refuses, so such a constraint has no valid set to compare.
 	//
 	// For bounds-based constraints (String, Integer, Float): child min >= parent min
 	// and child max <= parent max.
 	// For EnumConstraint: child values must be a subset of parent values.
 	// For ListConstraint: the child's element must narrow the parent's, and its
-	// length bounds must narrow as above.
+	// length bounds must narrow as above. A List with no element narrows to
+	// nothing, and nothing narrows to it.
 	// For parameterless or non-narrowable constraints (Boolean, Date, UUID,
-	// Timestamp, Pattern, Vector): delegates to Equal (no narrowing supported).
+	// Timestamp, Pattern, Vector): delegates to equal (no narrowing supported).
 	// For AliasConstraint: resolves alias chain first, then delegates.
-	NarrowsTo(child Constraint) bool
+	narrowsTo(child Constraint) bool
 
-	// IsResolved reports whether the constraint references are fully resolved.
-	// This method is primarily meaningful for AliasConstraint, which starts
-	// unresolved (referencing a DataType by name) and becomes resolved during
-	// schema completion when the underlying constraint is wired.
-	// All other constraint types always return true (they have no deferred
-	// references to resolve).
-	IsResolved() bool
+	// isResolved reports whether the constraint references are fully resolved.
+	// An AliasConstraint is resolved when its resolution ends in a resolved
+	// constraint of another kind, and a ListConstraint when it holds an element
+	// that is.
+	// Every other kind holds no reference and returns true.
+	isResolved() bool
 
 	// constraint is an unexported marker method to prevent external implementations.
 	constraint()
@@ -109,23 +115,23 @@ type StringConstraint struct {
 	hasMax bool
 }
 
-// NewStringConstraint creates a StringConstraint with no bounds.
-func NewStringConstraint() StringConstraint {
+// newStringConstraint creates a StringConstraint with no bounds.
+func newStringConstraint() StringConstraint {
 	return StringConstraint{}
 }
 
-// StringMinLen creates a StringConstraint with a minimum length bound.
-func StringMinLen(lo int64) StringConstraint {
+// stringMinLen creates a StringConstraint with a minimum length bound.
+func stringMinLen(lo int64) StringConstraint {
 	return StringConstraint{minLen: lo, hasMin: true}
 }
 
-// StringMaxLen creates a StringConstraint with a maximum length bound.
-func StringMaxLen(hi int64) StringConstraint {
+// stringMaxLen creates a StringConstraint with a maximum length bound.
+func stringMaxLen(hi int64) StringConstraint {
 	return StringConstraint{maxLen: hi, hasMax: true}
 }
 
-// StringLenBetween creates a StringConstraint with both min and max length bounds.
-func StringLenBetween(lo, hi int64) StringConstraint {
+// stringLenBetween creates a StringConstraint with both min and max length bounds.
+func stringLenBetween(lo, hi int64) StringConstraint {
 	return StringConstraint{minLen: lo, maxLen: hi, hasMin: true, hasMax: true}
 }
 
@@ -150,12 +156,12 @@ func (c StringConstraint) String() string {
 	return "String[" + minStr + ", " + maxStr + "]"
 }
 
-func (c StringConstraint) Equal(other Constraint) bool {
+func (c StringConstraint) equal(other Constraint) bool {
 	o, ok := ResolveAlias(other).(StringConstraint)
 	return ok && c == o
 }
 
-func (c StringConstraint) NarrowsTo(child Constraint) bool {
+func (c StringConstraint) narrowsTo(child Constraint) bool {
 	o, ok := ResolveAlias(child).(StringConstraint)
 	if !ok {
 		return false
@@ -171,7 +177,7 @@ func (c StringConstraint) NarrowsTo(child Constraint) bool {
 	return true
 }
 
-func (StringConstraint) IsResolved() bool { return true }
+func (StringConstraint) isResolved() bool { return true }
 
 // IntegerConstraint constrains integer values with optional min/max bounds.
 type IntegerConstraint struct {
@@ -181,23 +187,23 @@ type IntegerConstraint struct {
 	hasMax bool
 }
 
-// NewIntegerConstraint creates an IntegerConstraint with no bounds.
-func NewIntegerConstraint() IntegerConstraint {
+// newIntegerConstraint creates an IntegerConstraint with no bounds.
+func newIntegerConstraint() IntegerConstraint {
 	return IntegerConstraint{}
 }
 
-// IntegerMin creates an IntegerConstraint with a minimum bound.
-func IntegerMin(lo int64) IntegerConstraint {
+// integerMin creates an IntegerConstraint with a minimum bound.
+func integerMin(lo int64) IntegerConstraint {
 	return IntegerConstraint{min: lo, hasMin: true}
 }
 
-// IntegerMax creates an IntegerConstraint with a maximum bound.
-func IntegerMax(hi int64) IntegerConstraint {
+// integerMax creates an IntegerConstraint with a maximum bound.
+func integerMax(hi int64) IntegerConstraint {
 	return IntegerConstraint{max: hi, hasMax: true}
 }
 
-// IntegerBetween creates an IntegerConstraint with both min and max bounds.
-func IntegerBetween(lo, hi int64) IntegerConstraint {
+// integerBetween creates an IntegerConstraint with both min and max bounds.
+func integerBetween(lo, hi int64) IntegerConstraint {
 	return IntegerConstraint{min: lo, max: hi, hasMin: true, hasMax: true}
 }
 
@@ -222,12 +228,12 @@ func (c IntegerConstraint) String() string {
 	return "Integer[" + minStr + ", " + maxStr + "]"
 }
 
-func (c IntegerConstraint) Equal(other Constraint) bool {
+func (c IntegerConstraint) equal(other Constraint) bool {
 	o, ok := ResolveAlias(other).(IntegerConstraint)
 	return ok && c == o
 }
 
-func (c IntegerConstraint) NarrowsTo(child Constraint) bool {
+func (c IntegerConstraint) narrowsTo(child Constraint) bool {
 	o, ok := ResolveAlias(child).(IntegerConstraint)
 	if !ok {
 		return false
@@ -243,7 +249,7 @@ func (c IntegerConstraint) NarrowsTo(child Constraint) bool {
 	return true
 }
 
-func (IntegerConstraint) IsResolved() bool { return true }
+func (IntegerConstraint) isResolved() bool { return true }
 
 // FloatConstraint constrains float values with optional min/max bounds.
 type FloatConstraint struct {
@@ -253,23 +259,23 @@ type FloatConstraint struct {
 	hasMax bool
 }
 
-// NewFloatConstraint creates a FloatConstraint with no bounds.
-func NewFloatConstraint() FloatConstraint {
+// newFloatConstraint creates a FloatConstraint with no bounds.
+func newFloatConstraint() FloatConstraint {
 	return FloatConstraint{}
 }
 
-// FloatMin creates a FloatConstraint with a minimum bound.
-func FloatMin(lo float64) FloatConstraint {
+// floatMin creates a FloatConstraint with a minimum bound.
+func floatMin(lo float64) FloatConstraint {
 	return FloatConstraint{min: lo, hasMin: true}
 }
 
-// FloatMax creates a FloatConstraint with a maximum bound.
-func FloatMax(hi float64) FloatConstraint {
+// floatMax creates a FloatConstraint with a maximum bound.
+func floatMax(hi float64) FloatConstraint {
 	return FloatConstraint{max: hi, hasMax: true}
 }
 
-// FloatBetween creates a FloatConstraint with both min and max bounds.
-func FloatBetween(lo, hi float64) FloatConstraint {
+// floatBetween creates a FloatConstraint with both min and max bounds.
+func floatBetween(lo, hi float64) FloatConstraint {
 	return FloatConstraint{min: lo, max: hi, hasMin: true, hasMax: true}
 }
 
@@ -294,12 +300,12 @@ func (c FloatConstraint) String() string {
 	return "Float[" + minStr + ", " + maxStr + "]"
 }
 
-func (c FloatConstraint) Equal(other Constraint) bool {
+func (c FloatConstraint) equal(other Constraint) bool {
 	o, ok := ResolveAlias(other).(FloatConstraint)
 	return ok && c == o
 }
 
-func (c FloatConstraint) NarrowsTo(child Constraint) bool {
+func (c FloatConstraint) narrowsTo(child Constraint) bool {
 	o, ok := ResolveAlias(child).(FloatConstraint)
 	if !ok {
 		return false
@@ -315,13 +321,13 @@ func (c FloatConstraint) NarrowsTo(child Constraint) bool {
 	return true
 }
 
-func (FloatConstraint) IsResolved() bool { return true }
+func (FloatConstraint) isResolved() bool { return true }
 
 // BooleanConstraint constrains boolean values. It has no parameters.
 type BooleanConstraint struct{}
 
-// NewBooleanConstraint creates a BooleanConstraint.
-func NewBooleanConstraint() BooleanConstraint {
+// newBooleanConstraint creates a BooleanConstraint.
+func newBooleanConstraint() BooleanConstraint {
 	return BooleanConstraint{}
 }
 
@@ -329,56 +335,42 @@ func (BooleanConstraint) Kind() ConstraintKind { return KindBoolean }
 func (BooleanConstraint) constraint()          {}
 func (BooleanConstraint) String() string       { return "Boolean" }
 
-func (c BooleanConstraint) Equal(other Constraint) bool {
+func (c BooleanConstraint) equal(other Constraint) bool {
 	_, ok := ResolveAlias(other).(BooleanConstraint)
 	return ok
 }
 
-func (c BooleanConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
+func (c BooleanConstraint) narrowsTo(child Constraint) bool { return c.equal(child) }
 
-func (BooleanConstraint) IsResolved() bool { return true }
+func (BooleanConstraint) isResolved() bool { return true }
 
-// TimestampConstraint constrains timestamp values with an optional format.
-type TimestampConstraint struct {
-	format string
-}
+// TimestampConstraint constrains timestamp values. It has no parameters.
+type TimestampConstraint struct{}
 
-// NewTimestampConstraint creates a TimestampConstraint with no format.
-func NewTimestampConstraint() TimestampConstraint {
+// newTimestampConstraint creates a TimestampConstraint.
+func newTimestampConstraint() TimestampConstraint {
 	return TimestampConstraint{}
-}
-
-// NewTimestampConstraintFormatted creates a TimestampConstraint with a Go time format.
-func NewTimestampConstraintFormatted(format string) TimestampConstraint {
-	return TimestampConstraint{format: format}
 }
 
 func (TimestampConstraint) Kind() ConstraintKind { return KindTimestamp }
 func (TimestampConstraint) constraint()          {}
 
-func (c TimestampConstraint) Format() string { return c.format }
+func (TimestampConstraint) String() string { return "Timestamp" }
 
-func (c TimestampConstraint) String() string {
-	if c.format == "" {
-		return "Timestamp"
-	}
-	return fmt.Sprintf("Timestamp[%q]", c.format)
+func (TimestampConstraint) equal(other Constraint) bool {
+	_, ok := ResolveAlias(other).(TimestampConstraint)
+	return ok
 }
 
-func (c TimestampConstraint) Equal(other Constraint) bool {
-	o, ok := ResolveAlias(other).(TimestampConstraint)
-	return ok && c.format == o.format
-}
+func (c TimestampConstraint) narrowsTo(child Constraint) bool { return c.equal(child) }
 
-func (c TimestampConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
-
-func (TimestampConstraint) IsResolved() bool { return true }
+func (TimestampConstraint) isResolved() bool { return true }
 
 // DateConstraint constrains date values. It has no parameters.
 type DateConstraint struct{}
 
-// NewDateConstraint creates a DateConstraint.
-func NewDateConstraint() DateConstraint {
+// newDateConstraint creates a DateConstraint.
+func newDateConstraint() DateConstraint {
 	return DateConstraint{}
 }
 
@@ -386,20 +378,20 @@ func (DateConstraint) Kind() ConstraintKind { return KindDate }
 func (DateConstraint) constraint()          {}
 func (DateConstraint) String() string       { return "Date" }
 
-func (c DateConstraint) Equal(other Constraint) bool {
+func (c DateConstraint) equal(other Constraint) bool {
 	_, ok := ResolveAlias(other).(DateConstraint)
 	return ok
 }
 
-func (c DateConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
+func (c DateConstraint) narrowsTo(child Constraint) bool { return c.equal(child) }
 
-func (DateConstraint) IsResolved() bool { return true }
+func (DateConstraint) isResolved() bool { return true }
 
 // UUIDConstraint constrains UUID values. It has no parameters.
 type UUIDConstraint struct{}
 
-// NewUUIDConstraint creates a UUIDConstraint.
-func NewUUIDConstraint() UUIDConstraint {
+// newUUIDConstraint creates a UUIDConstraint.
+func newUUIDConstraint() UUIDConstraint {
 	return UUIDConstraint{}
 }
 
@@ -407,24 +399,25 @@ func (UUIDConstraint) Kind() ConstraintKind { return KindUUID }
 func (UUIDConstraint) constraint()          {}
 func (UUIDConstraint) String() string       { return "UUID" }
 
-func (c UUIDConstraint) Equal(other Constraint) bool {
+func (c UUIDConstraint) equal(other Constraint) bool {
 	_, ok := ResolveAlias(other).(UUIDConstraint)
 	return ok
 }
 
-func (c UUIDConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
+func (c UUIDConstraint) narrowsTo(child Constraint) bool { return c.equal(child) }
 
-func (UUIDConstraint) IsResolved() bool { return true }
+func (UUIDConstraint) isResolved() bool { return true }
 
 // EnumConstraint constrains string values to a fixed set of allowed values.
 type EnumConstraint struct {
 	values []string
 }
 
-// NewEnumConstraint creates an EnumConstraint with the given allowed values.
-// The values are stored in a defensive copy.
-func NewEnumConstraint(values []string) EnumConstraint {
-	return EnumConstraint{values: slices.Clone(values)}
+// parsedEnumConstraint creates an EnumConstraint that keeps values, which
+// internal/parse unquoted and kept as non-empty, distinct and valid UTF-8, so
+// it records no fault. It takes the slice as its own.
+func parsedEnumConstraint(values []string) EnumConstraint {
+	return EnumConstraint{values: values}
 }
 
 func (EnumConstraint) Kind() ConstraintKind { return KindEnum }
@@ -443,8 +436,8 @@ func (c EnumConstraint) String() string {
 	return fmt.Sprintf("Enum[%s]", strings.Join(quoted, ", "))
 }
 
-// Equal compares using set equality (order-insensitive).
-func (c EnumConstraint) Equal(other Constraint) bool {
+// equal compares the values as sets, so their order does not matter.
+func (c EnumConstraint) equal(other Constraint) bool {
 	o, ok := ResolveAlias(other).(EnumConstraint)
 	if !ok || len(c.values) != len(o.values) {
 		return false
@@ -462,7 +455,7 @@ func (c EnumConstraint) Equal(other Constraint) bool {
 	return true
 }
 
-func (c EnumConstraint) NarrowsTo(child Constraint) bool {
+func (c EnumConstraint) narrowsTo(child Constraint) bool {
 	o, ok := ResolveAlias(child).(EnumConstraint)
 	if !ok {
 		return false
@@ -480,108 +473,59 @@ func (c EnumConstraint) NarrowsTo(child Constraint) bool {
 	return true
 }
 
-func (EnumConstraint) IsResolved() bool { return true }
+func (EnumConstraint) isResolved() bool { return true }
 
-// PatternConstraint constrains string values to match one or more regex patterns.
-// All patterns must match (conjunction semantics). The DSL states at most two,
-// and [Builder.Build] refuses more.
+// PatternConstraint constrains string values to those its one regex pattern
+// matches. A match is a search: the pattern matches anywhere in the value
+// unless it is anchored. The zero PatternConstraint holds no pattern, and
+// [CheckConstraint] refuses it.
 type PatternConstraint struct {
-	patterns []string         // source pattern strings (public API)
-	compiled []*regexp.Regexp // compiled patterns (internal validation)
-	invalid  string           // the first source regexp.Compile refuses, with its error
+	pattern  string         // the source text
+	compiled *regexp.Regexp // nil when the constraint holds no pattern
 }
 
-// NewPatternConstraint creates a PatternConstraint holding every pattern given,
-// each non-nil. A pattern means [regexp.Compile] of its source text, as a
-// .yammm source compiles it, so each is compiled again from its source: a
-// regexp built with [regexp.CompilePOSIX] or [regexp.Regexp.Longest] matches
-// by the source's Perl reading. A source that reading refuses, which POSIX
-// syntax can accept (a**), is kept as given, and [Builder.Build] and
-// [CheckConstraint] refuse the constraint as the DSL refuses the pattern. They
-// refuse a pattern writing a surrogate code point with a \x{…} escape too.
-func NewPatternConstraint(patterns []*regexp.Regexp) PatternConstraint {
-	c := PatternConstraint{
-		patterns: make([]string, len(patterns)),
-		compiled: make([]*regexp.Regexp, len(patterns)),
+// parsedPatternConstraint creates a PatternConstraint that keeps compiled, the
+// regexp internal/parse built with [regexp.Compile] from the source's pattern
+// and judged there, or nil when the source's pattern was refused.
+func parsedPatternConstraint(compiled *regexp.Regexp) PatternConstraint {
+	if compiled == nil {
+		return PatternConstraint{}
 	}
-	for i, re := range patterns {
-		c.patterns[i] = re.String()
-		perl, err := regexp.Compile(c.patterns[i])
-		if err != nil {
-			perl = re
-			if c.invalid == "" {
-				c.invalid = fmt.Sprintf("invalid regex pattern %q: %v", c.patterns[i], err)
-			}
-		} else if r, found := parse.SurrogateEscape(c.patterns[i]); found && c.invalid == "" {
-			c.invalid = parse.SurrogateMessage(c.patterns[i], r)
-		}
-		c.compiled[i] = perl
-	}
-	return c
+	return PatternConstraint{pattern: compiled.String(), compiled: compiled}
 }
 
 func (PatternConstraint) Kind() ConstraintKind { return KindPattern }
 func (PatternConstraint) constraint()          {}
 
-// Patterns returns the regex pattern strings. Returns a defensive copy.
-func (c PatternConstraint) Patterns() []string {
-	return slices.Clone(c.patterns)
-}
-
-// PatternCount returns the number of patterns.
-func (c PatternConstraint) PatternCount() int {
-	return len(c.patterns)
-}
-
-// Pattern returns the first (primary) regex pattern.
-// Returns empty string if no patterns exist.
-// For constraints with two patterns, use Patterns() instead.
-func (c PatternConstraint) Pattern() string {
-	if len(c.patterns) == 0 {
-		return ""
-	}
-	return c.patterns[0]
-}
-
-// CompiledPatterns returns the compiled regex patterns for internal validation use.
-// This method is for internal use by the validation layer (checkers.go).
-// External consumers should use Patterns() which returns strings per the public API spec.
-func (c PatternConstraint) CompiledPatterns() []*regexp.Regexp {
-	return slices.Clone(c.compiled)
-}
+// Pattern returns the regex pattern's source text, or "" when the constraint
+// holds no pattern.
+func (c PatternConstraint) Pattern() string { return c.pattern }
 
 func (c PatternConstraint) String() string {
-	quoted := make([]string, len(c.patterns))
-	for i, p := range c.patterns {
-		quoted[i] = fmt.Sprintf("%q", p)
+	if c.compiled == nil {
+		return "Pattern[]"
 	}
-	return fmt.Sprintf("Pattern[%s]", strings.Join(quoted, ", "))
+	return fmt.Sprintf("Pattern[%q]", c.pattern)
 }
 
-// Equal compares using order-insensitive pattern string comparison.
-func (c PatternConstraint) Equal(other Constraint) bool {
+// equal reports whether other is a PatternConstraint with the same source
+// text. A constraint that holds no pattern equals only another that holds none.
+func (c PatternConstraint) equal(other Constraint) bool {
 	o, ok := ResolveAlias(other).(PatternConstraint)
-	if !ok || len(c.patterns) != len(o.patterns) {
-		return false
-	}
-	cp := slices.Clone(c.patterns)
-	op := slices.Clone(o.patterns)
-	slices.Sort(cp)
-	slices.Sort(op)
-	return slices.Equal(cp, op)
+	return ok && (c.compiled == nil) == (o.compiled == nil) && c.pattern == o.pattern
 }
 
-func (c PatternConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
+func (c PatternConstraint) narrowsTo(child Constraint) bool { return c.equal(child) }
 
-func (PatternConstraint) IsResolved() bool { return true }
+func (PatternConstraint) isResolved() bool { return true }
 
 // VectorConstraint constrains vector values to a fixed dimension.
 type VectorConstraint struct {
 	dimension int
 }
 
-// NewVectorConstraint creates a VectorConstraint with the given dimension.
-func NewVectorConstraint(dimension int) VectorConstraint {
+// newVectorConstraint creates a VectorConstraint with the given dimension.
+func newVectorConstraint(dimension int) VectorConstraint {
 	return VectorConstraint{dimension: dimension}
 }
 
@@ -595,14 +539,14 @@ func (c VectorConstraint) String() string {
 	return fmt.Sprintf("Vector[%d]", c.dimension)
 }
 
-func (c VectorConstraint) Equal(other Constraint) bool {
+func (c VectorConstraint) equal(other Constraint) bool {
 	o, ok := ResolveAlias(other).(VectorConstraint)
 	return ok && c.dimension == o.dimension
 }
 
-func (c VectorConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
+func (c VectorConstraint) narrowsTo(child Constraint) bool { return c.equal(child) }
 
-func (VectorConstraint) IsResolved() bool { return true }
+func (VectorConstraint) isResolved() bool { return true }
 
 // ListConstraint constrains list values with an element type and optional min/max length.
 type ListConstraint struct {
@@ -613,29 +557,30 @@ type ListConstraint struct {
 	hasMax  bool
 }
 
-// NewListConstraint creates a ListConstraint with no length bounds. The
-// element must be non-nil: [Builder.Build] and [CheckConstraint] refuse a List
-// with no element, which is what the zero ListConstraint holds.
-func NewListConstraint(element Constraint) ListConstraint {
-	return ListConstraint{element: element}
+// newListConstraint creates a ListConstraint with no length bounds. The
+// element must be non-nil: [CheckConstraint] refuses a List with no element,
+// which is what the zero ListConstraint holds. A nil pointer
+// is no element, whatever type it points to.
+func newListConstraint(element Constraint) ListConstraint {
+	return ListConstraint{element: held(element)}
 }
 
-// ListMinLen creates a ListConstraint with a minimum length bound and a non-nil
-// element.
-func ListMinLen(element Constraint, lo int64) ListConstraint {
-	return ListConstraint{element: element, minLen: lo, hasMin: true}
+// listMinLen creates a ListConstraint with a minimum length bound. The element
+// must be non-nil, as for newListConstraint.
+func listMinLen(element Constraint, lo int64) ListConstraint {
+	return ListConstraint{element: held(element), minLen: lo, hasMin: true}
 }
 
-// ListMaxLen creates a ListConstraint with a maximum length bound and a non-nil
-// element.
-func ListMaxLen(element Constraint, hi int64) ListConstraint {
-	return ListConstraint{element: element, maxLen: hi, hasMax: true}
+// listMaxLen creates a ListConstraint with a maximum length bound. The element
+// must be non-nil, as for newListConstraint.
+func listMaxLen(element Constraint, hi int64) ListConstraint {
+	return ListConstraint{element: held(element), maxLen: hi, hasMax: true}
 }
 
-// ListLenBetween creates a ListConstraint with both min and max length bounds
-// and a non-nil element.
-func ListLenBetween(element Constraint, lo, hi int64) ListConstraint {
-	return ListConstraint{element: element, minLen: lo, maxLen: hi, hasMin: true, hasMax: true}
+// listLenBetween creates a ListConstraint with both min and max length bounds.
+// The element must be non-nil, as for newListConstraint.
+func listLenBetween(element Constraint, lo, hi int64) ListConstraint {
+	return ListConstraint{element: held(element), minLen: lo, maxLen: hi, hasMin: true, hasMax: true}
 }
 
 func (ListConstraint) Kind() ConstraintKind { return KindList }
@@ -653,7 +598,9 @@ func (c ListConstraint) MaxLen() (int64, bool) { return c.maxLen, c.hasMax }
 func (c ListConstraint) String() string {
 	var sb strings.Builder
 	sb.WriteString("List<")
-	sb.WriteString(c.element.String())
+	if c.element != nil {
+		sb.WriteString(c.element.String())
+	}
 	sb.WriteString(">")
 	if c.hasMin || c.hasMax {
 		sb.WriteString("[")
@@ -673,7 +620,7 @@ func (c ListConstraint) String() string {
 	return sb.String()
 }
 
-func (c ListConstraint) Equal(other Constraint) bool {
+func (c ListConstraint) equal(other Constraint) bool {
 	o, ok := ResolveAlias(other).(ListConstraint)
 	if !ok {
 		return false
@@ -681,16 +628,20 @@ func (c ListConstraint) Equal(other Constraint) bool {
 	if c.hasMin != o.hasMin || c.hasMax != o.hasMax || c.minLen != o.minLen || c.maxLen != o.maxLen {
 		return false
 	}
-	return c.element.Equal(o.element)
+	if c.element == nil || o.element == nil {
+		return c.element == nil && o.element == nil
+	}
+	return c.element.equal(o.element)
 }
 
-func (c ListConstraint) NarrowsTo(child Constraint) bool {
+func (c ListConstraint) narrowsTo(child Constraint) bool {
 	o, ok := ResolveAlias(child).(ListConstraint)
 	if !ok {
 		return false
 	}
-	// Element must narrow.
-	if !c.element.NarrowsTo(o.element) {
+	// Element must narrow; a List with no element judges nothing, so it narrows
+	// to nothing.
+	if c.element == nil || o.element == nil || !c.element.narrowsTo(o.element) {
 		return false
 	}
 	// Child min must be >= parent min (if parent has a min).
@@ -704,8 +655,8 @@ func (c ListConstraint) NarrowsTo(child Constraint) bool {
 	return true
 }
 
-func (c ListConstraint) IsResolved() bool {
-	return c.element.IsResolved()
+func (c ListConstraint) isResolved() bool {
+	return c.element != nil && c.element.isResolved()
 }
 
 // AliasConstraint represents a reference to a named DataType.
@@ -715,15 +666,25 @@ type AliasConstraint struct {
 	resolved     Constraint // the resolved underlying constraint
 }
 
-// NewAliasConstraint creates an AliasConstraint referencing a DataType. The
-// resolved argument has one kind of reader: a raw-constraint caller with no
-// schema, such as [instance.CheckValue], [instance.CanonicalValue] or the
-// Neo4j adapter's Coerce, reads it as the alias's meaning. [Builder.Build] does not: it drops the argument at any List
-// depth and resolves the name through completion, as a loaded schema is
-// resolved, so a DataType reference means its declaration and nothing else.
-// [CheckConstraint] refuses a reference whose resolved argument is nil.
-func NewAliasConstraint(dataTypeName string, resolved Constraint) AliasConstraint {
-	return AliasConstraint{dataTypeName: dataTypeName, resolved: resolved}
+// newAliasConstraint creates an AliasConstraint referencing a DataType. A
+// raw-constraint caller with no schema, such as the neo4j package's
+// CoerceParams, reads the resolved
+// argument as the alias's meaning. Completion builds each resolved alias with
+// this function, so in a loaded schema a DataType reference means its
+// declaration and nothing else. [CheckConstraint] refuses a reference whose resolved argument is nil, and a
+// nil pointer is nil here, whatever type it points to.
+func newAliasConstraint(dataTypeName string, resolved Constraint) AliasConstraint {
+	return AliasConstraint{dataTypeName: dataTypeName, resolved: held(resolved)}
+}
+
+// held returns c, or nil for a nil pointer. Every constraint is a value type,
+// so a nil pointer holds no constraint, and a method called through one
+// panics; a List or an alias that holds one would panic in its own methods.
+func held(c Constraint) Constraint {
+	if v := reflect.ValueOf(c); v.Kind() == reflect.Pointer && v.IsNil() {
+		return nil
+	}
+	return c
 }
 
 func (AliasConstraint) Kind() ConstraintKind { return KindAlias }
@@ -739,25 +700,11 @@ func (c AliasConstraint) String() string {
 	return c.dataTypeName
 }
 
-// Equal compares the resolved underlying constraints, not the alias names.
-// This enables inheritance deduplication with different alias names but same constraint.
-//
-// An alias chain that does not bottom out in a terminal constraint — an
-// unresolvable datatype, or a cycle — has no underlying constraint to compare,
-// so equality cannot be decided structurally and two such aliases are equal
-// only when they reference the SAME datatype. Referencing different datatypes
-// stays unequal even if both are unresolvable: nothing here can show they mean
-// the same thing.
-//
-// That same-datatype case is not a special case, it is what keeps Equal
-// REFLEXIVE. Callers treat Equal as an equivalence relation, and inheritance
-// merging is one of them: a property whose constraint is not equal to itself is
-// re-detected as conflicting with itself, yielding a diagnostic that names one
-// declaration as both sides of its own conflict, once per carrying ancestor.
-//
-// This method is cycle-safe: it uses ResolveAlias() to unwrap alias chains before
-// delegating to the terminal constraint's Equal method.
-func (c AliasConstraint) Equal(other Constraint) bool {
+// equal compares the terminal constraints the alias chains resolve to, not the
+// alias names. Two chains that resolve to no terminal constraint, unresolved or
+// cyclic, are equal only when they name one datatype, which keeps equal
+// reflexive for inheritance merging.
+func (c AliasConstraint) equal(other Constraint) bool {
 	if _, undecidable := ResolveAlias(c).(AliasConstraint); undecidable {
 		o, ok := other.(AliasConstraint)
 		if !ok {
@@ -768,43 +715,28 @@ func (c AliasConstraint) Equal(other Constraint) bool {
 		}
 		return c.dataTypeName == o.dataTypeName
 	}
-	return ResolveAlias(c).Equal(other)
+	return ResolveAlias(c).equal(other)
 }
 
-// NarrowsTo delegates to the resolved underlying constraint's NarrowsTo method.
-// For unresolved aliases, returns false (cannot determine narrowing without resolution).
-//
-// This method is cycle-safe: it uses ResolveAlias() to unwrap alias chains before
-// delegating to the terminal constraint's NarrowsTo method.
-func (c AliasConstraint) NarrowsTo(child Constraint) bool {
+// narrowsTo delegates to the terminal constraint the alias chain resolves to.
+// A chain that resolves to none, unresolved or cyclic, narrows to nothing.
+func (c AliasConstraint) narrowsTo(child Constraint) bool {
 	if c.resolved == nil {
 		return false
 	}
 	// Use ResolveAlias for cycle-safety before delegating.
-	// If ResolveAlias returns an AliasConstraint, a cycle was detected
-	// and we cannot determine narrowing - return false.
+	// ResolveAlias returns an AliasConstraint for a cycle or for a chain that
+	// ends unresolved, and narrowing cannot be decided for either.
 	term := ResolveAlias(c.resolved)
 	if _, ok := term.(AliasConstraint); ok {
 		return false // cycle or unresolved alias chain
 	}
-	return term.NarrowsTo(child)
+	return term.narrowsTo(child)
 }
 
-// IsResolved reports whether the alias has been fully resolved to a terminal constraint.
-//
-// After successful schema completion, IsResolved() is guaranteed to return true
-// for all constraints. An unresolved alias (IsResolved() == false) indicates
-// either:
-//   - Pre-completion state during schema loading
-//   - A schema completion failure (alias target not found)
-//
-// Instance validation should only operate on fully completed schemas where
-// IsResolved() is always true. Encountering an unresolved constraint during
-// evaluation indicates a schema error.
-//
-// For alias chains (alias-of-alias), this method uses ResolveAlias to unwrap
-// the chain with cycle detection before checking the terminal constraint.
-func (c AliasConstraint) IsResolved() bool {
+// isResolved reports whether the alias chain resolves to a terminal
+// constraint; schema completion guarantees it for every constraint it keeps.
+func (c AliasConstraint) isResolved() bool {
 	if c.resolved == nil {
 		return false
 	}
@@ -815,7 +747,7 @@ func (c AliasConstraint) IsResolved() bool {
 	if _, ok := term.(AliasConstraint); ok {
 		return false // cycle or unresolved alias chain
 	}
-	return term.IsResolved()
+	return term.isResolved()
 }
 
 // ResolveAlias unwraps AliasConstraint chains to get the terminal constraint.
@@ -826,8 +758,7 @@ func (c AliasConstraint) IsResolved() bool {
 // prevent infinite loops in malformed schemas.
 //
 // Cycle detection uses datatype names (not constraint values) to avoid
-// hashability issues with slice-containing constraint types like EnumConstraint
-// and PatternConstraint.
+// hashability issues with slice-containing constraint types like EnumConstraint.
 func ResolveAlias(c Constraint) Constraint {
 	// Fast path: not an alias or unresolved
 	ac, ok := c.(AliasConstraint)
@@ -851,4 +782,82 @@ func ResolveAlias(c Constraint) Constraint {
 		seen[next.dataTypeName] = struct{}{}
 		c = next.resolved
 	}
+}
+
+// CheckConstraint returns why c cannot judge a value, or nil when it can. It
+// refuses nil, the zero value of a kind that needs an argument (an Enum, a
+// Pattern, a Vector, a List, a DataType reference), and a Go type this package
+// does not construct, such as a pointer to a constraint, at any List depth. It
+// also refuses a DataType reference resolved to another reference alone or to
+// no constraint, which completion refuses in a schema; the neo4j package's
+// CoerceParams calls it before it reads a value.
+func CheckConstraint(c Constraint) error {
+	if c == nil {
+		return errors.New("schema: no constraint")
+	}
+	if fault, found := constraintFault(c); found {
+		return fmt.Errorf("schema: %s", fault)
+	}
+	// constraintFault judged every List level, so only the innermost element
+	// is left to resolve: judging each level again costs the depth squared.
+	for {
+		list, isList := c.(ListConstraint)
+		if !isList {
+			break
+		}
+		c = list.Element()
+	}
+	held, isAlias := c.(AliasConstraint)
+	if !isAlias {
+		return nil
+	}
+	if inner, isAlias := held.resolved.(AliasConstraint); isAlias {
+		return fmt.Errorf("schema: datatype %q resolves to datatype %q alone; a datatype declares a built-in type or a List", held.DataTypeName(), inner.DataTypeName())
+	}
+	terminal := ResolveAlias(c)
+	if open, isOpen := terminal.(AliasConstraint); isOpen {
+		return fmt.Errorf("schema: datatype %q resolves to no constraint", open.DataTypeName())
+	}
+	return CheckConstraint(terminal)
+}
+
+// constraintFault describes the first fault of c, or of a List element at any
+// depth, that a caller can hold: the zero value of a kind that needs an
+// argument, or a Go type this package does not construct. The parser refuses
+// every argument the DSL cannot state, and only it sets one.
+func constraintFault(c Constraint) (string, bool) {
+	switch c := c.(type) {
+	case BooleanConstraint, TimestampConstraint, DateConstraint, UUIDConstraint,
+		IntegerConstraint, FloatConstraint, StringConstraint:
+		// Nothing to judge: each value of these kinds is one the DSL states.
+	case AliasConstraint:
+		// The zero AliasConstraint meets no constructor, so its empty name is
+		// read here; completion resolves every other name.
+		if c.dataTypeName == "" {
+			return fmt.Sprintf("datatype reference %q is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name", c.dataTypeName), true
+		}
+	case ListConstraint:
+		if c.Element() == nil {
+			return "list has no element constraint", true
+		}
+		return constraintFault(c.Element())
+	case EnumConstraint:
+		// The count is read here, not recorded: the zero EnumConstraint meets no
+		// constructor and holds no values.
+		if n := len(c.values); n < 2 {
+			return fmt.Sprintf("enum must have at least two values (got %d)", n), true
+		}
+	case PatternConstraint:
+		if c.compiled == nil {
+			return "pattern constraint needs a pattern", true
+		}
+	case VectorConstraint:
+		if d := c.Dimension(); d < parse.MinVectorDimensions || d > parse.MaxVectorDimensions {
+			return fmt.Sprintf("vector dimensions must be between %d and %d (got %d)",
+				parse.MinVectorDimensions, parse.MaxVectorDimensions, d), true
+		}
+	default:
+		return fmt.Sprintf("a constraint of Go type %T is none this package constructs", c), true
+	}
+	return "", false
 }

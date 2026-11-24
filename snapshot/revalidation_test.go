@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -10,8 +11,8 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -45,55 +46,61 @@ type Thing {
 }
 `
 
-func revalLoadSchema(t *testing.T) *schema.Schema {
+func revalLoadSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), revalSchema, "reval.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	s, err := schema.LoadString(t.Context(), revalSchema, "reval.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	return s
 }
 
-func revalItem(t *testing.T, s *schema.Schema, sku string) *instance.ValidInstance {
-	t.Helper()
-	item, _ := s.Type("Item")
-	return instancetest.VI(
-		"Item",
-		instancetest.TypeID(item.ID()),
-		instancetest.Props(map[string]any{"sku": sku}),
-	)
+// revalThing is Thing t1 holding a value at every constrained position and one
+// item, which the validator accepts.
+func revalThing() map[string]any {
+	return map[string]any{
+		"id": "t1", "count": int64(5), "state": "on", "code": "c-9",
+		"items": []any{map[string]any{"sku": "sku-1"}},
+	}
 }
 
-// revalDocument marshals one bypass-built Thing so Load sees a document the
-// validator never approved. A Target "x1" rides along so an edge to it
-// resolves — an unresolved edge moves to the diagnostics section and never
-// reaches the instance's edges.
-func revalDocument(t *testing.T, s *schema.Schema, opts ...instancetest.VIOption) []byte {
+// revalEdit rewrites a document's text: from is a regular expression.
+type revalEdit struct{ from, to string }
+
+// revalDocumentOf marshals insts, applies edits to the text and rehashes it, so
+// Load reads a document whose integrity holds and whose values no validator
+// approved. Its header states so.
+func revalDocumentOf(t *testing.T, s schema.Schema, insts []instance.ValidInstance, edits ...revalEdit) []byte {
 	t.Helper()
-	thing, _ := s.Type("Thing")
-	target, _ := s.Type("Target")
-	base := []instancetest.VIOption{
-		instancetest.TypeID(thing.ID()),
-		instancetest.PK("t1"),
-	}
 	g := graph.New(s)
-	x1 := instancetest.VI(
-		"Target",
-		instancetest.TypeID(target.ID()),
-		instancetest.PK("x1"),
-		instancetest.Props(map[string]any{"id": "x1"}),
-	)
-	if r := g.Add(t.Context(), x1); !r.OK() {
-		t.Fatalf("Add Target: %s", r.String())
+	for _, inst := range insts {
+		if err := g.Add(t.Context(), inst); err != nil {
+			t.Fatalf("Add: %s", err)
+		}
 	}
-	if r := g.Add(t.Context(), instancetest.VI("Thing", append(base, opts...)...)); !r.OK() {
-		t.Fatalf("Add: %s", r.String())
+	data, err := snapshot.Marshal(t.Context(), g.Snapshot())
+	if err != nil {
+		t.Fatalf("Marshal: %s", err)
 	}
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres.String())
+	for _, e := range append([]revalEdit{{`"attestation":\{"values":true`, `"attestation":{"values":false`}}, edits...) {
+		re := regexp.MustCompile(e.from)
+		if !re.Match(data) {
+			t.Fatalf("no %s in %s", e.from, data)
+		}
+		data = re.ReplaceAllLiteral(data, []byte(e.to))
 	}
-	return data
+	return rehashDocument(t, data)
+}
+
+// revalDocument is the document of the Thing props states. A Target "x1" rides
+// along so an edge to it resolves: an unresolved edge moves to the diagnostics
+// section and never reaches the instance's edges.
+func revalDocument(t *testing.T, s schema.Schema, props map[string]any, edits ...revalEdit) []byte {
+	t.Helper()
+	return revalDocumentOf(t, s, []instance.ValidInstance{
+		instancetest.Valid(t, s, "Target", map[string]any{"id": "x1"}),
+		instancetest.Valid(t, s, "Thing", props),
+	}, edits...)
 }
 
 // TestLoad_RevalidationMatrix pins the revalidation matrix: every constraint
@@ -103,77 +110,29 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 	t.Parallel()
 	s := revalLoadSchema(t)
 
-	goodItems := func() instancetest.VIOption {
-		return instancetest.Composed(map[string]immutable.Value{
-			"ITEMS": immutable.Wrap([]*instance.ValidInstance{revalItem(t, s, "sku-1")}),
-		})
-	}
-
 	cases := []struct {
 		name string
-		opts []instancetest.VIOption
+		edit revalEdit
 		want diag.Code
 	}{
-		{
-			name: "bound",
-			opts: []instancetest.VIOption{
-				instancetest.Props(map[string]any{"id": "t1", "count": int64(99)}),
-				goodItems(),
-			},
-			want: diag.E_CONSTRAINT_FAIL,
-		},
-		{
-			name: "enum",
-			opts: []instancetest.VIOption{
-				instancetest.Props(map[string]any{"id": "t1", "state": "neither"}),
-				goodItems(),
-			},
-			want: diag.E_CONSTRAINT_FAIL,
-		},
-		{
-			name: "pattern",
-			opts: []instancetest.VIOption{
-				instancetest.Props(map[string]any{"id": "t1", "code": "bad"}),
-				goodItems(),
-			},
-			want: diag.E_CONSTRAINT_FAIL,
-		},
-		{
-			name: "invariant",
-			opts: []instancetest.VIOption{
-				instancetest.PK("banned"),
-				instancetest.Props(map[string]any{"id": "banned"}),
-				goodItems(),
-			},
-			want: diag.E_INVARIANT_FAIL,
-		},
-		{
-			name: "required_composition",
-			opts: []instancetest.VIOption{
-				instancetest.Props(map[string]any{"id": "t1"}),
-			},
-			want: diag.E_UNRESOLVED_REQUIRED_COMPOSITION,
-		},
-		{
-			name: "composed_child_constraint",
-			opts: []instancetest.VIOption{
-				instancetest.Props(map[string]any{"id": "t1"}),
-				instancetest.Composed(map[string]immutable.Value{
-					"ITEMS": immutable.Wrap([]*instance.ValidInstance{revalItem(t, s, "bad")}),
-				}),
-			},
-			want: diag.E_CONSTRAINT_FAIL,
-		},
+		{"bound", revalEdit{`"count":5`, `"count":99`}, diag.E_CONSTRAINT_FAIL},
+		{"enum", revalEdit{`"state":"on"`, `"state":"neither"`}, diag.E_CONSTRAINT_FAIL},
+		{"pattern", revalEdit{`"code":"c-9"`, `"code":"bad"`}, diag.E_CONSTRAINT_FAIL},
+		{"invariant", revalEdit{`"t1"`, `"banned"`}, diag.E_INVARIANT_FAIL},
+		{"required_composition", revalEdit{`,"composed":\{"ITEMS":\[.*?\]\}`, ""}, diag.E_UNRESOLVED_REQUIRED_COMPOSITION},
+		{"composed_child_constraint", revalEdit{`"sku":"sku-1"`, `"sku":"bad"`}, diag.E_CONSTRAINT_FAIL},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			data := revalDocument(t, s, tc.opts...)
+			data := revalDocument(t, s, revalThing(), tc.edit)
 
 			// Silent without the option.
-			_, plain := snapshot.Load(t.Context(), data, s)
-			if plain.HasErrors() {
+			_, plain := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithWarnings(warn))
+			})
+			if diagtest.Err(plain) != nil {
 				t.Fatalf("plain Load refused the document: %s", plain.String())
 			}
 			if plain.HasCode(tc.want) {
@@ -181,8 +140,10 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			}
 
 			// Reported under the option, still loading at Warning severity.
-			snap, res := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
-			if res.HasErrors() || snap == nil {
+			snap, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+			})
+			if (diagtest.Err(res) != nil) || snap.IsZero() {
 				t.Fatalf("Warning-severity revalidation refused the load: %s", res.String())
 			}
 			if !res.HasCode(tc.want) {
@@ -190,8 +151,10 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			}
 
 			// Error severity refuses the document.
-			snap, res = snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
-			if snap != nil || !res.HasErrors() {
+			snap, res = diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+			})
+			if !snap.IsZero() || diagtest.Err(res) == nil {
 				t.Error("Error-severity revalidation returned a snapshot for a failing document")
 			}
 		})
@@ -200,16 +163,16 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 
 // revalCleanDocument marshals a validator-built Target and Thing, so a
 // revalidating load of it reports nothing about the data.
-func revalCleanDocument(t *testing.T, s *schema.Schema) []byte {
+func revalCleanDocument(t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	v := instance.NewValidator(s)
 
 	g := graph.New(s)
-	target, res := v.ValidateOne(t.Context(), "Target", instance.RawInstance{Properties: map[string]any{"id": "x1"}})
-	if !res.OK() {
-		t.Fatalf("validate Target: %s", res.String())
+	target, validateErr := v.ValidateOne(t.Context(), "Target", instance.RawInstance{Properties: map[string]any{"id": "x1"}})
+	if validateErr != nil {
+		t.Fatalf("validate Target: %s", validateErr)
 	}
-	thing, res := v.ValidateOne(t.Context(), "Thing", instance.RawInstance{Properties: map[string]any{
+	thing, validateErr := v.ValidateOne(t.Context(), "Thing", instance.RawInstance{Properties: map[string]any{
 		"id":    "t1",
 		"count": int64(5),
 		"state": "on",
@@ -218,17 +181,17 @@ func revalCleanDocument(t *testing.T, s *schema.Schema) []byte {
 		"links": []any{map[string]any{"_target_id": "x1", "note": "n"}},
 		"items": []any{map[string]any{"sku": "sku-1"}},
 	}})
-	if !res.OK() {
-		t.Fatalf("validate Thing: %s", res.String())
+	if validateErr != nil {
+		t.Fatalf("validate Thing: %s", validateErr)
 	}
-	for _, vi := range []*instance.ValidInstance{target, thing} {
-		if r := g.Add(t.Context(), vi); !r.OK() {
-			t.Fatalf("Add: %s", r.String())
+	for _, vi := range []instance.ValidInstance{target, thing} {
+		if err := g.Add(t.Context(), vi); err != nil {
+			t.Fatalf("Add: %s", err)
 		}
 	}
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres.String())
+	data, err := snapshot.Marshal(t.Context(), g.Snapshot())
+	if err != nil {
+		t.Fatalf("Marshal: %s", err)
 	}
 	return data
 }
@@ -238,8 +201,10 @@ func TestLoad_RevalidationCleanDataSilent(t *testing.T) {
 	s := revalLoadSchema(t)
 	data := revalCleanDocument(t, s)
 
-	snap, lres := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
-	if snap == nil || lres.HasErrors() {
+	snap, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+	})
+	if snap.IsZero() || (diagtest.Err(lres) != nil) {
 		t.Fatalf("clean validator-built data failed revalidation: %s", lres.String())
 	}
 	for issue := range lres.Issues() {
@@ -290,14 +255,16 @@ func TestLoad_RevalidationReportsACancelledRowAtItsOwnSeverity(t *testing.T) {
 	sawRow := false
 	for after := 1; ; after++ {
 		ctx := &cancelAfterPolls{after: after}
-		snap, res := snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
+		snap, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+		})
 		if ctx.polled() < after {
-			if snap == nil {
+			if snap.IsZero() {
 				t.Fatalf("an uncancelled load failed: %s", res)
 			}
 			break
 		}
-		if snap != nil {
+		if !snap.IsZero() {
 			t.Fatalf("poll %d: a cancelled load returned a snapshot", after)
 		}
 		if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
@@ -329,51 +296,26 @@ func TestLoad_RevalidationReportsACancelledRowAtItsOwnSeverity(t *testing.T) {
 
 // TestLoad_RefusesAnEdgeUnderAnUndeclaredRelation pins that an edge under a
 // relation name the type does not declare as an association is a structural
-// fault at every constructor: RebuildSnapshot refuses the parts, and Load and
-// Verify refuse the document with no option.
+// fault: Load and Verify refuse the document with no option.
 func TestLoad_RefusesAnEdgeUnderAnUndeclaredRelation(t *testing.T) {
 	t.Parallel()
 	s := revalLoadSchema(t)
-	thing, _ := s.Type("Thing")
-	target, _ := s.Type("Target")
 
-	node := func(id schema.TypeID, k string) graph.InstanceParts {
-		return graph.InstanceParts{
-			TypeID:     id,
-			PrimaryKey: immutable.WrapKey([]any{k}),
-			Properties: immutable.WrapProperties(map[string]any{"id": k}),
-		}
-	}
-	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{thing.ID(), target.ID()},
-		Instances: []graph.InstanceParts{node(thing.ID(), "t1"), node(target.ID(), "x1")},
-		Edges: []graph.EdgeParts{{
-			Relation:   "BOGUS",
-			SourceType: thing.ID(), SourceKey: immutable.WrapKey([]any{"t1"}),
-			TargetKey: immutable.WrapKey([]any{"x1"}),
-		}},
-	})
-	if !res.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
-		t.Errorf("RebuildSnapshot did not refuse an edge under an undeclared relation: %s", res)
-	}
-
-	data := revalDocument(
-		t, s,
-		instancetest.Props(map[string]any{"id": "t1"}),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{
-			"LINKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"x1"}), immutable.Properties{}),
-			}),
-		}),
-	)
+	linked := revalThing()
+	linked["links"] = []any{map[string]any{"_target_id": "x1"}}
+	data := revalDocument(t, s, linked)
 	edited := bytes.Replace(data, []byte(`"LINKS":`), []byte(`"BOGUS":`), 1)
 	if bytes.Equal(edited, data) {
 		t.Fatalf("no LINKS edge to rename in %s", data)
 	}
-	if _, lres := snapshot.Load(t.Context(), edited, s, snapshot.WithIntegrityCheck(false)); !lres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
+	if _, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	}); !lres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
 		t.Errorf("Load did not refuse an edge under an undeclared relation: %s", lres)
 	}
-	if vres := snapshot.Verify(t.Context(), edited, s, snapshot.WithIntegrityCheck(false)); !vres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
+	if vres := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	}); !vres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
 		t.Errorf("Verify did not refuse an edge under an undeclared relation: %s", vres)
 	}
 }
@@ -384,25 +326,20 @@ func TestLoad_RefusesAnEdgeUnderAnUndeclaredRelation(t *testing.T) {
 func TestLoad_RevalidationUnresolvedRequired(t *testing.T) {
 	t.Parallel()
 	s := revalLoadSchema(t)
-	data := revalDocument(
-		t, s,
-		instancetest.Props(map[string]any{"id": "t1"}),
-		instancetest.Composed(map[string]immutable.Value{
-			"ITEMS": immutable.Wrap([]*instance.ValidInstance{revalItem(t, s, "sku-1")}),
-		}),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{
-			"OWNER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"missing"}), immutable.Properties{}),
-			}),
-		}),
-	)
+	owned := revalThing()
+	owned["owner"] = map[string]any{"_target_id": "missing"}
+	data := revalDocument(t, s, owned)
 
-	_, plain := snapshot.Load(t.Context(), data, s)
+	_, plain := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithWarnings(warn))
+	})
 	if plain.HasCode(diag.W_SNAPSHOT_UNRESOLVED_REQUIRED) {
 		t.Fatal("the unresolved-required warning fired without the option")
 	}
 
-	_, res := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+	})
 	if !res.HasCode(diag.W_SNAPSHOT_UNRESOLVED_REQUIRED) {
 		t.Errorf("a Required unresolved record was not reported: %s", res.String())
 	}
@@ -417,7 +354,7 @@ func TestLoad_RevalidationUnresolvedRequired(t *testing.T) {
 func TestLoad_RevalidationJudgesANumberByItsText(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, `schema "num"
+	s, err := schema.LoadString(ctx, `schema "num"
 
 type T {
 	id String primary
@@ -426,22 +363,22 @@ type T {
 	s String
 }
 `, "num.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
-	vi, vr := instance.NewValidator(s).ValidateOne(ctx, "T", instance.RawInstance{
+	vi, validateErr := instance.NewValidator(s).ValidateOne(ctx, "T", instance.RawInstance{
 		Properties: map[string]any{"id": "a", "n": int64(7), "f": 1.5, "s": "x"},
 	})
-	if vr.HasErrors() {
-		t.Fatalf("validate: %s", vr.String())
+	if validateErr != nil {
+		t.Fatalf("validate: %s", validateErr)
 	}
 	g := graph.New(s)
-	if r := g.Add(ctx, vi); r.HasErrors() {
-		t.Fatalf("add: %s", r.String())
+	if err := g.Add(ctx, vi); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	clean, mr := snapshot.Marshal(ctx, g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr.String())
+	clean, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	for _, c := range []struct {
 		name, from, to string
@@ -467,8 +404,10 @@ type T {
 				}
 				data = bytes.Replace(clean, []byte(c.from), []byte(c.to), 1)
 			}
-			_, res := snapshot.Load(ctx, data, s,
-				snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, data, s,
+					snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+			})
 			var got []string
 			for issue := range res.Issues() {
 				got = append(got, issue.Code().String()+": "+issue.Message())
@@ -488,12 +427,12 @@ type T {
 
 // TestLoad_RevalidationJudgesAnEdgePropertyNumberByItsText pins the same rule
 // on an edge: an Integer edge property holding a literal just below int64 is
-// refused as written, not passed as math.MinInt64, and a number at an edge
-// target key is named as the decoder's json.Number.
+// refused as written, not passed as math.MinInt64, and a number at a
+// target_missing record's target key is named as the decoder's json.Number.
 func TestLoad_RevalidationJudgesAnEdgePropertyNumberByItsText(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, `schema "edgenum"
+	s, err := schema.LoadString(ctx, `schema "edgenum"
 
 type U {
 	id String primary
@@ -504,30 +443,33 @@ type T {
 	--> LINKS (_:many) U { n Integer }
 }
 `, "edgenum.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
-	u, ur := v.ValidateOne(ctx, "U", instance.RawInstance{Properties: map[string]any{"id": "u1"}})
-	if ur.HasErrors() {
-		t.Fatalf("validate U: %s", ur.String())
+	u, validateErr := v.ValidateOne(ctx, "U", instance.RawInstance{Properties: map[string]any{"id": "u1"}})
+	if validateErr != nil {
+		t.Fatalf("validate U: %s", validateErr)
 	}
-	ti, tr := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
-		"id":    "t1",
-		"links": []any{map[string]any{"_target_id": "u1", "n": int64(7)}},
+	ti, validateErr2 := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
+		"id": "t1",
+		"links": []any{
+			map[string]any{"_target_id": "u1", "n": int64(7)},
+			map[string]any{"_target_id": "u9", "n": int64(8)},
+		},
 	}})
-	if tr.HasErrors() {
-		t.Fatalf("validate T: %s", tr.String())
+	if validateErr2 != nil {
+		t.Fatalf("validate T: %s", validateErr2)
 	}
 	g := graph.New(s)
-	for _, vi := range []*instance.ValidInstance{u, ti} {
-		if r := g.Add(ctx, vi); r.HasErrors() {
-			t.Fatalf("add: %s", r.String())
+	for _, vi := range []instance.ValidInstance{u, ti} {
+		if err := g.Add(ctx, vi); err != nil {
+			t.Fatalf("add: %s", err)
 		}
 	}
-	clean, mr := snapshot.Marshal(ctx, g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr.String())
+	clean, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	for _, c := range []struct {
 		name, from, to string
@@ -537,7 +479,7 @@ type T {
 		{name: "untouched"},
 		{name: "an edge property below int64", from: `"n":7`, to: `"n":-9223372036854775809`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: -9223372036854775809"},
 		{name: "an edge property above int64", from: `"n":7`, to: `"n":9223372036854775808`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: 9223372036854775808"},
-		{name: "a number at an edge target key", from: `"target_key":["u1"]`, to: `"target_key":[5]`, code: diag.E_TYPE_MISMATCH, message: `FK field "_target_id": expected string, got json.Number`},
+		{name: "a number at a record's target key", from: `"target_key":["u9"]`, to: `"target_key":[5]`, code: diag.E_TYPE_MISMATCH, message: `FK field "_target_id": expected string, got json.Number`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -548,8 +490,10 @@ type T {
 				}
 				data = bytes.Replace(clean, []byte(c.from), []byte(c.to), 1)
 			}
-			_, res := snapshot.Load(ctx, data, s,
-				snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, data, s,
+					snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+			})
 			var got []string
 			for issue := range res.Issues() {
 				got = append(got, issue.Code().String()+": "+issue.Message())
@@ -560,20 +504,25 @@ type T {
 				}
 				return
 			}
-			if c.from == `"target_key":["u1"]` {
-				// The walker reports the dangling target too; the FK check's
-				// wording is what this case pins.
-				for _, g := range got {
-					if strings.HasPrefix(g, c.code.String()+": ") && strings.Contains(g, c.message) {
-						t.Logf("issues = %v", got)
-						return
-					}
-				}
-				t.Fatalf("issues = %v; want one %s holding %q", got, c.code, c.message)
-			}
 			if len(got) != 1 || !strings.HasPrefix(got[0], c.code.String()+": ") || !strings.Contains(got[0], c.message) {
 				t.Fatalf("issues = %v; want one %s holding %q", got, c.code, c.message)
 			}
 		})
+	}
+}
+
+// WithRevalidation refuses a severity outside Fatal to Hint when it is called,
+// so a clean document cannot hide the bug until a row fails.
+func TestWithRevalidation_PanicsOnAnInvalidSeverity(t *testing.T) {
+	t.Parallel()
+	for _, sev := range []diag.Severity{0, diag.Hint + 1} {
+		func() {
+			defer func() {
+				if r := recover(); r == nil || !strings.Contains(r.(string), "snapshot.WithRevalidation: invalid severity") {
+					t.Errorf("WithRevalidation(%d): recovered %v, want the option's panic", sev, r)
+				}
+			}()
+			snapshot.WithRevalidation(sev)
+		}()
 	}
 }

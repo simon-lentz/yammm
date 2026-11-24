@@ -2,10 +2,9 @@
 	"yammm_snapshot": {
 		"version": 4,
 		"schema_name": "wiretest",
-		"schema_source": "string://wiretest.yammm",
 		"schema_hash": "sha256:85707b600a437573cc41db1fc14ea72314086ca4d4d9b57aff1c4e6b434026a5",
 		"schema_hash_algorithm": 4,
-		"integrity_hash": "sha256:cf8bf80fb147cf4d2e2ba3af8c6ea3241d8f436aaddc094c7a97ca41c5a490cc",
+		"integrity_hash": "sha256:48b5baad13513e1bc24fe6371eef86770a9cb8f3dc3eae4ee825bedcaf835ece",
 		"features": [],
 		"attestation": {
 			"values": false,

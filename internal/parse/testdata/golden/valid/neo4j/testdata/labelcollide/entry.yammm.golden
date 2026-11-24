@@ -1,0 +1,69 @@
+{
+  "name": "\"geo\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "imports": [
+    {
+      "path": "\"geo_regions.yammm\"",
+      "alias": "other",
+      "span": {
+        "s": 14,
+        "e": 49
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Regions__Region",
+      "name_span": {
+        "s": 56,
+        "e": 71
+      },
+      "props": [
+        {
+          "name": "rid",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 82,
+              "e": 88
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 78,
+            "e": 96
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "PEER",
+          "name_span": {
+            "s": 105,
+            "e": 109
+          },
+          "target": {
+            "qualifier": "other",
+            "name": "Region",
+            "span": {
+              "s": 116,
+              "e": 128
+            }
+          },
+          "span": {
+            "s": 101,
+            "e": 128
+          }
+        }
+      ],
+      "span": {
+        "s": 51,
+        "e": 130
+      }
+    }
+  ]
+}

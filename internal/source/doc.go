@@ -38,7 +38,6 @@
 //   - Register is safe for concurrent access (synchronized with RWMutex)
 //   - After build completes, the registry is effectively immutable
 //   - Read methods (Content, PositionAt, etc.) are safe for concurrent reads
-//   - Clear() resets the registry, requiring exclusive access
 //
 // # Identity and Uniqueness
 //
@@ -61,7 +60,10 @@
 //	reg := source.NewRegistry()
 //
 //	// During loading/building:
-//	sourceID := location.MustSourceIDFromPath("schema.yammm")
+//	sourceID, err := location.SourceIDFromPath("schema.yammm")
+//	if err != nil {
+//	    // handle the path error
+//	}
 //	if err := reg.Register(sourceID, content); err != nil {
 //	    // handle collision error
 //	}
@@ -73,7 +75,7 @@
 //
 //	// For position conversion:
 //	pos := reg.PositionAt(sourceID, byteOffset)
-//	if !pos.IsZero() {
-//	    // pos.Line, pos.Column, pos.Byte are populated
+//	if pos.IsValid() {
+//	    // pos.Line, pos.Column, pos.Offset are populated
 //	}
 package source

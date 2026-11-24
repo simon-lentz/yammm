@@ -21,6 +21,9 @@ import (
 // It swaps process-global state and therefore must not run in parallel.
 func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+	// t.Setenv panics in a parallel test, so a parallel caller fails at once
+	// rather than as a race only -race and some shuffle orders see.
+	t.Setenv("YAMMM_RUNCLI_SERIAL", "1")
 
 	outR, outW, err := os.Pipe()
 	if err != nil {
@@ -81,9 +84,7 @@ func TestRun_MissingPathExitsRuntimeEverywhere(t *testing.T) {
 		{"validate", []string{"validate", missingSchema}},
 		{"fmt", []string{"fmt", missingSchema}},
 		{"check", []string{"check", valid, missingData}},
-		{"load", []string{"load", valid, missingData}},
 		{"snapshot save", []string{"snapshot", "save", "-o", filepath.Join(dir, "o.ys"), valid, missingData}},
-		{"export", []string{"export", "--to", "json", valid, missingData}},
 		{"snapshot verify", []string{"snapshot", "verify", valid, missingSnap}},
 		{"snapshot info", []string{"snapshot", "info", missingSnap}},
 	}
@@ -115,13 +116,10 @@ func TestRun_MissingSchemaExitsRuntime(t *testing.T) {
 		args []string
 	}{
 		{"check", []string{"check", missing, data}},
-		{"load", []string{"load", missing, data}},
-		{"export", []string{"export", "--to", "json", missing, data}},
 		{"gen", []string{"gen", "--to", "go", missing}},
 		{"snapshot save", []string{"snapshot", "save", "-o", filepath.Join(t.TempDir(), "o.ys"), missing, data}},
 		{"snapshot verify", []string{"snapshot", "verify", missing, "testdata/data.json"}},
-		{"neo4j constraints", []string{"neo4j", "constraints", missing}},
-		{"neo4j indexes", []string{"neo4j", "indexes", missing}},
+		{"gen --to cypher", []string{"gen", "--to", "cypher", missing}},
 	}
 
 	for _, tt := range tests {
@@ -150,8 +148,8 @@ func TestRun_EveryFailurePrints(t *testing.T) {
 		{"unknown flag", []string{"validate", "--nosuchflag", "testdata/valid.yammm"}, cli.ExitUsage},
 		{"too few args", []string{"validate"}, cli.ExitUsage},
 		{"too many args", []string{"validate", "a.yammm", "b.yammm"}, cli.ExitUsage},
-		{"bad --format", []string{"validate", "--format", "bogus", "testdata/valid.yammm"}, cli.ExitUsage},
-		{"missing required flag", []string{"export", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
+		{"bad --json value", []string{"validate", "--json=bogus", "testdata/valid.yammm"}, cli.ExitUsage},
+		{"missing required flag", []string{"gen", "testdata/valid.yammm"}, cli.ExitUsage},
 	}
 
 	for _, tt := range tests {
@@ -167,15 +165,30 @@ func TestRun_EveryFailurePrints(t *testing.T) {
 	}
 }
 
-// TestRun_ABadFormatFlagExitsUsage pins that a --format value the CLI does not
-// know is refused as a usage error, through run(), naming the flag's value.
-func TestRun_ABadFormatFlagExitsUsage(t *testing.T) {
-	code, _, errOut := runCLI(t, "validate", "--format", "bogus", "testdata/valid.yammm")
-	if code != cli.ExitUsage {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-	}
-	if !strings.Contains(errOut, `invalid output format "bogus"`) {
-		t.Errorf("stderr does not name the value:\n%s", errOut)
+// TestRun_ABadJSONValueExitsUsage pins that a --json value that is not a
+// boolean is a usage error naming the flag and the value, on every command:
+// help and completion, which withDiagnostics does not wrap, and neo4j diff
+// before its --uri guard. pflag refuses it as it parses the flags.
+func TestRun_ABadJSONValueExitsUsage(t *testing.T) {
+	for _, args := range [][]string{
+		{"validate", "--json=bogus", "testdata/valid.yammm"},
+		{"fmt", "--json=bogus", "testdata/valid.yammm"},
+		{"neo4j", "diff", "--json=bogus", shadowedSchema},
+		{"help", "--json=bogus"},
+		{"completion", "bash", "--json=bogus"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code, out, errOut := runCLI(t, args...)
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
+			}
+			if !strings.Contains(errOut, `"bogus"`) || !strings.Contains(errOut, "--json") {
+				t.Errorf("stderr does not name the flag and its value:\n%s", errOut)
+			}
+			if out != "" {
+				t.Errorf("a refusal wrote %q to stdout", out)
+			}
+		})
 	}
 }
 
@@ -247,78 +260,139 @@ func TestRun_FmtReportsEveryPath(t *testing.T) {
 	}
 }
 
-// TestRun_FmtValidatesFormat pins that fmt refuses `--format bogus`: fmt calls
-// ParseOutputFormat like every other command that takes the flag.
-func TestRun_FmtValidatesFormat(t *testing.T) {
-	code, _, errOut := runCLI(t, "fmt", "--format", "bogus", "testdata/valid.yammm")
-	if code != cli.ExitUsage {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-	}
-	if !strings.Contains(errOut, "invalid output format") {
-		t.Errorf("stderr does not mention %q:\n%s", "invalid output format", errOut)
+// TestRun_Neo4jHasNoIntrospectCommand pins that `neo4j introspect` is an
+// unknown command: a script that still calls it fails as a usage error naming
+// the word, before any connection is opened, whatever flags follow it.
+func TestRun_Neo4jHasNoIntrospectCommand(t *testing.T) {
+	for name, args := range map[string][]string{
+		"with --uri":         {"--uri", "bolt://127.0.0.1:1"},
+		"with --help":        {"--help"},
+		"with -h":            {"-h"},
+		"with a former flag": {"--schema", "inventory", "--output", "inferred.yammm"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, append([]string{"neo4j", "introspect"}, args...)...)
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitUsage, stderr)
+			}
+			if !strings.Contains(stderr, `unknown command "introspect" for "yammm neo4j"`) {
+				t.Errorf("stderr does not name the unknown command:\n%s", stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing", stdout)
+			}
+		})
 	}
 }
 
-// TestRun_IntrospectValidatesFormatBeforeURI pins that introspect refuses a bad
-// --format before its --uri guard runs. Otherwise the command exits 2 for a
-// reason other than the flag under test, and the check reads as covered.
-func TestRun_IntrospectValidatesFormatBeforeURI(t *testing.T) {
-	code, _, errOut := runCLI(t, "neo4j", "introspect", "--format", "bogus")
-	if code != cli.ExitUsage {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-	}
-	if !strings.Contains(errOut, "invalid output format") {
-		t.Errorf("stderr does not mention %q:\n%s", "invalid output format", errOut)
+// TestRun_AGroupRefusesAnUnknownSubcommandBeforeHelp pins that every command
+// holding subcommands refuses a word that names none of them, though cobra
+// answers --help before it judges a command's words; the group's own help
+// still exits 0.
+func TestRun_AGroupRefusesAnUnknownSubcommandBeforeHelp(t *testing.T) {
+	for _, group := range []string{"neo4j", "snapshot", "completion"} {
+		t.Run(group, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, group, "bogus", "--help")
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitUsage, stderr)
+			}
+			if want := `unknown command "bogus" for "yammm ` + group + `"`; !strings.Contains(stderr, want) {
+				t.Errorf("stderr does not say %s:\n%s", want, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing", stdout)
+			}
+			if code, stdout, stderr := runCLI(t, group, "--help"); code != cli.ExitOK || stdout == "" {
+				t.Errorf("%s --help: exit code = %d and %d bytes of help, want %d and the help; stderr:\n%s", group, code, len(stdout), cli.ExitOK, stderr)
+			}
+		})
 	}
 }
 
-// TestRun_ExportRefusesBeforeWork pins that export validates --to, and refuses
-// flag pairs that contradict each other, before it loads, parses, validates,
-// builds or renders anything.
-func TestRun_ExportRefusesBeforeWork(t *testing.T) {
-	dir := t.TempDir()
+// A help flag before a subcommand's name asks for that subcommand's help, and a
+// word after it that names no subcommand is still refused. --version before a
+// command's name is judged on that command, as after it.
+func TestRun_AHelpFlagBeforeASubcommandHelpsIt(t *testing.T) {
+	for _, tt := range []struct {
+		args  []string
+		usage string
+	}{
+		{[]string{"neo4j", "--help", "diff"}, "yammm neo4j diff <schema.yammm>"},
+		{[]string{"neo4j", "-h", "diff"}, "yammm neo4j diff <schema.yammm>"},
+		{[]string{"neo4j", "--help", "--json", "diff"}, "yammm neo4j diff <schema.yammm>"},
+		{[]string{"--help", "neo4j"}, "yammm neo4j [flags]"},
+		{[]string{"--no-color", "-h", "validate"}, "yammm validate <schema.yammm>"},
+		{[]string{"snapshot", "-h", "info"}, "yammm snapshot info"},
+		{[]string{"completion", "--help", "bash"}, "yammm completion bash"},
+	} {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, tt.args...)
+			if code != cli.ExitOK || !strings.Contains(stdout, "Usage:\n  "+tt.usage) {
+				t.Errorf("exit code = %d, want %d and the usage %q; stdout:\n%s\nstderr:\n%s", code, cli.ExitOK, tt.usage, stdout, stderr)
+			}
+		})
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"neo4j", "--help", "bogus"}, `unknown command "bogus" for "yammm neo4j"`},
+		{[]string{"neo4j", "--help", "diff", "--nosuch"}, "unknown flag: --nosuch"},
+		{[]string{"--version", "check"}, "unknown flag: --version"},
+	} {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, tt.args...)
+			if code != cli.ExitUsage || !strings.Contains(stderr, tt.want) || stdout != "" {
+				t.Errorf("exit code = %d, want %d, stderr naming %q and no stdout; stdout:\n%s\nstderr:\n%s", code, cli.ExitUsage, tt.want, stdout, stderr)
+			}
+		})
+	}
+}
 
-	t.Run("bad --to refuses before rendering diagnostics", func(t *testing.T) {
-		code, _, errOut := runCLI(t, "export", "--to", "xml", "testdata/valid.yammm", "testdata/data.json")
-		if code != cli.ExitUsage {
-			t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-		}
-		if !strings.Contains(errOut, "xml") {
-			t.Errorf("stderr does not mention %q:\n%s", "xml", errOut)
-		}
-		if strings.Contains(errOut, "loaded") {
-			t.Errorf("stderr mentions %q but no work runs before the flag set is refused:\n%s", "loaded", errOut)
-		}
-	})
-
-	t.Run("--output-dir with --to json is refused", func(t *testing.T) {
-		code, _, _ := runCLI(t, "export", "--to", "json", "--output-dir", dir,
-			"testdata/valid.yammm", "testdata/data.json")
-		if code != cli.ExitUsage {
-			t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-		}
-	})
-
-	t.Run("--output with --output-dir is refused", func(t *testing.T) {
-		code, _, _ := runCLI(t, "export", "--to", "csv",
-			"--output", filepath.Join(dir, "o.csv"), "--output-dir", dir,
-			"testdata/valid.yammm", "testdata/data.json")
-		if code != cli.ExitUsage {
-			t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-		}
-	})
+// A --json after a help flag still asks for one document, so a refused
+// word under --help is inside it.
+func TestRun_AHelpRefusalAfterAHelpFlagIsOneJSONDocument(t *testing.T) {
+	for _, args := range [][]string{
+		{"neo4j", "bogus", "--help", "--json"},
+		{"neo4j", "bogus", "-h", "--json"},
+		{"bogus", "--help", "--json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code, _, stderr := runCLI(t, args...)
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
+			}
+			if problem := oneJSONDocumentOutcome(stderr); problem != "" || !strings.Contains(stderr, `"E_COMMAND_FAILED"`) {
+				t.Errorf("want one JSON document holding E_COMMAND_FAILED: %s\n%s", problem, stderr)
+			}
+		})
+	}
 }
 
 // TestRun_UpdateMetadataRefusesContradictoryKeys pins that --set and --unset
 // naming one key are refused. Accepted, they delete the key, exit 0 and report
 // "(0 keys)".
 func TestRun_UpdateMetadataRefusesContradictoryKeys(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "valid_snapshot.ys")
+	copyFile(t, "testdata/valid_snapshot.ys", snap)
 	code, _, errOut := runCLI(t, "snapshot", "update-metadata",
-		"-s", "env=staging", "--unset", "env", "testdata/valid.yammm")
+		"-s", "env=staging", "--unset", "env", snap)
 	if code != cli.ExitUsage {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
 	}
 	if !strings.Contains(errOut, "env") {
 		t.Errorf("stderr does not mention %q:\n%s", "env", errOut)
+	}
+}
+
+// TestRun_VersionHasNoShortForm pins that --version prints the version and -v
+// is refused, so -v stays free for a verbose flag.
+func TestRun_VersionHasNoShortForm(t *testing.T) {
+	if code, stdout, stderr := runCLI(t, "--version"); code != cli.ExitOK || !strings.Contains(stdout, "yammm version") {
+		t.Errorf("--version: exit code = %d, stdout %q, want %d and the version; stderr:\n%s", code, stdout, cli.ExitOK, stderr)
+	}
+	code, stdout, stderr := runCLI(t, "-v")
+	if code != cli.ExitUsage || stdout != "" || !strings.Contains(stderr, "unknown shorthand flag: 'v'") {
+		t.Errorf("-v: exit code = %d, stdout %q, want %d and the refusal; stderr:\n%s", code, stdout, cli.ExitUsage, stderr)
 	}
 }

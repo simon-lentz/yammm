@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -18,13 +19,15 @@ func invariantCodes(t *testing.T, decls, inv string, props map[string]any) []dia
 	t.Helper()
 	src := "schema \"x\"\n\ntype T {\n\tid String primary\n" + decls +
 		"\t! \"probe\" " + inv + "\n}\n"
-	s, result := schema.LoadString(t.Context(), src, "x.yammm")
-	if result.HasErrors() {
-		t.Fatalf("schema carrying %q did not load: %s", inv, result)
+	s, err := schema.LoadString(t.Context(), src, "x.yammm")
+	if err != nil {
+		t.Fatalf("schema carrying %q did not load: %s", inv, err)
 	}
 	all := map[string]any{"id": "a"}
 	maps.Copy(all, props)
-	_, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: all})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: all})
+	})
 	var codes []diag.Code
 	for issue := range res.Issues() {
 		codes = append(codes, issue.Code())

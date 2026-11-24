@@ -17,7 +17,7 @@ import (
 func TestMerge_StoresSurvivorsInArrivalOrder(t *testing.T) {
 	t.Parallel()
 
-	src := NewCollectorUnlimited()
+	src := NewCollector(NoLimit)
 	src.Collect(NewIssue(Warning, E_SYNTAX, "c arrives first, sorts last").Build())
 	src.Collect(NewIssue(Warning, E_SYNTAX, "b arrives second, sorts second").Build())
 	src.Collect(NewIssue(Warning, E_SYNTAX, "a arrives third, sorts first").Build())
@@ -60,14 +60,14 @@ func TestMerge_StoresSurvivorsInArrivalOrder(t *testing.T) {
 func TestResult_KeepsArrivalOrderAcrossMerge(t *testing.T) {
 	t.Parallel()
 
-	src := NewCollectorUnlimited()
+	src := NewCollector(NoLimit)
 	src.Collect(NewIssue(Warning, E_SYNTAX, "z first").Build())
 	src.Collect(NewIssue(Warning, E_SYNTAX, "y second").Build())
 	src.Collect(NewIssue(Warning, E_SYNTAX, "x third").Build())
 	res := src.Result()
 
 	// A merge of a merge keeps the order the first one stored.
-	relay := NewCollectorUnlimited()
+	relay := NewCollector(NoLimit)
 	relay.Merge(res)
 
 	c := NewCollector(2)

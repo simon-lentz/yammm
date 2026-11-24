@@ -3,7 +3,6 @@ package value
 import (
 	"encoding/json"
 	"reflect"
-	"regexp"
 
 	"github.com/simon-lentz/yammm/immutable"
 )
@@ -22,17 +21,19 @@ const (
 
 // TypeStrata returns the strata for a value's type — its ordering category.
 //
-// Returns InvalidStrata for types with no category: maps, channels, and structs
-// other than [immutable.Slice]. A pointer takes the strata of what it points at
-// and a named type the strata of its underlying kind, so the categories agree
-// with [Order] and with the extraction functions.
+// Returns InvalidStrata for types with no category: a pointer, nil or not, a
+// non-nil map, a channel, a function, a struct other than an [immutable.Slice]
+// and a nil [immutable] container, and a json.Number that is no JSON number
+// literal. A value that holds none ([Absent]) is NilStrata, and a scalar takes
+// the strata of the form [Scalar] reads it in, so the categories agree with
+// [Order] and with the extraction functions.
 func TypeStrata(a any) int {
 	if a == nil {
 		return NilStrata
 	}
 	// Predeclared types first: this is the whole of the hot path, and it
 	// answers without reaching reflect.
-	switch a.(type) {
+	switch x := a.(type) {
 	case bool:
 		return BoolStrata
 	// Signed integers
@@ -46,30 +47,35 @@ func TypeStrata(a any) int {
 		return NumericStrata
 	case string:
 		return StringStrata
-	case *regexp.Regexp:
-		return StringStrata
 	case json.Number:
 		// Numeric here because Classify says numeric; a lexical number that
 		// ordered as a string would compare against int64 by strata rank and
 		// answer without erroring.
+		if !IsNumberLiteral(x) {
+			return InvalidStrata
+		}
 		return NumericStrata
 	case immutable.Slice:
 		// A List- or Vector-typed property carries this out of the
 		// evaluator's scope; it is a struct, so no reflect kind names it.
-		return SliceStrata
-	}
-	return strataOfKind(reflect.ValueOf(a))
-}
-
-// strataOfKind reports the strata of rv by its underlying kind, dereferencing
-// pointers first. It is the fallback the predeclared type switch cannot answer:
-// a pointer, or a named type over a predeclared base.
-func strataOfKind(rv reflect.Value) int {
-	for rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
+		if immutable.IsNilContainer(a) {
 			return NilStrata
 		}
-		rv = rv.Elem()
+		return SliceStrata
+	}
+	return strataOfKind(a)
+}
+
+// strataOfKind reports the strata of a value the predeclared type switch
+// cannot answer: nil for a value [Absent] reads as none, a named scalar by its
+// kind, a non-nil slice as a list, and any other value as none.
+func strataOfKind(a any) int {
+	if immutable.IsNilContainer(a) {
+		return NilStrata
+	}
+	rv := reflect.ValueOf(a)
+	if isNil(rv) {
+		return NilStrata
 	}
 	switch rv.Kind() {
 	case reflect.Bool:
@@ -84,7 +90,6 @@ func strataOfKind(rv reflect.Value) int {
 		// Elements are not inspected here; an unsupported element fails at
 		// the comparison that reaches it.
 		return SliceStrata
-	default:
-		return InvalidStrata
 	}
+	return InvalidStrata
 }

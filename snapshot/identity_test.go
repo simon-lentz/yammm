@@ -2,12 +2,12 @@ package snapshot_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/internal/instancetest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
@@ -34,11 +34,11 @@ type Basin {
 `),
 }
 
-func loadCrossSchema(t *testing.T) *schema.Schema {
+func loadCrossSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), crossSchemaSources, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load cross-schema fixture: %s", result)
+	s, err := schema.LoadSourcesWithEntry(t.Context(), crossSchemaSources, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load cross-schema fixture: %s", err)
 	}
 	return s
 }
@@ -51,12 +51,12 @@ func TestRoundTrip_ComposedChildKeepsTypeIdentity(t *testing.T) {
 	s := loadWireTestSchema(t)
 	snap := buildWireTestSnapshot(t, s, float64(2), []any{float64(1)})
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestRoundTrip_ComposedChildKeepsTypeIdentity(t *testing.T) {
 	if !ok {
 		t.Fatal("sensor s1 missing after round trip")
 	}
-	children := sensor.Composed("PARTS")
+	children := slices.Collect(sensor.Composed("PARTS"))
 	if len(children) != 1 {
 		t.Fatalf("PARTS children = %d, want 1", len(children))
 	}
@@ -86,14 +86,14 @@ func TestDiffSnapshots_SeesComposedChildType(t *testing.T) {
 	ctx := context.Background()
 	s := loadWireTestSchema(t)
 	snap := buildWireTestSnapshot(t, s, float64(2), []any{float64(1)})
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	snapshottest.DiffSnapshots(t, snap, loaded)
@@ -106,35 +106,25 @@ func TestRoundTrip_CrossSchemaInstance(t *testing.T) {
 	ctx := context.Background()
 	s := loadCrossSchema(t)
 
-	basin, ok := s.ResolveType(schema.NewTypeRef("base", "Basin", location.Span{}))
-	if !ok {
-		t.Fatal("base.Basin did not resolve through the entry schema")
-	}
-
 	anchor := mustValidInstance(t, s, "Anchor", []any{"a1"},
 		map[string]any{"id": "a1", "depth": float64(3)})
-	imported := instancetest.VI(
-		"Basin",
-		instancetest.TypeID(basin.ID()),
-		instancetest.PK("b1"),
-		instancetest.Props(map[string]any{"id": "b1", "area": float64(7)}),
-	)
+	imported := instancetest.Valid(t, s, "base.Basin", map[string]any{"id": "b1", "area": float64(7)})
 	snap := snapshottest.BuildSnapshot(t, s, anchor, imported)
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if !strings.Contains(string(data), `"name":"Basin"`) {
 		t.Fatalf("marshalled types table does not carry the imported identity:\n%s", data)
 	}
 
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load rejected a document Marshal produced: %v", err)
 	}
 	if _, ok := loaded.InstanceByKey(tidOf(t, s, "base.Basin"), graph.FormatKey("b1")); !ok {
 		t.Error("imported-type instance missing after round trip")
 	}
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 }

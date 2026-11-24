@@ -2,6 +2,8 @@ package diag
 
 import (
 	"fmt"
+	"strconv"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/location"
 )
@@ -36,8 +38,8 @@ type IssueBuilder struct {
 // deferring failure to [Collector.Collect]. This fulfills the builder's
 // guarantee that issues constructed via IssueBuilder are always valid.
 func NewIssue(severity Severity, code Code, message string) *IssueBuilder {
-	if severity > Hint {
-		panic(fmt.Sprintf("diag.NewIssue: invalid severity %d (must be 0-%d)", severity, Hint))
+	if severity < Fatal || severity > Hint {
+		panic(fmt.Sprintf("diag.NewIssue: invalid severity %d (must be %d-%d)", severity, Fatal, Hint))
 	}
 	if code.IsZero() {
 		panic("diag.NewIssue: zero code (use package-defined codes like E_SYNTAX)")
@@ -90,7 +92,7 @@ func FromIssue(issue Issue) *IssueBuilder {
 	}
 	// Deep copy slices to preserve original issue immutability
 	if len(issue.related) > 0 {
-		b.issue.related = make([]location.RelatedInfo, len(issue.related))
+		b.issue.related = make([]RelatedInfo, len(issue.related))
 		copy(b.issue.related, issue.related)
 	}
 	if len(issue.details) > 0 {
@@ -112,7 +114,7 @@ func (b *IssueBuilder) WithSpan(span location.Span) *IssueBuilder {
 // WithPath sets instance provenance.
 //
 // sourceName is the label for the instance data source (e.g., "data.json").
-// path is the canonical instance path (e.g., "$.Car[0].regNbr").
+// path is the instance path (e.g., "$.Car[0].regNbr").
 func (b *IssueBuilder) WithPath(sourceName, path string) *IssueBuilder {
 	b.issue.sourceName = sourceName
 	b.issue.path = path
@@ -140,7 +142,7 @@ func (b *IssueBuilder) WithHint(hint string) *IssueBuilder {
 // Ordering note: Related entries are compared lexicographically during issue
 // sorting (by span, then message). For deterministic output, add entries in
 // a consistent order.
-func (b *IssueBuilder) WithRelated(related ...location.RelatedInfo) *IssueBuilder {
+func (b *IssueBuilder) WithRelated(related ...RelatedInfo) *IssueBuilder {
 	b.issue.related = append(b.issue.related, related...)
 	return b
 }
@@ -152,7 +154,7 @@ func (b *IssueBuilder) WithRelated(related ...location.RelatedInfo) *IssueBuilde
 //
 // Multiple calls to WithDetail append to the existing details list.
 func (b *IssueBuilder) WithDetail(key, value string) *IssueBuilder {
-	b.issue.details = append(b.issue.details, Detail{Key: key, Value: value})
+	b.issue.details = append(b.issue.details, Detail{Key: key, Value: detailText(value)})
 	return b
 }
 
@@ -167,16 +169,32 @@ func (b *IssueBuilder) WithDetail(key, value string) *IssueBuilder {
 // Ordering note: Details are compared lexicographically during issue sorting
 // (by key, then value). For deterministic output, add details in a consistent
 // order.
+//
+// A detail value is held as given when it is valid UTF-8, and otherwise as the
+// quoted Go string [strconv.Quote] returns, so every detail value of a built
+// issue is valid UTF-8 whatever the data held; a key is held as given.
+// [IssueBuilder.WithDetail] holds its value to the same rule.
 func (b *IssueBuilder) WithDetails(details ...Detail) *IssueBuilder {
-	b.issue.details = append(b.issue.details, details...)
+	for _, d := range details {
+		b.issue.details = append(b.issue.details, Detail{Key: d.Key, Value: detailText(d.Value)})
+	}
 	return b
+}
+
+// detailText returns value as a detail holds it. A detail can carry text the
+// data writes, which no schema rule has judged.
+func detailText(value string) string {
+	if utf8.ValidString(value) {
+		return value
+	}
+	return strconv.Quote(value)
 }
 
 // WithExpectedGot is a convenience for type mismatch issues.
 //
-// This is equivalent to calling WithDetails(ExpectedGot(expected, got)...).
+// It adds the [DetailKeyExpected] and [DetailKeyGot] details.
 func (b *IssueBuilder) WithExpectedGot(expected, got string) *IssueBuilder {
-	return b.WithDetails(ExpectedGot(expected, got)...)
+	return b.WithDetails(expectedGot(expected, got)...)
 }
 
 // Build returns the constructed issue.
@@ -196,7 +214,7 @@ func (b *IssueBuilder) Build() Issue {
 
 	// Deep copy slices to ensure immutability
 	if len(b.issue.related) > 0 {
-		result.related = make([]location.RelatedInfo, len(b.issue.related))
+		result.related = make([]RelatedInfo, len(b.issue.related))
 		copy(result.related, b.issue.related)
 	}
 	if len(b.issue.details) > 0 {

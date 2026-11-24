@@ -231,10 +231,13 @@ func TestTrackedFiles_AnEmptyIndexHoldsNoFile(t *testing.T) {
 	}
 }
 
-// throwawayListers are the files that run git ls-files on a tree of their own
-// and never on the repository, each with what it lists there.
+// throwawayListers are the files that run git ls-files on a tree of their own,
+// or on one a caller names, and never on the repository as a test's input, each
+// with what it lists there.
 var throwawayListers = map[string]string{
 	"internal/gittree/gittree_test.go":    "a temporary directory's index",
+	"internal/mutants/tree.go":            "the checkout a run is given, and a worker's copy of it",
+	"internal/mutants/tree_test.go":       "a fixture's checkout and a worker's copy of it",
 	"internal/scripttest/test_sh_test.go": "a fixture's untracked files",
 }
 

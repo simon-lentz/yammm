@@ -2,16 +2,18 @@ package snapshot_test
 
 import (
 	"encoding/json"
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
+	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
 // The writer states what the snapshot holds and mints nothing of its own.
@@ -23,24 +25,28 @@ import (
 func TestWriter_RefusesNonWhitespaceIndent(t *testing.T) {
 	t.Parallel()
 	s, data := attWireFixture(t)
-	snap, res := snapshot.Load(t.Context(), data, s)
-	if res.HasErrors() {
-		t.Fatalf("load fixture: %s", res)
+	snap, err := snapshot.Unmarshal(t.Context(), data, s)
+	if err != nil {
+		t.Fatalf("load fixture: %s", err)
 	}
 
-	out, mres := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("xx"))
-	if !mres.HasCode(diag.E_SNAPSHOT_MALFORMED) {
-		t.Fatalf("Marshal accepted a non-whitespace indent and returned %d bytes: %s", len(out), mres)
-	}
-	if out != nil {
-		t.Errorf("Marshal returned bytes alongside its refusal")
+	// A vertical tab, a form feed and a no-break space are whitespace to Go and
+	// not to JSON, which allows only the four the control uses.
+	for _, bad := range []string{"xx", "\v", "\f", "\u00a0"} {
+		out, err := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent(bad))
+		if !errors.Is(err, diag.E_SNAPSHOT_MALFORMED) {
+			t.Errorf("Marshal accepted the indent %q and returned %d bytes: %s", bad, len(out), err)
+		}
+		if out != nil {
+			t.Errorf("Marshal returned bytes alongside its refusal of %q", bad)
+		}
 	}
 
-	// The control: whitespace indents still marshal, and still parse.
-	for _, ok := range []string{"", "  ", "\t"} {
-		got, r := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent(ok))
-		if r.HasErrors() {
-			t.Errorf("indent %q refused: %s", ok, r)
+	// The control: JSON whitespace indents still marshal, and still parse.
+	for _, ok := range []string{"", "  ", "\t", "\n", "\r\n"} {
+		got, err := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent(ok))
+		if err != nil {
+			t.Errorf("indent %q refused: %s", ok, err)
 			continue
 		}
 		if !json.Valid(got) {
@@ -55,30 +61,23 @@ func TestWriter_RefusesNonWhitespaceIndent(t *testing.T) {
 // property gave one entity two addresses.
 func TestWriter_CanonicalizesTheKeyLikeItsProperty(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "wk"
+	s, err := schema.LoadString(t.Context(), `schema "wk"
 
 type Doc {
 	uid UUID primary
 	other UUID
 }
 `, "wk.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	const upper = "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
 	const lower = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 
-	ty, _ := s.Type("Doc")
-	g := graph.New(s)
-	g.Add(t.Context(), instancetest.VI(
-		"Doc",
-		instancetest.TypeID(ty.ID()),
-		instancetest.PK(upper),
-		instancetest.Props(map[string]any{"uid": upper, "other": upper}),
-	))
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	snap := snapshottest.BuildSnapshot(t, s, instancetest.Valid(t, s, "Doc", map[string]any{"uid": upper, "other": upper}))
+	data, readErr := snapshot.Marshal(t.Context(), snap)
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	doc := string(data)
 
@@ -93,91 +92,34 @@ type Doc {
 	}
 }
 
-// TestWriter_PreservesAnEmptyProvenancePath pins that a value the document
-// carried is not replaced by one the writer mints. An empty path does not
-// parse, so the reader falls back to the root and warns — and writing "$" back
-// made the second read clean, losing both the value and the warning.
-func TestWriter_PreservesAnEmptyProvenancePath(t *testing.T) {
+// TestWriter_PreservesAProvenancePathAsWritten pins that a path the document
+// carried is not replaced by one the writer mints: a path is held as text, so
+// one the path methods would never write, the empty one among them, reads
+// clean and is written back byte for byte.
+func TestWriter_PreservesAProvenancePathAsWritten(t *testing.T) {
 	t.Parallel()
 	s, data := attWireFixture(t)
 
-	edited := strings.Replace(string(data), `"provenance":null`,
-		`"provenance":{"source_name":"s","path":""}`, 1)
-	if edited == string(data) {
-		t.Skipf("fixture carries no null provenance: %s", data)
-	}
+	for _, written := range []string{"", "not a path [", `$["Item"]`, "$[ 0 ]"} {
+		quoted := strconv.Quote(written)
+		edited := strings.Replace(string(data), `"provenance":null`,
+			`"provenance":{"source_name":"s","path":`+quoted+`}`, 1)
+		if edited == string(data) {
+			t.Skipf("fixture carries no null provenance: %s", data)
+		}
 
-	snap, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
-	if res.HasErrors() {
-		t.Fatalf("first load: %s", res)
-	}
-	if !res.HasCode(diag.W_SNAPSHOT_PATH_FALLBACK) {
-		t.Errorf("an unparseable path must warn on the first read: %s", res)
-	}
-
-	again, mres := snapshot.Marshal(t.Context(), snap)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
-	}
-	if !strings.Contains(string(again), `"path":""`) {
-		t.Errorf("the empty path was not written back:\n%s", again)
-	}
-
-	// The warning must survive too: a second read of a document still holding
-	// the unparseable path reports it again.
-	_, res2 := snapshot.Load(t.Context(), again, s)
-	if !res2.HasCode(diag.W_SNAPSHOT_PATH_FALLBACK) {
-		t.Errorf("the fallback warning vanished on the second read: %s", res2)
-	}
-}
-
-// A target key [graph.ParseKey] cannot read is refused where a snapshot is
-// built, by RebuildSnapshot and by Graph.Add, so no snapshot Marshal receives
-// holds one: an unresolved record's fields are read through methods alone.
-// TestParseTargetKey_RefusesAKeyParseKeyCannotRead pins Marshal's own guard.
-func TestWriter_RefusesATargetKeyItCannotParse(t *testing.T) {
-	t.Parallel()
-
-	s, res := schema.LoadString(t.Context(), bigKeySchema, "bigkey.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load bigkey schema: %s", res)
-	}
-	typ, ok := s.Type("Ref")
-	if !ok {
-		t.Fatal("Ref missing")
-	}
-	id := typ.ID()
-
-	nested := immutable.WrapKey([]any{[]any{"nested"}})
-	if _, err := graph.ParseKey(nested.String()); err == nil {
-		t.Fatalf("fixture is vacuous: ParseKey reads %s", nested)
-	}
-	r1 := graph.InstanceParts{
-		TypeID:     id,
-		PrimaryKey: immutable.WrapKey([]any{"r1"}),
-		Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
-	}
-	_, res = graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{id},
-		Instances: []graph.InstanceParts{r1},
-		Unresolved: []graph.UnresolvedParts{{
-			SourceType: id,
-			SourceKey:  immutable.WrapKey([]any{"r1"}),
-			Relation:   "POINTS",
-			TargetKey:  nested,
-			Reason:     "target_missing",
-		}},
-	})
-	if !res.HasCode(diag.E_GRAPH_INVALID_PK) || !strings.Contains(res.String(), "is not a scalar") {
-		t.Errorf("RebuildSnapshot = %s, want the target key refused", res)
-	}
-	g := graph.New(s)
-	add := g.Add(t.Context(), instance.NewValidInstance("Ref", id, immutable.WrapKey([]any{"r1"}),
-		immutable.WrapProperties(map[string]any{"id": "r1"}),
-		map[string]*instance.ValidEdgeData{"POINTS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(nested, immutable.Properties{}),
-		})}, nil, nil))
-	if !add.HasCode(diag.E_GRAPH_INVALID_PK) {
-		t.Errorf("Graph.Add = %s, want the target key refused", add)
+		snap, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+		})
+		if res.Len() != 0 {
+			t.Errorf("path %s: the read reported %s; a path as written is no finding", quoted, res)
+		}
+		again, err := snapshot.Marshal(t.Context(), snap)
+		if err != nil {
+			t.Fatalf("marshal: %s", err)
+		}
+		if !strings.Contains(string(again), `"path":`+quoted) {
+			t.Errorf("the path %s was not written back:\n%s", quoted, again)
+		}
 	}
 }

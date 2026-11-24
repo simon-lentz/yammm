@@ -2,25 +2,29 @@
 // the run by what each package reported, not by the go command's exit status
 // alone.
 //
-// It prints each package's result line, the output of every test that failed or
-// never finished, and all of a failed package's own output, which holds the
-// shuffle seed that reproduces its order. Then it names each package that
-// reported no result, each package that ran no test, and every skipped test with
-// its reason. The arguments are the packages the run was asked for, and it exits
-// 1 when one of them failed or reported no result.
+// It prints each package's result line and the output of every test that
+// failed. For a package that failed or reported no result, it also prints the
+// output of each test that never finished and all of the package's own output,
+// which under -shuffle holds the seed that reproduces its order. Then it names
+// each package that reported no result, each package that passed or skipped
+// and ran no test, and every skipped test with its reason. The arguments are
+// the packages the run was asked for, and it exits 1 when one of them failed
+// or reported no result.
 //
 // go test -json gives a line written outside the testing package's framing
-// (a panic, a stack, a raw print from any test) to the test whose result line
-// it read last, until it reads another line naming a test or the package's
-// result. When a finished test's result line came last, a test binary's
-// timeout panic, the tests it names as running and every goroutine's stack
-// arrive that way, so a failed package also prints each line that followed a
-// finished test's own result line.
+// (a panic, a stack, a raw print from any test) to the test that the last
+// framing line it read names, a "=== " line or a test's result line, until it
+// reads another such line or the package's result. When a finished test's
+// result line came last, a test binary's timeout panic, the tests it names as
+// running and every goroutine's stack arrive that way, so a failed package
+// also prints what followed a finished test's own result line, which
+// [testjson.SplitAtResult] finds.
 //
-// A test skipped through [raceskip.Skip] is also collected. With
-// -race-skips=FILE, those tests are written to FILE, one line per package: the
-// import path, a tab, and the top-level test names joined by commas. With
-// -require=A,B, the run fails unless each named top-level test ran and passed.
+// A test skipped through [raceskip.Skip] is also collected, a subtest by its
+// own name. With -race-skips=FILE, those tests are written to FILE, one line
+// each: the import path, a tab, and the test's name. With -require=NAME, which
+// may be given more than once and never with an empty name, the run fails
+// unless each named test ran and passed.
 //
 // With -durations=FILE, every result go test timed is written to FILE as
 // tab-separated rows under a header: the package, the test (empty for the
@@ -32,20 +36,27 @@
 //
 // With -slowest=N, the summary lists before its verdict the N packages whose
 // results go test timed longest, longest first, each with its seconds to a
-// tenth; packages timed alike are in import-path order. The seconds are a
-// package's test binary's, so they leave out its build, and packages run at
-// once, so they can sum to more than the run took. A run of fewer than N
+// tenth; packages timed alike are in import-path order. A package's seconds
+// run from the start of its test run, after its build, to the run's end, so
+// they leave out its build, and packages run at once, so they can sum to more
+// than the run took. A run of fewer than N
 // packages lists them all.
+//
+// With -timeout=D, the go test -timeout of the run, the summary also names
+// each package whose result go test timed at over 70% of D, longest first: a
+// package that nears the limit is seen before it reaches it. A zero D, which
+// go test reads as no limit, names none. The list is a
+// warning and changes no exit status. With -annotate, each such package is
+// also printed as a GitHub Actions warning annotation.
 //
 // Usage:
 //
-//	go test -json ./... | testsummary [-race-skips=FILE] [-durations=FILE] [-slowest=N] [-require=A,B] pkg...
+//	go test -json ./... | testsummary [-race-skips=FILE] [-durations=FILE] [-slowest=N] [-timeout=D [-annotate]] [-require=NAME]... pkg...
 package main
 
 import (
-	"bufio"
 	"cmp"
-	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -54,8 +65,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/simon-lentz/yammm/internal/raceskip"
+	"github.com/simon-lentz/yammm/internal/testjson"
 )
 
 func main() {
@@ -68,7 +81,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	raceSkipsFile := fs.String("race-skips", "", "write the tests raceskip.Skip skipped to this file")
 	durationsFile := fs.String("durations", "", "write every timed result to this file")
 	slowest := fs.Int("slowest", 0, "list this many of the packages go test timed longest")
-	require := fs.String("require", "", "comma-separated top-level tests that must run and pass")
+	timeout := fs.Duration("timeout", 0, "the run's go test -timeout: name each package that took over 70% of it")
+	annotate := fs.Bool("annotate", false, "print each package over 70% of -timeout as a GitHub Actions warning")
+	var required []string
+	fs.Func("require", "a test that must run and pass; may be given more than once", func(name string) error {
+		if name == "" {
+			return errors.New("names no test")
+		}
+		required = append(required, name)
+		return nil
+	})
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -81,19 +103,19 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "testsummary: -slowest takes a count of zero or more, got %d\n", *slowest)
 		return 2
 	}
+	if *timeout < 0 {
+		fmt.Fprintf(stderr, "testsummary: -timeout takes a duration of zero or more, got %v\n", *timeout)
+		return 2
+	}
 
 	s, err := read(stdin, stdout)
 	if err != nil {
 		fmt.Fprintf(stderr, "testsummary: %v\n", err)
 		return 1
 	}
-	var required []string
-	if *require != "" {
-		required = strings.Split(*require, ",")
-	}
 	// The report comes first, so a file that cannot be written does not hide
 	// the run's result.
-	status := s.report(want, required, *slowest, stdout, stderr)
+	status := s.report(want, required, *slowest, budget{*timeout, *annotate}, stdout, stderr)
 	for _, out := range []struct {
 		file    string
 		content func() []byte
@@ -112,27 +134,15 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return status
 }
 
-// event is one line of `go test -json` output. A build error arrives with
-// ImportPath rather than Package.
-type event struct {
-	Action  string
-	Package string
-	Test    string
-	Output  string
-	Elapsed *float64
-}
-
 type summary struct {
-	result    map[string]string          // package -> pass, fail or skip
-	ran       map[string]int             // package -> top-level tests started
-	passed    map[string]map[string]bool // package -> top-level test -> passed
-	skipped   []string                   // "package test: reason"
-	raceSkips map[string][]string        // package -> top-level tests raceskip.Skip skipped
-	pending   map[string][]string        // package NUL test -> output of a test not yet finished
-	framing   map[string][]string        // package -> its own output, until it finishes
-	after     map[string][]string        // package -> lines that followed a finished test's result line
-	paused    map[string]bool            // package NUL test -> the test paused for t.Parallel
-	timed     []timing                   // every result go test timed, in arrival order
+	tally     testjson.Tally      // each package's result and each test's
+	skipped   []string            // "package test: reason"
+	raceSkips map[string][]string // package -> tests raceskip.Skip skipped
+	pending   map[string][]string // package NUL test -> output of a test not yet finished
+	framing   map[string][]string // package -> its own output, until it finishes
+	after     map[string][]string // package -> output that followed a finished test's result line
+	paused    map[string]bool     // package NUL test -> the test paused for t.Parallel
+	timed     []timing            // every result go test timed, in arrival order
 }
 
 // timing is one result go test timed.
@@ -144,28 +154,15 @@ type timing struct {
 
 func read(r io.Reader, w io.Writer) (*summary, error) {
 	s := &summary{
-		result:    map[string]string{},
-		ran:       map[string]int{},
-		passed:    map[string]map[string]bool{},
 		raceSkips: map[string][]string{},
 		pending:   map[string][]string{},
 		framing:   map[string][]string{},
 		after:     map[string][]string{},
 		paused:    map[string]bool{},
 	}
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 1<<20), 1<<26)
-	for sc.Scan() {
-		var e event
-		if err := json.Unmarshal(sc.Bytes(), &e); err != nil || e.Action == "" {
-			// The go command writes a setup error as plain text.
-			fmt.Fprintln(w, sc.Text())
-			continue
-		}
-		s.apply(e, w)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("reading events: %w", err)
+	err := testjson.Read(r, func(e testjson.Event) { s.apply(e, w) }, func(line string) { fmt.Fprintln(w, line) })
+	if err != nil {
+		return nil, err //nolint:wrapcheck // testjson.Read's error says what failed
 	}
 	// A package that never finished is judged as failed, so all of its output shows.
 	for _, pkg := range s.unfinished() {
@@ -174,9 +171,9 @@ func read(r io.Reader, w io.Writer) (*summary, error) {
 	return s, nil
 }
 
-func (s *summary) apply(e event, w io.Writer) {
+func (s *summary) apply(e testjson.Event, w io.Writer) {
+	s.tally.Add(e)
 	key := e.Package + "\x00" + e.Test
-	top, _, _ := strings.Cut(e.Test, "/")
 	if e.Elapsed != nil && (e.Action == "pass" || e.Action == "fail" || e.Action == "skip") {
 		s.timed = append(s.timed, timing{e.Package, e.Test, e.Action, *e.Elapsed, s.paused[key]})
 	}
@@ -191,49 +188,38 @@ func (s *summary) apply(e event, w io.Writer) {
 		}
 	case "run":
 		delete(s.paused, key)
-		if e.Test != "" && top == e.Test {
-			s.ran[e.Package]++
-		}
 	case "pause":
 		s.paused[key] = true
 	case "skip":
 		if e.Test == "" {
-			s.result[e.Package] = e.Action
 			s.finish(e.Package, false, w)
 			return
 		}
-		own, trailing := splitAtResult(s.pending[key], e.Test)
+		before, _, trailing := testjson.SplitAtResult(s.pending[key], e.Test)
 		s.keepAfter(e.Package, trailing)
-		why := reason(own)
+		why := reason(before)
 		delete(s.pending, key)
 		s.skipped = append(s.skipped, e.Package+" "+e.Test+": "+why)
-		if strings.Contains(why, raceskip.Reason) && !slices.Contains(s.raceSkips[e.Package], top) {
-			s.raceSkips[e.Package] = append(s.raceSkips[e.Package], top)
+		if strings.Contains(why, raceskip.Reason) && !slices.Contains(s.raceSkips[e.Package], e.Test) {
+			s.raceSkips[e.Package] = append(s.raceSkips[e.Package], e.Test)
 		}
 	case "pass", "fail":
 		if e.Test == "" {
-			s.result[e.Package] = e.Action
 			s.finish(e.Package, e.Action == "fail", w)
 			return
 		}
 		if e.Action == "fail" {
 			fmt.Fprint(w, strings.Join(s.pending[key], ""))
 		} else {
-			_, trailing := splitAtResult(s.pending[key], e.Test)
+			_, _, trailing := testjson.SplitAtResult(s.pending[key], e.Test)
 			s.keepAfter(e.Package, trailing)
 		}
 		delete(s.pending, key)
-		if top == e.Test {
-			if s.passed[e.Package] == nil {
-				s.passed[e.Package] = map[string]bool{}
-			}
-			s.passed[e.Package][e.Test] = e.Action == "pass"
-		}
 	}
 }
 
-// keepAfter holds lines that followed a finished test's result line until its
-// package finishes.
+// keepAfter holds the output that followed a finished test's result line until
+// its package finishes.
 func (s *summary) keepAfter(pkg string, lines []string) {
 	if len(lines) > 0 {
 		s.after[pkg] = append(s.after[pkg], lines...)
@@ -289,42 +275,12 @@ func (s *summary) unfinished() []string {
 	return slices.Sorted(maps.Keys(pkgs))
 }
 
-// splitAtResult splits a finished test's lines after its own result line, the
-// last "--- PASS: ", "--- FAIL: " or "--- SKIP: " line naming it. The lines
-// after it were written outside the testing package's framing. With no such
-// line, every line is the test's own. Under -json, testing writes every result
-// line unindented.
-//
-// go test -json cuts a line longer than its 1024-byte output buffer into
-// several events, so the lines are rejoined before they are matched.
-func splitAtResult(lines []string, test string) (own, trailing []string) {
-	lines = strings.SplitAfter(strings.Join(lines, ""), "\n")
-	if lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	for i, line := range slices.Backward(lines) {
-		if namesResult(line, test) {
-			return lines[:i+1], lines[i+1:]
-		}
-	}
-	return lines, nil
-}
-
-func namesResult(line, test string) bool {
-	for _, marker := range []string{"--- PASS: ", "--- FAIL: ", "--- SKIP: "} {
-		if rest, ok := strings.CutPrefix(line, marker); ok {
-			name, _, _ := strings.Cut(rest, " (")
-			return strings.TrimRight(name, "\r\n") == test
-		}
-	}
-	return false
-}
-
 func (s *summary) raceSkipLines() []byte {
 	var b strings.Builder
 	for _, pkg := range slices.Sorted(maps.Keys(s.raceSkips)) {
-		names := slices.Sorted(slices.Values(s.raceSkips[pkg]))
-		b.WriteString(pkg + "\t" + strings.Join(names, ",") + "\n")
+		for _, name := range slices.Sorted(slices.Values(s.raceSkips[pkg])) {
+			b.WriteString(pkg + "\t" + name + "\n")
+		}
 	}
 	return []byte(b.String())
 }
@@ -363,16 +319,40 @@ func (s *summary) slowestPackages(n int) (heading string, items []string) {
 	return fmt.Sprintf("the %d slowest of %d packages", n, len(pkgs)), items
 }
 
-func (s *summary) report(want, required []string, slowest int, stdout, stderr io.Writer) int {
+// budget is the run's go test -timeout, and whether a package over 70% of it
+// is also printed as a GitHub Actions annotation. A zero timeout names none.
+type budget struct {
+	timeout  time.Duration
+	annotate bool
+}
+
+// overBudget returns each package result go test timed at over 70% of the
+// timeout, most seconds first and ties by import path.
+func (s *summary) overBudget(timeout time.Duration) []timing {
+	var over []timing
+	for _, r := range s.timed {
+		// Ten times the seconds against seven times the limit keeps the
+		// boundary exact for a whole-second limit: 420 s of 10m is not over.
+		if r.test == "" && timeout > 0 && r.seconds*10 > timeout.Seconds()*7 {
+			over = append(over, r)
+		}
+	}
+	slices.SortFunc(over, func(a, b timing) int {
+		return cmp.Or(cmp.Compare(b.seconds, a.seconds), strings.Compare(a.pkg, b.pkg))
+	})
+	return over
+}
+
+func (s *summary) report(want, required []string, slowest int, b budget, stdout, stderr io.Writer) int {
 	var missing, failed, noTests []string
 	for _, pkg := range want {
-		switch s.result[pkg] {
+		switch s.tally.Result(pkg) {
 		case "":
 			missing = append(missing, pkg)
 		case "fail":
 			failed = append(failed, pkg)
 		default:
-			if s.ran[pkg] == 0 {
+			if s.tally.Started(pkg) == 0 {
 				noTests = append(noTests, pkg)
 			}
 		}
@@ -382,6 +362,17 @@ func (s *summary) report(want, required []string, slowest int, stdout, stderr io
 	list(stdout, fmt.Sprintf("%d test(s) skipped", len(s.skipped)), s.skipped)
 	heading, items := s.slowestPackages(slowest)
 	list(stdout, heading, items)
+	over := s.overBudget(b.timeout)
+	items = nil
+	for _, r := range over {
+		items = append(items, fmt.Sprintf("%6.1fs  %s", r.seconds, r.pkg))
+	}
+	list(stdout, fmt.Sprintf("%d package(s) took over 70%% of the %v -timeout", len(over), b.timeout), items)
+	if b.annotate {
+		for _, r := range over {
+			fmt.Fprintf(stdout, "::warning title=Test budget::%s took %.1fs, over 70%% of the %v -timeout\n", r.pkg, r.seconds, b.timeout)
+		}
+	}
 
 	status := 0
 	if len(missing) > 0 {
@@ -393,7 +384,7 @@ func (s *summary) report(want, required []string, slowest int, stdout, stderr io
 		status = 1
 	}
 	for _, name := range required {
-		if !slices.ContainsFunc(want, func(pkg string) bool { return s.passed[pkg][name] }) {
+		if !slices.ContainsFunc(want, func(pkg string) bool { return s.tally.Passed(pkg, name) }) {
 			fmt.Fprintf(stderr, "test: %s did not run and pass\n", name)
 			status = 1
 		}
@@ -415,10 +406,11 @@ func list(w io.Writer, heading string, items []string) {
 }
 
 // reason returns a skipped test's own output lines, joined: its skip message
-// without go test's RUN, NAME and SKIP framing.
-func reason(lines []string) string {
+// without the framing lines that begin "=== " or "--- ". outputs are the events
+// before the test's result line, and an event can hold part of a line.
+func reason(outputs []string) string {
 	var out []string
-	for _, l := range lines {
+	for l := range strings.Lines(strings.Join(outputs, "")) {
 		t := strings.TrimSpace(l)
 		if t == "" || strings.HasPrefix(t, "=== ") || strings.HasPrefix(t, "--- ") {
 			continue

@@ -4,11 +4,13 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// TypeID uniquely identifies a type across all schemas. It is the semantic
+// TypeID identifies a type across the schemas of one load, and two loads of one
+// source give equal TypeIDs for different [Type] handles. It is the semantic
 // identity of a type, used for equality comparisons, inheritance deduplication,
 // and cross-schema type resolution.
 //
-// Two types are equal if and only if they have the same TypeID. This enables:
+// Within one load, two handles name one type if and only if their TypeIDs are
+// equal, which enables:
 //   - Proper diamond inheritance handling (same ancestor via different paths)
 //   - Cross-schema type comparison (types from different schemas are distinct)
 //   - Safe use as map keys
@@ -19,14 +21,9 @@ type TypeID struct {
 	name       string
 }
 
-// NewTypeID creates a TypeID from a schema source ID and type name.
-func NewTypeID(schemaPath location.SourceID, name string) TypeID {
-	return TypeID{schemaPath: schemaPath, name: name}
-}
-
 // SchemaPath returns the canonical source identity of the schema containing
-// this type. For file-backed schemas, this is the canonicalized file path.
-// For programmatically built schemas, this is a synthetic identifier.
+// this type. For file-backed schemas, this is the canonicalized file path. For a
+// schema loaded from a string or under a synthetic root, it is a synthetic identifier.
 func (id TypeID) SchemaPath() location.SourceID {
 	return id.schemaPath
 }
@@ -40,10 +37,11 @@ func (id TypeID) Name() string {
 // Format: "schemaPath:typeName" or just "typeName" for empty schema path.
 //
 // For a disk-loaded schema the rendering embeds an absolute filesystem path,
-// so it is machine-local: two hosts loading one schema text render different
-// strings. Use it for diagnostics, never as a persisted or compared identity —
-// [StructuralHash] and the .ys wire key on (schema name, type name) for that
-// reason.
+// so it is machine-local: two hosts that hold one schema text at different
+// paths render different strings. Use it for diagnostics and for a sort order on one host, never as a
+// persisted identity or an identity compared across hosts. For that reason
+// the .ys wire keys a type, and [StructuralHash] a relation target, on (schema
+// name, type name).
 func (id TypeID) String() string {
 	if id.schemaPath.IsZero() {
 		return id.name

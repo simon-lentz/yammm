@@ -1,0 +1,110 @@
+package neo4j
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/simon-lentz/yammm/schema/cypher"
+)
+
+// Neo4j spells the node uniqueness constraint type differently across Cypher
+// languages — CYPHER 5 reports UNIQUENESS, CYPHER 25 NODE_PROPERTY_UNIQUENESS
+// — and this package supports both. Every comparison against a server-reported
+// type therefore has to fold the two together. These tests pin that at each
+// site: matching a remote constraint could rot silently into "the schema's own
+// constraint is drift to be dropped", which is worse than a hard failure
+// because the plan looks actionable.
+
+// uniquenessSpellings is what real Neo4j servers report for a node uniqueness
+// constraint: CYPHER 5 (5.x's one language) reports the first, CYPHER 25 (a
+// new 2026.05 database's default) the second. Both were read from SHOW CONSTRAINTS
+// on running servers.
+//
+// Written as LITERALS on purpose. Deriving them from
+// remoteConstraintTypeAliases would make every test below agree with whatever
+// that table happens to contain — including an empty one — and the regression
+// they exist to catch is precisely a spelling missing from it. This list is a
+// claim about the servers, not about the code.
+var uniquenessSpellings = []string{"UNIQUENESS", "NODE_PROPERTY_UNIQUENESS"}
+
+func TestCanonicalRemoteConstraintType(t *testing.T) {
+	t.Parallel()
+	canonical := cypher.ConstraintUnique.String()
+
+	for _, spelling := range uniquenessSpellings {
+		if got := canonicalRemoteConstraintType(spelling); got != canonical {
+			t.Errorf("canonicalRemoteConstraintType(%q) = %q; want %q — a spelling a real server reports must fold onto the one the desired side embeds",
+				spelling, got, canonical)
+		}
+		// Case is folded too: the column is canonically upper-case, but a
+		// difference must not hide a declarable constraint.
+		lower := strings.ToLower(spelling)
+		if got := canonicalRemoteConstraintType(lower); got != canonical {
+			t.Errorf("canonicalRemoteConstraintType(%q) = %q; want %q", lower, got, canonical)
+		}
+	}
+
+	// The other three kinds are already spelled canonically and must pass
+	// through untouched rather than acquiring an alias by accident.
+	for _, kind := range []cypher.ConstraintKind{cypher.ConstraintNotNull, cypher.ConstraintType, cypher.ConstraintNodeKey} {
+		remote := kind.String()
+		if got := canonicalRemoteConstraintType(remote); got != remote {
+			t.Errorf("canonicalRemoteConstraintType(%q) = %q; want it unchanged", remote, got)
+		}
+	}
+
+	// A relationship spelling must NOT fold onto a node kind: admitting one
+	// would decide ownership against LabelsOrTypes holding a relationship type
+	// rather than a label.
+	for _, relType := range []string{"RELATIONSHIP_UNIQUENESS", "RELATIONSHIP_PROPERTY_UNIQUENESS"} {
+		if got := canonicalRemoteConstraintType(relType); got == canonical {
+			t.Errorf("canonicalRemoteConstraintType(%q) = %q; a relationship constraint must not fold onto a node kind", relType, got)
+		}
+	}
+}
+
+func TestConstraintDiff_UniquenessSpellingsAllMatch(t *testing.T) {
+	t.Parallel()
+
+	for _, spelling := range uniquenessSpellings {
+		t.Run(spelling, func(t *testing.T) {
+			t.Parallel()
+			a := cypher.Config{}
+
+			desired := []cypher.Constraint{{
+				Kind: cypher.ConstraintUnique, Label: "test__Entity", Properties: []string{"id"},
+			}}
+			actual := []RemoteConstraint{{
+				Name: "test__Entity_id_unique", Type: spelling, EntityType: "NODE",
+				LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"},
+			}}
+
+			result := diff(a, desired, nil, actual, nil, testOwned()).Constraints
+
+			// The specific misbehaviour this guards: an unrecognised spelling
+			// makes the remote constraint undeclarable, so it is Excluded rather
+			// than paired, and this unnamed desired constraint then plans a create
+			// of a constraint the database already holds (a named one would read
+			// as drift instead).
+			if len(result.Match) != 1 {
+				t.Errorf("Match = %d; want 1 — remote %q should realise the declaration", len(result.Match), spelling)
+			}
+			for _, unwanted := range []struct {
+				name string
+				n    int
+			}{
+				{"Drift", len(result.Drift)},
+				{"Create", len(result.Create)},
+				{"Drop", len(result.Drop)},
+				{"Excluded", result.Excluded},
+			} {
+				if unwanted.n != 0 {
+					t.Errorf("%s = %d; want 0 for remote %q", unwanted.name, unwanted.n, spelling)
+				}
+			}
+			for _, d := range result.Drift {
+				t.Logf("  drift: %s", d.Reason)
+			}
+		})
+	}
+}

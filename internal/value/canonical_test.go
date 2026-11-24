@@ -3,9 +3,11 @@ package value_test
 import (
 	"encoding/json"
 	"reflect"
-	"regexp"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/immutable"
@@ -29,7 +31,7 @@ func canon(t *testing.T, in any, c schema.Constraint) any {
 // which two spellings of one instant would become two keys.
 func TestCanonical_TimestampReachesOneSpelling(t *testing.T) {
 	t.Parallel()
-	bare := schema.NewTimestampConstraint()
+	bare := schematest.Constraint(t, "Timestamp")
 
 	cases := []struct {
 		name string
@@ -61,7 +63,7 @@ func TestCanonical_TimestampReachesOneSpelling(t *testing.T) {
 // produces for the same time.Time.
 func TestCanonical_TimestampMovesNoKey(t *testing.T) {
 	t.Parallel()
-	bare := schema.NewTimestampConstraint()
+	bare := schematest.Constraint(t, "Timestamp")
 
 	for _, ts := range []time.Time{
 		time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
@@ -84,38 +86,12 @@ func TestCanonical_TimestampMovesNoKey(t *testing.T) {
 	}
 }
 
-// TestCanonical_TimestampUsesTheDeclaredFormat closes the defect where a
-// custom-format timestamp built from a time.Time was written in RFC 3339 text
-// that does not satisfy its own declared layout.
-func TestCanonical_TimestampUsesTheDeclaredFormat(t *testing.T) {
-	t.Parallel()
-	const layout = "2006-01-02 15:04:05"
-	c := schema.NewTimestampConstraintFormatted(layout)
-
-	got := canon(t, time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), c)
-	if got != "2026-08-19 12:00:00" {
-		t.Errorf("Canonical of a time.Time under %q = %#v", layout, got)
-	}
-	if _, err := time.Parse(layout, got.(string)); err != nil {
-		t.Errorf("canonical text does not satisfy its own declared layout: %v", err)
-	}
-
-	// The string arm parses under the declared layout exclusively, matching
-	// what the checker accepts.
-	if got := canon(t, "2026-08-19 12:00:00", c); got != "2026-08-19 12:00:00" {
-		t.Errorf("Canonical of a conforming string = %#v", got)
-	}
-	if _, err := value.Canonical("2026-08-19T12:00:00Z", c); err == nil {
-		t.Error("RFC 3339 text under a declared layout canonicalized; want an error")
-	}
-}
-
 // TestCanonical_UUIDCollapsesEverySpelling pins the fix for the silent
 // primary-key split: uuid.Parse accepts five spellings and every one of them
 // produced its own key.
 func TestCanonical_UUIDCollapsesEverySpelling(t *testing.T) {
 	t.Parallel()
-	c := schema.NewUUIDConstraint()
+	c := schematest.Constraint(t, "UUID")
 	const want = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
 
 	for _, in := range []any{
@@ -145,7 +121,7 @@ func TestCanonical_UUIDMovesNoKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalText: %v", err)
 	}
-	if got := canon(t, u, schema.NewUUIDConstraint()); got != string(text) {
+	if got := canon(t, u, schematest.Constraint(t, "UUID")); got != string(text) {
 		t.Errorf("Canonical = %#v, want %q", got, text)
 	}
 }
@@ -155,7 +131,7 @@ func TestCanonical_UUIDMovesNoKey(t *testing.T) {
 // own location rather than in UTC.
 func TestCanonical_DateAcceptsATimeTime(t *testing.T) {
 	t.Parallel()
-	c := schema.NewDateConstraint()
+	c := schematest.Constraint(t, "Date")
 
 	if got := canon(t, time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), c); got != "2026-08-19" {
 		t.Errorf("Canonical of a UTC time.Time = %#v", got)
@@ -189,12 +165,11 @@ func TestCanonical_IsIdempotent(t *testing.T) {
 		in   any
 		c    schema.Constraint
 	}{
-		{"timestamp go native", time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC), schema.NewTimestampConstraint()},
-		{"timestamp non-canonical string", "2026-08-19T12:00:00.000+00:00", schema.NewTimestampConstraint()},
-		{"timestamp declared layout", time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")},
-		{"uuid go native", uuid.MustParse("0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"), schema.NewUUIDConstraint()},
-		{"uuid uppercase string", "0A35EF0F-9D40-4B6B-A0A1-0D1A5A0E1F2B", schema.NewUUIDConstraint()},
-		{"date go native", time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), schema.NewDateConstraint()},
+		{"timestamp go native", time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC), schematest.Constraint(t, "Timestamp")},
+		{"timestamp non-canonical string", "2026-08-19T12:00:00.000+00:00", schematest.Constraint(t, "Timestamp")},
+		{"uuid go native", uuid.MustParse("0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"), schematest.Constraint(t, "UUID")},
+		{"uuid uppercase string", "0A35EF0F-9D40-4B6B-A0A1-0D1A5A0E1F2B", schematest.Constraint(t, "UUID")},
+		{"date go native", time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), schematest.Constraint(t, "Date")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -212,7 +187,7 @@ func TestCanonical_IsIdempotent(t *testing.T) {
 // only scalar cases cannot tell the recursion from dead code.
 func TestCanonical_ListsCanonicalizeElementwise(t *testing.T) {
 	t.Parallel()
-	ts := schema.NewListConstraint(schema.NewTimestampConstraint())
+	ts := schematest.Constraint(t, "List<Timestamp>")
 
 	got := canon(t, []any{
 		time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
@@ -223,7 +198,7 @@ func TestCanonical_ListsCanonicalizeElementwise(t *testing.T) {
 		t.Errorf("List<Timestamp> = %#v, want %#v", got, want)
 	}
 
-	nested := schema.NewListConstraint(ts)
+	nested := schematest.Constraint(t, "List<List<Timestamp>>")
 	gotNested := canon(t, []any{[]any{time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)}}, nested)
 	wantNested := []any{[]any{"2026-08-19T12:00:00Z"}}
 	if !reflect.DeepEqual(gotNested, wantNested) {
@@ -232,17 +207,17 @@ func TestCanonical_ListsCanonicalizeElementwise(t *testing.T) {
 
 	// A list of a pass-through kind keeps its concrete slice type.
 	strs := []string{"a", "b"}
-	if got := canon(t, strs, schema.NewListConstraint(schema.NewStringConstraint())); !reflect.DeepEqual(got, strs) {
+	if got := canon(t, strs, schematest.Constraint(t, "List<String>")); !reflect.DeepEqual(got, strs) {
 		t.Errorf("List<String> = %#v, want the input slice untouched", got)
 	}
 }
 
-// TestCanonical_ResolvesThroughAnAlias holds the DataType path: a
-// Timestamp["layout"] reached through an alias keeps its layout.
+// TestCanonical_ResolvesThroughAnAlias holds the DataType path: a Timestamp
+// reached through an alias is rendered as a Timestamp is.
 func TestCanonical_ResolvesThroughAnAlias(t *testing.T) {
 	t.Parallel()
-	alias := schema.NewAliasConstraint("EventTime", schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05"))
-	if got := canon(t, time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), alias); got != "2026-08-19 12:00:00" {
+	alias := schematest.Constraint(t, "EventTime", "type EventTime = Timestamp")
+	if got := canon(t, time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", 2*3600)), alias); got != "2026-08-19T12:00:00+02:00" {
 		t.Errorf("Canonical through an alias = %#v", got)
 	}
 }
@@ -256,13 +231,13 @@ func TestCanonical_PassesEveryOtherKindThrough(t *testing.T) {
 		in   any
 		c    schema.Constraint
 	}{
-		{"string", "x", schema.NewStringConstraint()},
-		{"integer", int64(3), schema.NewIntegerConstraint()},
-		{"float", 2.5, schema.NewFloatConstraint()},
-		{"boolean", true, schema.NewBooleanConstraint()},
-		{"enum", "a", schema.NewEnumConstraint([]string{"a", "b"})},
-		{"pattern", "ab", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a")})},
-		{"vector", []float64{1, 2}, schema.NewVectorConstraint(2)},
+		{"string", "x", schematest.Constraint(t, "String")},
+		{"integer", int64(3), schematest.Constraint(t, "Integer")},
+		{"float", 2.5, schematest.Constraint(t, "Float")},
+		{"boolean", true, schematest.Constraint(t, "Boolean")},
+		{"enum", "a", schematest.Constraint(t, `Enum["a", "b"]`)},
+		{"pattern", "ab", schematest.Constraint(t, `Pattern["^a"]`)},
+		{"vector", []float64{1, 2}, schematest.Constraint(t, "Vector[2]")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -279,16 +254,20 @@ func TestCanonical_PassesEveryOtherKindThrough(t *testing.T) {
 // cannot, never failing a write.
 func TestCanonical_ReturnsTheInputOnFailure(t *testing.T) {
 	t.Parallel()
+	type carrier string
 	cases := []struct {
 		name string
 		in   any
 		c    schema.Constraint
+		want string // the refusal, where the row holds it
 	}{
-		{"timestamp, wrong type", 42, schema.NewTimestampConstraint()},
-		{"timestamp, unparseable text", "not-a-timestamp", schema.NewTimestampConstraint()},
-		{"uuid, wrong type", 42, schema.NewUUIDConstraint()},
-		{"date, wrong type", 42, schema.NewDateConstraint()},
-		{"list element fails", []any{"not-a-timestamp"}, schema.NewListConstraint(schema.NewTimestampConstraint())},
+		{"timestamp, wrong type", 42, schematest.Constraint(t, "Timestamp"), "value: cannot canonicalize int as a Timestamp (want a string or time.Time)"},
+		{"timestamp, unparseable text", "not-a-timestamp", schematest.Constraint(t, "Timestamp"), `value: "not-a-timestamp" is not an RFC 3339 timestamp`},
+		{"timestamp, unparseable text in a named string", carrier("not-a-timestamp"), schematest.Constraint(t, "Timestamp"), `value: "not-a-timestamp" is not an RFC 3339 timestamp`},
+		{"timestamp, a date alone", "2026-08-19", schematest.Constraint(t, "Timestamp"), `value: "2026-08-19" is not an RFC 3339 timestamp`},
+		{"uuid, wrong type", 42, schematest.Constraint(t, "UUID"), ""},
+		{"date, wrong type", 42, schematest.Constraint(t, "Date"), ""},
+		{"list element fails", []any{"not-a-timestamp"}, schematest.Constraint(t, "List<Timestamp>"), ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,6 +275,9 @@ func TestCanonical_ReturnsTheInputOnFailure(t *testing.T) {
 			got, err := value.Canonical(tc.in, tc.c)
 			if err == nil {
 				t.Fatal("want an error")
+			}
+			if tc.want != "" && err.Error() != tc.want {
+				t.Errorf("Canonical refuses with %q, want %q", err, tc.want)
 			}
 			if !reflect.DeepEqual(got, tc.in) {
 				t.Errorf("on failure Canonical returned %#v, want the input unchanged", got)
@@ -308,7 +290,7 @@ func TestCanonical_ReturnsTheInputOnFailure(t *testing.T) {
 // relies on: an absent optional value and an unconstrained property.
 func TestCanonical_NilInputsPassThrough(t *testing.T) {
 	t.Parallel()
-	if got := canon(t, nil, schema.NewTimestampConstraint()); got != nil {
+	if got := canon(t, nil, schematest.Constraint(t, "Timestamp")); got != nil {
 		t.Errorf("Canonical(nil) = %#v, want nil", got)
 	}
 	if got := canon(t, "x", nil); got != "x" {
@@ -316,22 +298,41 @@ func TestCanonical_NilInputsPassThrough(t *testing.T) {
 	}
 }
 
-// canonicalUUID reads the same carriers checkUUID accepts: a named string
-// type (adapter/gogen's shape for a DataType over UUID) and a *string. A
-// value the check passes must not fail the coercion that follows it.
-func TestCanonical_UUIDReadsAStringCarrier(t *testing.T) {
+// canonicalUUID reads a named string as checkUUID accepts it (schema/gogen's
+// shape for a DataType over UUID): a value the check passes must not fail the
+// coercion that follows it.
+func TestCanonical_UUIDReadsANamedString(t *testing.T) {
 	t.Parallel()
 	type userID string
 	const spelled = "{123E4567-E89B-12D3-A456-426614174000}"
 	const want = "123e4567-e89b-12d3-a456-426614174000"
-	str := spelled
-	for name, in := range map[string]any{"named string": userID(spelled), "pointer": &str} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			if got := canon(t, in, schema.NewUUIDConstraint()); got != want {
-				t.Errorf("Canonical(%T) = %#v, want %q", in, got, want)
+	if got := canon(t, userID(spelled), schematest.Constraint(t, "UUID")); got != want {
+		t.Errorf("Canonical(a named string) = %#v, want %q", got, want)
+	}
+}
+
+// A pointer has no canonical form at any kind that has one, nil or not:
+// Canonical refuses it and returns it as given.
+func TestCanonical_RefusesAPointer(t *testing.T) {
+	t.Parallel()
+	text := "2026-08-19"
+	at := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	id := uuid.MustParse("123e4567-e89b-12d3-a456-426614174000")
+	list := []any{text}
+	var nilText *string
+	for _, c := range []schema.Constraint{
+		schematest.Constraint(t, "Timestamp"), schematest.Constraint(t, "Date"), schematest.Constraint(t, "UUID"),
+		schematest.Constraint(t, "List<Date>"),
+	} {
+		for _, p := range []any{&text, &at, &id, &list, nilText} {
+			got, err := value.Canonical(p, c)
+			if err == nil {
+				t.Errorf("Canonical(%T, %s) = %#v, want a refusal", p, c, got)
 			}
-		})
+			if got != p {
+				t.Errorf("Canonical(%T, %s) returned %#v beside its error, want the pointer as given", p, c, got)
+			}
+		}
 	}
 }
 
@@ -341,7 +342,7 @@ func TestCanonical_UUIDReadsAStringCarrier(t *testing.T) {
 // [16]byte, so under a List it reads as sixteen bytes and fails at the first.
 func TestCanonical_ListRefusesANonList(t *testing.T) {
 	t.Parallel()
-	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
+	lc := schematest.Constraint(t, "List<Timestamp>")
 	for name, in := range map[string]any{"string": "2026-08-19T12:00:00Z", "int": 7, "uuid under a list of timestamps": uuid.MustParse("123e4567-e89b-12d3-a456-426614174000")} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -360,10 +361,10 @@ func TestCanonical_ListRefusesANonList(t *testing.T) {
 // arm included: it is what a stored List property unwraps to.
 func TestCanonical_ListReadsAnImmutableSlice(t *testing.T) {
 	t.Parallel()
-	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
-	in := immutable.Wrap([]any{time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), "2026-08-19T13:00:00+00:00"}).Unwrap()
+	lc := schematest.Constraint(t, "List<Timestamp>")
+	in := immutable.Wrap([]any{time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), "2026-08-19T13:00:00+00:00"}).Any()
 	if _, ok := in.(immutable.Slice); !ok {
-		t.Fatalf("fixture: Wrap([]any).Unwrap() is %T, want immutable.Slice", in)
+		t.Fatalf("fixture: Wrap([]any).Any() is %T, want immutable.Slice", in)
 	}
 	got := canon(t, in, lc)
 	want := []any{"2026-08-19T12:00:00Z", "2026-08-19T13:00:00Z"}
@@ -377,8 +378,57 @@ func TestCanonical_ListReadsAnImmutableSlice(t *testing.T) {
 // List<Timestamp> is refused rather than read elementwise.
 func TestCanonical_ListRefusesAnArray(t *testing.T) {
 	t.Parallel()
-	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
+	lc := schematest.Constraint(t, "List<Timestamp>")
 	if got, err := value.Canonical([1]string{"2026-08-19T12:00:00+00:00"}, lc); err == nil {
 		t.Errorf("Canonical([1]string) = %#v, want an error: an array is not a list", got)
+	}
+}
+
+// A time.Time whose text does not read back is refused with that text cut to
+// its head: a year past 9999 with nanoseconds and a half-hour zone runs 36 bytes.
+func TestCanonical_AnUnreadTimeIsCutToItsHead(t *testing.T) {
+	t.Parallel()
+	_, err := value.Canonical(time.Date(10000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 5*3600+1800)), schematest.Constraint(t, "Timestamp"))
+	want := `value: a time.Time renders as "10000-01-01T00:00:00.123456789+0"… (36 bytes), which is no RFC 3339 timestamp`
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %s", err, want)
+	}
+}
+
+// A string no kind reads is refused with that string cut to its head.
+func TestCanonical_ARefusedLongStringIsCut(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", 100)
+	cut := `"` + long[:32] + `"… (100 bytes)`
+	for _, c := range []struct {
+		c    schema.Constraint
+		want string
+	}{
+		{schematest.Constraint(t, "Timestamp"), "value: " + cut + " is not an RFC 3339 timestamp"},
+		{schematest.Constraint(t, "UUID"), "value: " + cut + " is not a UUID"},
+		{schematest.Constraint(t, "Date"), "value: " + cut + " is not a YYYY-MM-DD date"},
+	} {
+		if _, err := value.Canonical(long, c.c); err == nil || err.Error() != c.want {
+			t.Errorf("at %s: err = %v, want %s", c.c.Kind(), err, c.want)
+		}
+	}
+}
+
+// A value that holds none passes Canonical untouched at every kind, a nil
+// slice at a List included: it stays the nil it was and never becomes an
+// empty list, which a writer would write as [] where the nil writes null.
+func TestCanonical_AValueThatHoldsNonePassesThrough(t *testing.T) {
+	t.Parallel()
+	for _, c := range []schema.Constraint{
+		schematest.Constraint(t, "List<Timestamp>"),
+		schematest.Constraint(t, "List<UUID>"),
+		schematest.Constraint(t, "Timestamp"),
+	} {
+		for _, v := range []any{nil, []any(nil), []string(nil), map[string]any(nil)} {
+			out, err := value.Canonical(v, c)
+			if err != nil || !reflect.DeepEqual(out, v) || reflect.TypeOf(out) != reflect.TypeOf(v) {
+				t.Errorf("Canonical(%#v, %s) = %#v, %v; want it unchanged", v, c, out, err)
+			}
+		}
 	}
 }

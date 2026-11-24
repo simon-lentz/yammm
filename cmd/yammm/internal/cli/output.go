@@ -9,25 +9,14 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 )
 
-// OutputFormat controls how diagnostic results are rendered.
-type OutputFormat string
+// OutputFormat controls how diagnostic results are rendered: text, or under
+// --json one JSON document.
+type OutputFormat uint8
 
 const (
-	FormatText OutputFormat = "text"
-	FormatJSON OutputFormat = "json"
+	FormatText OutputFormat = iota
+	FormatJSON
 )
-
-// ParseOutputFormat validates and returns the output format.
-func ParseOutputFormat(s string) (OutputFormat, error) {
-	switch s {
-	case "text":
-		return FormatText, nil
-	case "json":
-		return FormatJSON, nil
-	default:
-		return "", Usagef("invalid output format %q: must be \"text\" or \"json\"", s)
-	}
-}
 
 // IsTTY reports whether the given file descriptor is a terminal.
 func IsTTY(fd uintptr) bool {

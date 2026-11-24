@@ -1,0 +1,5 @@
+schema "b__c__direction_LR"
+
+type Mark {
+	id String primary
+}

@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 
-	// Blank imports register adapter-defined diagnostic codes so AllCodes()
+	// Blank imports register the Neo4j packages' diagnostic codes so AllCodes()
 	// includes them. This is a test file, so the coupling is acceptable.
-	_ "github.com/simon-lentz/yammm/adapter/csv"
-	_ "github.com/simon-lentz/yammm/adapter/neo4j"
+	_ "github.com/simon-lentz/yammm/neo4j"
+	_ "github.com/simon-lentz/yammm/schema/cypher"
 )
 
 // diagnosticsRefPath is the path to the plugin's diagnostics reference file,
@@ -28,9 +29,11 @@ const specRefPath = "../docs/SPEC.md"
 //
 // It catches a code added to the registry and not yet documented. The other
 // direction, a documented name that is no registered code, is
-// [github.com/simon-lentz/yammm/docs.TestModuleCitesRegisteredCodes]'s, over
+// [TestModuleCitesRegisteredCodes]'s, over
 // the whole module.
 func TestRegisteredCodesDocumented(t *testing.T) {
+	// The documents are read on one goroutine, and the detector multiplies each read.
+	raceskip.Skip(t)
 	// Both documents enumerate the whole code set, so both are oracles: a
 	// code documented in one and absent from the other is the drift this
 	// guard exists to catch.

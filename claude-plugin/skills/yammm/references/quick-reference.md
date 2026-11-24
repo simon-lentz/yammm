@@ -47,11 +47,11 @@ Using `primary required` together is a parse error -- `primary` already implies 
 | `Integer` | `Integer[min, max]` | Signed; negative bounds allowed |
 | `Float` | `Float[min, max]` | Inclusive bounds |
 | `Boolean` | `Boolean` | No parameters |
-| `Timestamp` | `Timestamp` or `Timestamp["format"]` | Default RFC3339 |
+| `Timestamp` | `Timestamp` | RFC 3339 |
 | `Date` | `Date` | Date only |
 | `UUID` | `UUID` | UUID string |
 | `Enum` | `Enum["a", "b", ...]` | Minimum 2 options |
-| `Pattern` | `Pattern["regex"]` or `Pattern["r1", "r2"]` | Conjunction: must match all |
+| `Pattern` | `Pattern["regex"]` | One pattern; a match is a search |
 | `Vector` | `Vector[dims]` | Fixed-dimension numeric |
 | `List` | `List<Type>` or `List<Type>[min, max]` | Ordered collection |
 
@@ -78,7 +78,7 @@ Primary key types: `String`, `UUID`, `Date`, `Timestamp` only. Aliases that reso
 
 ## Annotations
 
-Validated metadata for adapters (indexes, write-once). Property-level `@name`, type-level `@@name`.
+Validated metadata for downstream tools (indexes, write-once). Property-level `@name`, type-level `@@name`.
 
 ```yammm-snippet
 state      String      @index                // single-property range index
@@ -89,9 +89,9 @@ first_seen Timestamp   @writeOnce            // set on create only
 @@fulltext(title, state)                     // multi-property fulltext index
 ```
 
-- `@index` — a scalar property that is not the sole primary key.
-- `@@index(p, …)` — one or more scalar references (order matters); primary-key members allowed.
-- `@vector(sim)` — a `Vector[N]` property; `sim` is `cosine` or `euclidean`.
+- `@index` — a scalar property; refused only when every concrete type that emits it keys on that property alone (a `part` type never does; an emitter in another schema file is not seen).
+- `@@index(p, …)` — one or more scalar references (order matters); primary-key members allowed; one argument is refused only where `@index` on it is.
+- `@vector(sim)` — a `Vector[N]` property, N at most 4096; `sim` is `cosine` or `euclidean`.
 - `@fulltext` — a text property (`String`, `Pattern`, `Enum`); primary keys allowed (the range-index redundancy rule does not apply).
 - `@@fulltext(p, …)` — one or more text references (order matters); primary-key members allowed.
 - `@writeOnce` — any non-primary-key property.
@@ -107,4 +107,4 @@ first_seen Timestamp   @writeOnce            // set on create only
 ! "all_valid" ITEMS -> All |$item| { $item.quantity > 0 }
 ```
 
-Built-in functions are capitalized: `Len`, `All`, `Any`, `Filter`, `Map`, `Reduce`, `Contains`, `Sum`, `Default`, `Coalesce`, `IsNil`, etc. See `expressions.md` for the full expression language.
+A built-in function name is matched exactly, capital first: `Len`, `All`, `Any`, `Filter`, `Map`, `Reduce`, `Contains`, `Sum`, `Default`, `Coalesce`, `IsNil`, etc. See `expressions.md` for the full expression language.

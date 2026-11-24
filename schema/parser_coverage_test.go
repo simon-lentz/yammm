@@ -3,12 +3,14 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -16,7 +18,7 @@ import (
 func parseSchema(t *testing.T, schemaSource string) (*schema.TestModel, diag.Result) {
 	t.Helper()
 	reg := source.NewRegistry()
-	sourceID := location.MustNewSourceID("test://coverage.yammm")
+	sourceID := sourcetest.ID("test://coverage.yammm")
 	err := reg.Register(sourceID, []byte(schemaSource))
 	require.NoError(t, err)
 
@@ -44,12 +46,12 @@ func runParseCases(t *testing.T, tests []parseCase) {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				if tt.checkFn != nil {
 					tt.checkFn(t, model)
 				}
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				require.Error(t, diagtest.Err(result), "expected errors")
 			}
 			if tt.wantWarnings {
 				assert.True(t, result.HasWarnings(), "expected warnings, got: %v", result)
@@ -221,7 +223,7 @@ type Thing {
 }`
 
 	model, result := parseSchema(t, schemaSource)
-	require.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	require.Len(t, model.Types, 1)
 	require.Len(t, model.Types[0].Properties, 2)
@@ -257,7 +259,7 @@ type Thing {
 type Thing {
 	code Pattern["^[A-Z]+$", "^[0-9]+$"]
 }`,
-			wantOK: true,
+			wantOK: false,
 		},
 		{
 			name: "invalid regex",
@@ -282,14 +284,14 @@ type Thing {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
 				prop := model.Types[0].Properties[0]
 				assert.Equal(t, schema.KindPattern, prop.Constraint.Kind())
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -307,14 +309,6 @@ type Event {
 }`,
 			wantOK: true,
 		},
-		{
-			name: "timestamp with format",
-			source: `schema "test"
-type Event {
-	createdAt Timestamp["2006-01-02T15:04:05Z07:00"]
-}`,
-			wantOK: true,
-		},
 	}
 
 	for _, tt := range tests {
@@ -322,14 +316,14 @@ type Event {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
 				prop := model.Types[0].Properties[0]
 				assert.Equal(t, schema.KindTimestamp, prop.Constraint.Kind())
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -344,7 +338,7 @@ type Event {
 }`
 
 	model, result := parseSchema(t, schemaSource)
-	require.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	require.Len(t, model.Types, 1)
 	require.Len(t, model.Types[0].Properties, 1)
@@ -381,14 +375,14 @@ type Embedding {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
 				prop := model.Types[0].Properties[0]
 				assert.Equal(t, schema.KindVector, prop.Constraint.Kind())
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -477,14 +471,14 @@ type R {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
 				prop := model.Types[0].Properties[0]
 				assert.Equal(t, schema.KindList, prop.Constraint.Kind())
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -572,7 +566,7 @@ type B {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.GreaterOrEqual(t, len(model.Types), 2)
 
@@ -587,7 +581,7 @@ type B {
 				require.NotNil(t, rel, "should have a relation")
 				assert.Equal(t, tt.wantMany, rel.Many, "Many flag mismatch")
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -702,7 +696,7 @@ type Thing {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Properties, 1)
@@ -712,7 +706,7 @@ type Thing {
 					tt.checkFn(t, model)
 				}
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				require.Error(t, diagtest.Err(result), "expected errors")
 			}
 			if tt.wantWarnings {
 				assert.True(t, result.HasWarnings(), "expected warnings, got: %v", result)
@@ -756,9 +750,9 @@ type Thing {
 			t.Parallel()
 			_, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -800,7 +794,7 @@ type Parent {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 
 				// Find the composition relation
@@ -816,7 +810,7 @@ type Parent {
 				require.NotNil(t, rel, "should have a composition relation")
 				assert.Equal(t, tt.wantMany, rel.Many)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -859,12 +853,12 @@ import "common.yammm"`,
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Imports, 1)
 				assert.Equal(t, tt.wantAlias, model.Imports[0].Alias)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -886,10 +880,15 @@ func TestParse_SchemaNameVariations(t *testing.T) {
 			wantName: "test",
 		},
 		{
-			name:     "schema name with escape",
-			source:   `schema "my-schema"`,
+			name:     "schema name with an escape",
+			source:   `schema "my\x5fschema"`,
 			wantOK:   true,
-			wantName: "my-schema",
+			wantName: "my_schema",
+		},
+		{
+			name:   "schema name that is no identifier",
+			source: `schema "my-schema"`,
+			wantOK: false,
 		},
 	}
 
@@ -898,11 +897,11 @@ func TestParse_SchemaNameVariations(t *testing.T) {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				assert.Equal(t, tt.wantName, model.Name)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -917,7 +916,7 @@ type B {}
 type C extends A, B {}`
 
 	model, result := parseSchema(t, schemaSource)
-	require.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	require.Len(t, model.Types, 3)
 
@@ -965,12 +964,12 @@ type Thing {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Invariants, 1)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1043,7 +1042,7 @@ type Source {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 
 				// Find the association relation with properties
@@ -1059,62 +1058,7 @@ type Source {
 				require.NotNil(t, rel, "should have an association with properties")
 				assert.Len(t, rel.Properties, tt.wantRelProps)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
-			}
-		})
-	}
-}
-
-func TestParse_TimestampFormats(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		source     string
-		wantOK     bool
-		wantFormat string
-	}{
-		{
-			name: "timestamp with custom format",
-			source: `schema "test"
-type Event {
-	id UUID primary
-	time Timestamp["2006-01-02T15:04:05Z07:00"]
-}`,
-			wantOK:     true,
-			wantFormat: "2006-01-02T15:04:05Z07:00",
-		},
-		{
-			name: "timestamp with simple format",
-			source: `schema "test"
-type Event {
-	id UUID primary
-	date Timestamp["2006-01-02"]
-}`,
-			wantOK:     true,
-			wantFormat: "2006-01-02",
-		},
-		{
-			name: "timestamp without format",
-			source: `schema "test"
-type Event {
-	id UUID primary
-	created Timestamp
-}`,
-			wantOK:     true,
-			wantFormat: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			model, result := parseSchema(t, tt.source)
-			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
-				require.NotNil(t, model)
-			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1166,10 +1110,10 @@ type Embedding {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1205,12 +1149,12 @@ import "../parent/types.yammm" as parent`,
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Imports, 1)
 				assert.Equal(t, tt.wantPath, model.Imports[0].Path)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1247,7 +1191,7 @@ type Foo { id UUID primary }`,
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				if tt.wantDoc {
 					assert.NotEmpty(t, model.Documentation)
@@ -1255,7 +1199,7 @@ type Foo { id UUID primary }`,
 					assert.Empty(t, model.Documentation)
 				}
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1294,7 +1238,7 @@ type Child extends A, B, {}`,
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 
 				// Find the type that extends
@@ -1308,7 +1252,7 @@ type Child extends A, B, {}`,
 				require.NotNil(t, childType)
 				assert.Len(t, childType.Inherits, tt.wantCount)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1428,12 +1372,12 @@ type Thing {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Types, 1)
 				require.Len(t, model.Types[0].Invariants, 1)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1475,7 +1419,7 @@ type Source {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 
 				// Find the relation and check the target type ref
@@ -1487,9 +1431,9 @@ type Source {
 					}
 				}
 				require.NotNil(t, rel, "should have a relation")
-				assert.Equal(t, tt.wantQualified, rel.Target.IsQualified())
+				assert.Equal(t, tt.wantQualified, rel.Target.Qualifier != "")
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1501,26 +1445,38 @@ func TestParse_StringEscapeSequences(t *testing.T) {
 	tests := []parseCase{
 		{
 			name: "string with newline escape",
-			source: `schema "test\nwith\nnewlines"
-type Foo { id UUID primary }`,
+			source: `schema "test"
+type Foo {
+	id UUID primary
+	k Enum["test\nwith\nnewlines", "b"]
+}`,
 			wantOK: true,
 		},
 		{
 			name: "string with tab escape",
-			source: `schema "test\twith\ttabs"
-type Foo { id UUID primary }`,
+			source: `schema "test"
+type Foo {
+	id UUID primary
+	k Enum["test\twith\ttabs", "b"]
+}`,
 			wantOK: true,
 		},
 		{
 			name: "string with backslash escape",
-			source: `schema "test\\with\\backslashes"
-type Foo { id UUID primary }`,
+			source: `schema "test"
+type Foo {
+	id UUID primary
+	k Enum["test\\with\\backslashes", "b"]
+}`,
 			wantOK: true,
 		},
 		{
 			name: "string with quote escape",
-			source: `schema "test\"with\"quotes"
-type Foo { id UUID primary }`,
+			source: `schema "test"
+type Foo {
+	id UUID primary
+	k Enum["test\"with\"quotes", "b"]
+}`,
 			wantOK: true,
 		},
 		{
@@ -1545,9 +1501,9 @@ type Foo {
 			t.Parallel()
 			_, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1593,9 +1549,9 @@ type Foo {
 			t.Parallel()
 			_, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1638,12 +1594,12 @@ import "types.yammm"`,
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 				require.Len(t, model.Imports, 1)
 				assert.Equal(t, tt.wantAlias, model.Imports[0].Alias)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1721,7 +1677,7 @@ type Source {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 
 				// Find the relation
@@ -1736,7 +1692,7 @@ type Source {
 				assert.Equal(t, tt.wantOptional, rel.Optional, "optional mismatch")
 				assert.Equal(t, tt.wantMany, rel.Many, "many mismatch")
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1781,7 +1737,7 @@ type Source {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 
 				// Find the relation
@@ -1799,7 +1755,7 @@ type Source {
 				assert.Equal(t, tt.wantQualif, rel.Target.Qualifier)
 				assert.Equal(t, tt.wantName, rel.Target.Name)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1846,10 +1802,10 @@ type Foo { id UUID primary }`,
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -1906,10 +1862,10 @@ type Person {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -2005,7 +1961,7 @@ type Thing {
 			wantOK: true,
 		},
 		{
-			name: "invariant with xor",
+			name: "invariant with a caret, which is no operator",
 			source: `schema "test"
 type Thing {
 	id UUID primary
@@ -2013,7 +1969,7 @@ type Thing {
 	b Boolean
 	! "Exclusive or" a ^ b
 }`,
-			wantOK: true,
+			wantOK: false,
 		},
 		{
 			name: "invariant with less than or equal",
@@ -2052,10 +2008,10 @@ type Thing {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -2075,7 +2031,7 @@ type Foo {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	require.Len(t, model.Types, 1)
 	require.Len(t, model.Types[0].Properties, 3)
@@ -2102,7 +2058,7 @@ type Parent {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 
 	// Find Source type and check relation documentation
@@ -2157,7 +2113,7 @@ type lowercase {}`,
 			t.Parallel()
 			_, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 			} else {
 				// We expect either parsing to fail or diagnostics
 				_ = result
@@ -2200,10 +2156,10 @@ type Child extends base.Parent {}`,
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -2251,10 +2207,10 @@ type Item {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -2297,10 +2253,10 @@ type Graph {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -2321,7 +2277,7 @@ type Source {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 
 	// Find the Source type and verify edge properties
@@ -2397,7 +2353,7 @@ type Organization extends Entity {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	assert.Equal(t, "comprehensive", model.Name)
 	assert.Len(t, model.Imports, 1)
@@ -2415,7 +2371,7 @@ type Entity {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	require.Len(t, model.Types, 1)
 	require.Len(t, model.Types[0].Properties, 2)
@@ -2472,10 +2428,10 @@ type Foo {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 				require.NotNil(t, model)
 			} else {
-				assert.False(t, result.OK(), "expected errors")
+				assert.Error(t, diagtest.Err(result), "expected errors")
 			}
 		})
 	}
@@ -2484,14 +2440,14 @@ type Foo {
 func TestParse_NilTypeRefHandling(t *testing.T) {
 	t.Parallel()
 
-	// Test TypeRef.String() and IsQualified() methods
+	// Test TypeRef.String() and Qualifier
 	ref := schema.TestASTTypeRef{Name: "Test"}
 	assert.Equal(t, "Test", ref.String())
-	assert.False(t, ref.IsQualified())
+	assert.Empty(t, ref.Qualifier)
 
 	qualRef := schema.TestASTTypeRef{Qualifier: "pkg", Name: "Test"}
 	assert.Equal(t, "pkg.Test", qualRef.String())
-	assert.True(t, qualRef.IsQualified())
+	assert.NotEmpty(t, qualRef.Qualifier)
 }
 
 func TestRelationKind_AllValues(t *testing.T) {
@@ -2516,16 +2472,16 @@ type Child extends base.Entity, base.Auditable {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	require.Len(t, model.Types, 1)
 
 	child := model.Types[0]
 	require.Len(t, child.Inherits, 2)
-	assert.True(t, child.Inherits[0].IsQualified())
+	assert.NotEmpty(t, child.Inherits[0].Qualifier)
 	assert.Equal(t, "base", child.Inherits[0].Qualifier)
 	assert.Equal(t, "Entity", child.Inherits[0].Name)
-	assert.True(t, child.Inherits[1].IsQualified())
+	assert.NotEmpty(t, child.Inherits[1].Qualifier)
 	assert.Equal(t, "base", child.Inherits[1].Qualifier)
 	assert.Equal(t, "Auditable", child.Inherits[1].Name)
 }
@@ -2595,7 +2551,7 @@ type Parent {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
-			assert.True(t, result.OK(), "expected no errors, got: %v", result)
+			require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 			require.NotNil(t, model)
 
 			// Find the composition relation
@@ -2627,7 +2583,7 @@ type User {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	require.Len(t, model.DataTypes, 1)
 	assert.NotEmpty(t, model.DataTypes[0].Documentation)
@@ -2645,7 +2601,7 @@ type Machine {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 
 	// Find the Machine type
@@ -2669,7 +2625,7 @@ type B {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 
 	// Find the association relation with properties
@@ -2692,7 +2648,7 @@ type Machine {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 
 	// Find the composition relation - default is optional/one
@@ -2716,7 +2672,7 @@ type Machine {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 
 	// Find the composition relation
@@ -2724,7 +2680,7 @@ type Machine {
 		if typ.Name == "Machine" {
 			require.Len(t, typ.Relations, 1)
 			rel := typ.Relations[0]
-			assert.True(t, rel.Target.IsQualified())
+			assert.NotEmpty(t, rel.Target.Qualifier)
 			assert.Equal(t, "parts", rel.Target.Qualifier)
 			assert.Equal(t, "Component", rel.Target.Name)
 		}
@@ -2742,7 +2698,7 @@ type Foo {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	require.Len(t, model.Imports, 2)
 	assert.Equal(t, "types", model.Imports[0].Alias)
@@ -2760,7 +2716,7 @@ type Thing {
 }`
 
 	model, result := parseSchema(t, source)
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	require.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 	require.NotNil(t, model)
 	require.Len(t, model.Types, 1)
 	require.Len(t, model.Types[0].Invariants, 1)
@@ -2888,9 +2844,9 @@ type Parent {
 
 			// Verify errors were reported via diagnostic system
 			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
+				assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 			} else {
-				assert.False(t, result.OK(), "expected errors to be reported via diagnostics")
+				assert.Error(t, diagtest.Err(result), "expected errors to be reported via diagnostics")
 				// Note: We verify that model is still usable (may be nil or partially populated)
 				_ = model
 			}
@@ -2937,7 +2893,7 @@ type Foo {
 				_, result = parseSchema(t, tt.source)
 			})
 
-			assert.False(t, result.OK(), "expected errors")
+			require.Error(t, diagtest.Err(result), "expected errors")
 
 			// Check that at least one issue has the expected code
 			foundCode := false
@@ -2952,20 +2908,6 @@ type Foo {
 	}
 }
 
-func TestParse_TimestampInvalidFormat(t *testing.T) {
-	t.Parallel()
-
-	// Test timestamp with invalid escape sequence in format string
-	source := `schema "test"
-type Event {
-	id UUID primary
-	time Timestamp["\xinvalid"]
-}`
-
-	_, result := parseSchema(t, source)
-	assert.False(t, result.OK(), "expected error for invalid escape sequence")
-}
-
 func TestParse_InvariantInvalidMessage(t *testing.T) {
 	t.Parallel()
 
@@ -2978,7 +2920,7 @@ type Thing {
 }`
 
 	_, result := parseSchema(t, source)
-	assert.False(t, result.OK(), "expected error for invalid escape sequence")
+	assert.Error(t, diagtest.Err(result), "expected error for invalid escape sequence")
 }
 
 func TestParse_EnumInvalidValue(t *testing.T) {
@@ -2992,7 +2934,7 @@ type Thing {
 }`
 
 	_, result := parseSchema(t, source)
-	assert.False(t, result.OK(), "expected error for invalid escape sequence")
+	assert.Error(t, diagtest.Err(result), "expected error for invalid escape sequence")
 }
 
 func TestParse_PatternInvalidString(t *testing.T) {
@@ -3006,7 +2948,7 @@ type Thing {
 }`
 
 	_, result := parseSchema(t, source)
-	assert.False(t, result.OK(), "expected error for invalid escape sequence")
+	assert.Error(t, diagtest.Err(result), "expected error for invalid escape sequence")
 }
 
 func TestParse_SchemaNameInvalidEscape(t *testing.T) {
@@ -3029,7 +2971,7 @@ func TestParse_ImportPathInvalidEscape(t *testing.T) {
 import "\xinvalid" as bad`
 
 	_, result := parseSchema(t, source)
-	assert.False(t, result.OK(), "expected error for invalid escape sequence")
+	assert.Error(t, diagtest.Err(result), "expected error for invalid escape sequence")
 }
 
 func TestParse_MissingCompositionRelName(t *testing.T) {
@@ -3043,7 +2985,7 @@ type Parent {
 }`
 
 	_, result := parseSchema(t, source)
-	assert.False(t, result.OK(), "expected error for missing relation name")
+	assert.Error(t, diagtest.Err(result), "expected error for missing relation name")
 }
 
 func TestParse_MissingCompositionTarget(t *testing.T) {
@@ -3056,7 +2998,7 @@ type Parent {
 }`
 
 	_, result := parseSchema(t, source)
-	assert.False(t, result.OK(), "expected error for missing target type")
+	assert.Error(t, diagtest.Err(result), "expected error for missing target type")
 }
 
 func TestParse_InvalidMultiplicityKeyword(t *testing.T) {
@@ -3086,7 +3028,7 @@ type Source {
 			t.Parallel()
 			_, result := parseSchema(t, tt.source)
 			// Invalid multiplicity should produce an error
-			assert.False(t, result.OK(), "expected error for invalid multiplicity")
+			assert.Error(t, diagtest.Err(result), "expected error for invalid multiplicity")
 		})
 	}
 }
@@ -3102,7 +3044,7 @@ type Embedding {
 }`
 
 	_, result := parseSchema(t, source)
-	assert.False(t, result.OK(), "expected error for non-numeric vector dimension")
+	assert.Error(t, diagtest.Err(result), "expected error for non-numeric vector dimension")
 }
 
 func TestParse_ImportEmptyPath(t *testing.T) {
@@ -3143,7 +3085,7 @@ type Foo {}`,
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			_, result := parseSchema(t, tt.source)
-			assert.False(t, result.OK(), "expected syntax error")
+			assert.Error(t, diagtest.Err(result), "expected syntax error")
 		})
 	}
 }
@@ -3177,7 +3119,7 @@ type Foo { id UUID primary }`,
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			model, result := parseSchema(t, tt.source)
-			assert.True(t, result.OK(), "expected no errors")
+			require.NoError(t, diagtest.Err(result), "expected no errors")
 			require.NotNil(t, model)
 			require.Len(t, model.Types, 1)
 			assert.Equal(t, tt.wantTypeDoc, model.Types[0].Documentation)
@@ -3213,26 +3155,4 @@ type Source {
 	_, result := parseSchema(t, source)
 	// This is valid syntax - exercises the using clause path
 	_ = result
-}
-
-// TestParse_ReverseClauseRemoved pins the removal at the schema load
-// surface: a schema carrying the clause fails to load with the named code,
-// never a bare syntax error.
-func TestParse_ReverseClauseRemoved(t *testing.T) {
-	t.Parallel()
-
-	const source = `schema "test"
-
-type Parent {
-	id String primary
-	--> CHILD (one) Child / parent (many)
-}
-
-type Child {
-	id String primary
-}`
-	_, result := schema.LoadString(t.Context(), source, "test.yammm")
-	require.True(t, result.HasErrors(), "a schema carrying the reverse clause must fail to load")
-	assert.True(t, result.HasCode(diag.E_REVERSE_CLAUSE_REMOVED),
-		"want E_REVERSE_CLAUSE_REMOVED, got: %s", result.String())
 }

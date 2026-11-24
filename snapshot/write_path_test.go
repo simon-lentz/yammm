@@ -203,10 +203,8 @@ func TestScanDir_ReadsTheDirectoryItsPathsName(t *testing.T) {
 		if want := filepath.Join(scanned, entry.Name); entry.Path != want {
 			t.Errorf("%s: Path %q, want %q", entry.Name, entry.Path, want)
 		}
-		for issue := range entry.Result.Issues() {
-			if issue.Code() == diag.E_SNAPSHOT_IO {
-				t.Errorf("%s could not be opened: %s", entry.Name, issue.Message())
-			}
+		if errors.Is(entry.Err, diag.E_SNAPSHOT_IO) {
+			t.Errorf("%s could not be opened: %s", entry.Name, entry.Err)
 		}
 	}
 	if !slices.Equal(names, []string{"only_text.ys"}) {

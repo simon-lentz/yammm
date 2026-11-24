@@ -1,0 +1,34 @@
+# A data operand is read once and through the path that reaches it, so a pipe and
+# a redirected file read as a named file does.
+[windows] skip
+
+stdin data.json
+exec yammm check valid.yammm /dev/stdin
+
+stdin data.json
+exec yammm snapshot save valid.yammm /dev/stdin -o saved.ys
+grep '"alice"' saved.ys
+
+exec sh -c 'yammm check valid.yammm /dev/stdin < data.json'
+exec sh -c 'yammm snapshot save valid.yammm /dev/stdin -o redirected.ys < data.json'
+grep '"alice"' redirected.ys
+
+# A link to a descriptor path reads the descriptor, whatever the host names it.
+symlink lk -> /dev/stdin
+stdin data.json
+exec yammm check valid.yammm lk
+exec sh -c 'yammm check valid.yammm lk < data.json'
+
+# A FIFO's second open would wait for a writer that has gone.
+exec sh -c 'mkfifo f; cat data.json > f & yammm snapshot save valid.yammm f -o fifo.ys'
+grep '"alice"' fifo.ys
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+}
+-- data.json --
+{"Person":[{"id":"a","name":"alice"}]}

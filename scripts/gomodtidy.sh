@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # gomodtidy.sh — assert every git-tracked module is tidy.
 #
-# Runs `go mod tidy -diff` in each directory holding a tracked go.mod, covering
-# the testdata fixture modules as well as the root one. Tracked is the rule:
-# the gitignored .claude/ tree holds throwaway probe modules whose replace
-# directives name export directories that no longer exist.
+# Runs `go mod tidy -diff` in each directory holding a tracked go.mod; the
+# repository tracks the root module's alone. Tracked is the rule: a go.mod git
+# ignores, as one under the .claude/ tree is, is passed over, and an untracked
+# go.mod git does not ignore fails the run.
 #
-# The EVIDENCE is the verdict, not the exit code. `-diff` documents no exit-code
-# contract, and a non-zero status with nothing on stdout is a command that
+# The EVIDENCE is the verdict, not the exit code. `-diff` exits non-zero both
+# when the diff is not empty, as `go help mod tidy` documents, and when the
+# command fails, so a non-zero status with nothing on stdout is a command that
 # failed to RUN — a network error, a missing toolchain — which reported as
 # "this module is untidy" sends an operator to look for a diff that is not
 # there. So: output means untidy; no output and a non-zero status means the

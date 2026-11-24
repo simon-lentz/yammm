@@ -1,0 +1,141 @@
+package neo4j
+
+import (
+	"fmt"
+	"strings"
+)
+
+// batchKeyParamPrefix namespaces MERGE-key entries away from the `props` and
+// `update_props` entries that share their map. Both builders and both parameter
+// assemblers spell it through this constant, so the two halves of each wire
+// contract cannot drift apart.
+const batchKeyParamPrefix = "key_"
+
+// The row-key prefixes of [BuildBatchRelationshipMergeQuery]'s `$rows`
+// parameter. Each row carries the source endpoint's key properties under
+// RelFromRowPrefix and the target's under RelToRowPrefix:
+//
+//	{rows: [{from_<name>: v, to_<name>: v, [rel_props: map]}, ...]}
+//
+// They are exported because that shape is the builder's contract in all but
+// name: a consumer holding the template has to assemble rows that match it, and
+// a prefix it spells as a literal is a prefix nothing keeps in step. A
+// disagreement is silent — the MATCH binds null, merges nothing, and reports no
+// error.
+const (
+	RelFromRowPrefix = "from_"
+	RelToRowPrefix   = "to_"
+)
+
+// buildBatchNodeMergeQuery renders the UNWIND-batched node MERGE. Parameter
+// shape:
+//
+//	{rows: [{key_<key_1>: v, props: map, [update_props: map]}, ...]}
+//
+// The `update_props` entry per row is required when keys == [immutableKeys] and
+// ignored when keys == [mutableKeys].
+//
+// Merge keys carry the `key_` prefix ([batchKeyParamPrefix]), so a row's key
+// entries occupy a namespace disjoint from `props` and `update_props`. That
+// matters because `props` and `update_props` are themselves legal DSL property
+// names: without the prefix a primary key so named would collide with the
+// property map in the same row.
+//
+// Node batch merges emit no RETURN clause: a MERGE creates the node it does not
+// find, so there is no missed-match case for a count to report. The composition
+// and relationship templates are MATCH-anchored and do carry one.
+func buildBatchNodeMergeQuery(label string, keyNames []string, keys keyMutability) string {
+	var b strings.Builder
+	b.WriteString("UNWIND $rows AS row\n")
+	b.WriteString("MERGE (n:")
+	b.WriteString(label)
+	b.WriteString(" {")
+	for i, name := range keyNames {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s: row.%s%s", name, batchKeyParamPrefix, name)
+	}
+	b.WriteString("})")
+
+	if keys == immutableKeys {
+		b.WriteString("\nON CREATE SET n += row.props")
+		b.WriteString("\nON MATCH SET n += row.update_props")
+	} else {
+		b.WriteString("\nSET n += row.props")
+	}
+	return b.String()
+}
+
+// BuildBatchRelationshipMergeQuery returns the Cypher template for an
+// UNWIND-batched relationship MERGE between nodes identified by their
+// (label, primary-key) shapes. If hasProps is true, the generated query holds
+// `SET r += row.rel_props` before its RETURN, so callers can pass per-edge
+// properties.
+// Parameter shape:
+//
+//	{rows: [{from_<name>: v, to_<name>: v, [rel_props: map]}, ...]}
+//
+// The generated query always ends with `RETURN count(*) AS matched_rows`.
+// Consumers implementing silent-failure detection on generated MERGEs sum the
+// column; consumers that do not care ignore it. The RETURN takes no flag of its
+// own, so hasProps is the signature's one bool and the SET clause is the emitted
+// query's one branch.
+//
+// Return-value semantics (matched_rows). Neo4j's transactional semantics
+// mean a chunk run in its own transaction either fully commits (all
+// matched_rows reflected in the returned value) or fully rolls back (no
+// matched_rows, driver error surfaces to the caller). The returned column reflects the
+// MERGE match count within this chunk's transaction only — it is not
+// a session-spanning aggregate.
+//
+// Consumers that chunk a batch across multiple transactions (the common
+// case — large batches are split to respect transaction-size limits) are
+// responsible for summing matched_rows across chunk results. A single
+// chunk's value reflects that chunk's commit only. The library returns
+// a template; cross-chunk aggregation is the consumer's.
+//
+// The silent-failure detection pattern that motivates the always-on
+// RETURN — "sum matched_rows across chunks; assert sum > 0 whenever at
+// least one edge was submitted" — works correctly only when the
+// consumer sums across chunks. A consumer that reads a single chunk's
+// matched_rows as authoritative will false-positive "rule silently
+// no-op'd" any time the first chunk legitimately has zero matches even
+// though later chunks have nonzero matches.
+func BuildBatchRelationshipMergeQuery(
+	fromLabel string, fromKeyNames []string,
+	relType string,
+	toLabel string, toKeyNames []string,
+	hasProps bool,
+) string {
+	var b strings.Builder
+
+	b.WriteString("UNWIND $rows AS row\n")
+	b.WriteString("MATCH (from:")
+	b.WriteString(fromLabel)
+	b.WriteString(" {")
+	for i, name := range fromKeyNames {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s: row.%s%s", name, RelFromRowPrefix, name)
+	}
+	b.WriteString("})\n")
+
+	b.WriteString("MATCH (to:")
+	b.WriteString(toLabel)
+	b.WriteString(" {")
+	for i, name := range toKeyNames {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s: row.%s%s", name, RelToRowPrefix, name)
+	}
+	fmt.Fprintf(&b, "})\nMERGE (from)-[r:%s]->(to)", relType)
+
+	if hasProps {
+		b.WriteString("\nSET r += row.rel_props")
+	}
+	b.WriteString("\nRETURN count(*) AS matched_rows")
+	return b.String()
+}

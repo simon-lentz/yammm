@@ -10,7 +10,7 @@ import (
 )
 
 func TestKey_WrapKey(t *testing.T) {
-	input := []any{"us", 12345}
+	input := []any{"us", int64(12345)}
 
 	k := WrapKey(input)
 
@@ -18,10 +18,10 @@ func TestKey_WrapKey(t *testing.T) {
 		t.Errorf("expected Len() to be 2, got %d", k.Len())
 	}
 
-	first := k.Get(0)
+	first := k.At(0)
 	wantString(t, first, "us")
 
-	second := k.Get(1)
+	second := k.At(1)
 	wantInt(t, second, 12345)
 }
 
@@ -41,7 +41,7 @@ func TestKey_WrapEmpty(t *testing.T) {
 	}
 }
 
-func TestKey_Get_Panic(t *testing.T) {
+func TestKey_At_PanicsOutOfRange(t *testing.T) {
 	k := WrapKey([]any{"a"})
 
 	defer func() {
@@ -50,7 +50,7 @@ func TestKey_Get_Panic(t *testing.T) {
 		}
 	}()
 
-	_ = k.Get(5) // Should panic
+	_ = k.At(5) // Should panic
 }
 
 func TestKey_String_CanonicalFormat(t *testing.T) {
@@ -214,34 +214,14 @@ func TestKey_WrapKey_PanicsOnUnmarshalableValue(t *testing.T) {
 	}
 }
 
-func TestKey_WrapKey_WithClone_PanicsOnUnmarshalableValue(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Error("expected panic for unmarshalable value")
-			return
-		}
-		msg, ok := r.(string)
-		if !ok {
-			t.Errorf("expected panic message to be string, got %T", r)
-			return
-		}
-		if !strings.Contains(msg, "immutable: key component is not JSON-marshalable") {
-			t.Errorf("unexpected panic message: %s", msg)
-		}
-	}()
-
-	_ = WrapKey([]any{make(chan int)}, WithClone(true))
-}
-
 func TestKey_Iter(t *testing.T) {
 	input := []any{"a", 1, true}
 
 	k := WrapKey(input)
 
 	var values []any
-	for v := range k.Iter() {
-		values = append(values, v.Unwrap())
+	for v := range k.Values() {
+		values = append(values, v.Any())
 	}
 
 	if len(values) != 3 {
@@ -282,7 +262,7 @@ func TestKey_Clone(t *testing.T) {
 	// Verify clone is independent
 	cloned[0] = "eu"
 
-	first := k.Get(0)
+	first := k.At(0)
 	wantString(t, first, "us")
 }
 
@@ -295,17 +275,16 @@ func TestKey_CloneNil(t *testing.T) {
 	}
 }
 
-func TestKey_WrapKey_WithClone_Isolation(t *testing.T) {
+func TestKey_WrapKey_CopiesItsInput(t *testing.T) {
 	input := []any{"original", 100}
 
-	k := WrapKey(input, WithClone(true))
-
-	// Mutate original
+	k := WrapKey(input)
 	input[0] = "mutated"
 
-	// Wrapped key should be isolated
-	first := k.Get(0)
-	wantString(t, first, "original")
+	wantString(t, k.At(0), "original")
+	if got := k.String(); got != `["original",100]` {
+		t.Errorf("String() = %s after the input changed, want [\"original\",100]", got)
+	}
 }
 
 func TestKey_IteratorEarlyExit(t *testing.T) {
@@ -314,7 +293,7 @@ func TestKey_IteratorEarlyExit(t *testing.T) {
 	k := WrapKey(input)
 
 	count := 0
-	for range k.Iter() {
+	for range k.Values() {
 		count++
 		if count == 2 {
 			break
@@ -332,15 +311,15 @@ func TestKey_IteratorRepeatability(t *testing.T) {
 
 	// First iteration
 	var first []string
-	for v := range k.Iter() {
-		s, _ := v.String()
+	for v := range k.Values() {
+		s, _ := v.AsString()
 		first = append(first, s)
 	}
 
 	// Second iteration
 	var second []string
-	for v := range k.Iter() {
-		s, _ := v.String()
+	for v := range k.Values() {
+		s, _ := v.AsString()
 		second = append(second, s)
 	}
 
@@ -357,10 +336,10 @@ func TestKey_NestedValues(t *testing.T) {
 
 	k := WrapKey(input)
 
-	first := k.Get(0)
-	m, ok := first.Map()
+	first := k.At(0)
+	m, ok := first.Any().(Properties)
 	if !ok {
-		t.Fatal("expected first component to be Map")
+		t.Fatalf("the first component holds %T, want Properties", first.Any())
 	}
 
 	nested, ok := m.Get("nested")
@@ -410,7 +389,7 @@ func TestKey_Iter_ZeroValue(t *testing.T) {
 	var k Key
 
 	count := 0
-	for range k.Iter() {
+	for range k.Values() {
 		count++
 	}
 

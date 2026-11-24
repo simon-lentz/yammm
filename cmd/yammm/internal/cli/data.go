@@ -1,127 +1,48 @@
 package cli
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
+	"strconv"
 
-	"github.com/simon-lentz/yammm/adapter/csv"
-	adapterjson "github.com/simon-lentz/yammm/adapter/json"
+	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/snapread"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// dataExtension is the one spelling of a data file's extension that
-// [DetectFormat] and [CSVDelimiter] both read, so a name that selects the CSV
-// format and a name that selects a tab are decided by one fold.
-func dataExtension(path string) string {
-	return strings.ToLower(filepath.Ext(path))
-}
-
-// DetectFormat returns "json" or "csv" based on the file extension.
-func DetectFormat(path string) (string, error) {
-	switch dataExtension(path) {
-	case ".json", ".jsonc":
-		return "json", nil
-	case ".csv", ".tsv":
-		return "csv", nil
-	default:
-		return "", Usagef("cannot detect data format for %q: use --from to specify json or csv", path)
-	}
-}
-
-// CSVDelimiter returns the field delimiter a CSV file's extension names: '\t'
-// for ".tsv" and ',' for every other name, the empty one included. The read
-// side and the write side both take it, so a file `export` writes under a
-// ".tsv" name is one `check` reads back.
-func CSVDelimiter(path string) rune {
-	if dataExtension(path) == ".tsv" {
-		return '\t'
-	}
-	return ','
-}
-
-// LoadAndParseJSON reads a JSON file and parses it into raw instances.
+// LoadAndParseJSON reads a JSON file and parses it into its elements.
 //
-// The identity and the host path come out of one resolution, as the schema
-// loader takes them, so a data diagnostic and a schema diagnostic name one file
-// the same way.
+// The bytes come through the path the kernel reaches for path ([ReadFile]), and
+// the identity, the one the schema loader derives, only names them, so a data
+// diagnostic and a schema diagnostic name one file the same way, and a
+// descriptor path, or a link to one, reads the file a shell reads.
 //
-// Returns (T, diag.Result, error) because the error return captures the
-// failures that stop a read — a path that names no file, one that cannot be
-// read — which are distinct from semantic parse issues reported through the
-// diag.Result. The caller refuses an empty path or one that is not valid UTF-8
-// first ([CheckSourceOperand], exit 2), so every error this returns is a path the
-// filesystem answered — one under a regular file, or one that resolves into
-// bytes that are not UTF-8, included — and exits 3. This is an internal CLI
-// helper, not a public API.
-func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.RawInstance, diag.Result, error) {
-	sourceID, hostPath, err := location.ResolveSourcePath(path)
-	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
-	}
-
-	data, err := os.ReadFile(hostPath)
+// The error return captures the failures that stop a read: a path that names no
+// file, one that cannot be read, or one the identity cannot be derived for. The
+// diag.Result carries the parse's diagnostics. The caller refuses an empty path
+// or one that is not valid UTF-8 first ([CheckSourceOperand], exit 2), so every
+// error this returns is a path the filesystem answered, and exits 3.
+func LoadAndParseJSON(ctx context.Context, path string) (map[string]jsondata.Batch, diag.Result, error) {
+	data, err := ReadFile(path)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("read data file: %w", err)
 	}
-
-	parsed, result := adapterjson.New().ParseObject(ctx, sourceID, data)
-	return parsed, result, nil
-}
-
-// LoadAndParseCSV reads a CSV file and parses it into raw instances.
-// The typeName parameter specifies the schema type for the rows.
-// If typeColumn is non-empty, it is used instead of typeName for multi-type CSVs.
-//
-// The identity and the host path come out of one resolution, as
-// [LoadAndParseJSON] takes them; the handle is opened on the path it returns.
-// The delimiter is [CSVDelimiter]'s for path as the caller spelled it, the
-// spelling [DetectFormat] reads.
-//
-// Returns (T, diag.Result, error) because the error return captures I/O
-// failures (file open errors) which are distinct from semantic parse
-// issues reported through the diag.Result.
-func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *schema.Schema) (map[string][]instance.RawInstance, diag.Result, error) {
-	sourceID, hostPath, err := location.ResolveSourcePath(path)
+	sourceID, err := location.SourceIDFromPath(path)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
 	}
-
-	f, err := os.Open(hostPath)
-	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("open data file: %w", err)
-	}
-	defer f.Close()
-
-	if typeColumn != "" {
-		adapter := csv.New(csv.WithTypeColumn(typeColumn), csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path)))
-		parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, f, func(name string) *schema.Type {
-			t, _ := s.ResolveTypeName(name)
-			return t
-		})
-		return parsed, result, nil
-	}
-
-	// An unknown type is the caller's mistake, refused here rather than parsed
-	// uncoerced and refused row by row downstream.
-	schemaType, ok := s.ResolveTypeName(typeName)
-	if !ok {
-		return nil, diag.Result{}, Usagef("type %q not found in schema", typeName)
-	}
-	raws, result := csv.New(csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path))).ParseTyped(ctx, sourceID, typeName, f, schemaType)
-	return map[string][]instance.RawInstance{typeName: raws}, result, nil
+	parsed, result := jsondata.Parse(ctx, sourceID, data)
+	return parsed, result, nil
 }
 
 // Validated is a document's instances after validation, in the order they
@@ -133,34 +54,90 @@ type Validated struct {
 }
 
 // validatedBatch is one type name's instances and the validator's answer for
-// each: valids holds one entry per raw, nil where the validator refused it, and
+// each: valids holds one entry per raw, zero where the validator refused it, and
 // is nil when the batch was refused whole or did not complete.
 type validatedBatch struct {
 	typeName string
 	raws     []instance.RawInstance
-	valids   []*instance.ValidInstance
+	valids   []instance.ValidInstance
 }
 
-// ValidateInstances validates parsed instances against the schema and returns
-// them with the merged diagnostics.
-func ValidateInstances(ctx context.Context, s *schema.Schema, parsed map[string][]instance.RawInstance) (Validated, diag.Result) {
+// ValidateInstances validates parsed elements against the schema and returns
+// them with the merged diagnostics. An element the parser refused is not
+// validated, and its entry is zero, as a refused instance's is. A diagnostic's
+// instance index names its element among the type's elements, refused or not,
+// and a diagnostic that names no element stands at the root of the batch's source.
+func ValidateInstances(ctx context.Context, s schema.Schema, parsed map[string]jsondata.Batch) (Validated, diag.Result) {
 	doc := Validated{validator: instance.NewValidator(s)}
-	collector := diag.NewCollectorUnlimited()
+	collector := diag.NewCollector(diag.NoLimit)
 	for _, typeName := range slices.Sorted(maps.Keys(parsed)) {
-		raws := parsed[typeName]
-		valids, result := doc.validator.Validate(ctx, typeName, raws)
-		collector.Merge(result)
+		elements := parsed[typeName].Elements
+		raws := make([]instance.RawInstance, len(elements))
+		judged := []instance.RawInstance{}
+		var at []int // at[j] is the index in elements of judged[j]
+		for i, e := range elements {
+			raws[i] = e.RawInstance
+			if !e.Refused {
+				judged = append(judged, e.RawInstance)
+				at = append(at, i)
+			}
+		}
+		judgedValids, err := doc.validator.Validate(ctx, typeName, judged)
+		var valids []instance.ValidInstance
+		if judgedValids != nil {
+			valids = make([]instance.ValidInstance, len(elements))
+			for j, valid := range judgedValids {
+				valids[at[j]] = valid
+			}
+		}
+		collector.MergeFunc(FailureIssues(err), anchorIssue(parsed[typeName].Source, at))
 		doc.batches = append(doc.batches, validatedBatch{typeName: typeName, raws: raws, valids: valids})
 	}
 	return doc, collector.Result()
 }
 
+// anchorIssue returns the transform that places an issue about the type name,
+// one that names no element, at the root of source, and rewrites an element's
+// instance index j, an index into the batch the validator judged, as at[j]. The
+// validator anchors a type issue at the first element it judged, which names no
+// file when it judged none and a later file than source when the first stated none.
+func anchorIssue(source location.SourceID, at []int) func(diag.Issue) diag.Issue {
+	return func(issue diag.Issue) diag.Issue {
+		details := issue.Details()
+		indexed := false
+		changed := false
+		for k, d := range details {
+			if d.Key != diag.DetailKeyInstanceIndex {
+				continue
+			}
+			indexed = true
+			if j, err := strconv.Atoi(d.Value); err == nil && j >= 0 && j < len(at) && at[j] != j {
+				details[k].Value = strconv.Itoa(at[j])
+				changed = true
+			}
+		}
+		switch {
+		case !indexed:
+			return diag.FromIssue(issue).WithSpan(location.Span{}).WithPath(source.String(), path.Root.String()).Build()
+		case !changed:
+			return issue
+		}
+		return diag.NewIssue(issue.Severity(), issue.Code(), issue.Message()).
+			WithSpan(issue.Span()).
+			WithPath(issue.SourceName(), issue.Path()).
+			WithHint(issue.Hint()).
+			WithRelated(issue.Related()...).
+			WithDetails(details...).
+			Build()
+	}
+}
+
 // Valids returns the instances the validator accepted, in validation order.
-func (d Validated) Valids() []*instance.ValidInstance {
-	var out []*instance.ValidInstance
+func (d Validated) Valids() []instance.ValidInstance {
+	var out []instance.ValidInstance
 	for _, b := range d.batches {
 		for _, valid := range b.valids {
-			if valid != nil {
+			if !valid.IsZero() {
 				out = append(out, valid)
 			}
 		}
@@ -171,27 +148,32 @@ func (d Validated) Valids() []*instance.ValidInstance {
 // BuildGraph adds the document's valid instances to base, or to a new graph
 // when base is nil, runs the graph-level checks, and returns the graph with a
 // verdict about the document (see [documentVerdict]).
-func BuildGraph(ctx context.Context, s *schema.Schema, base *graph.Graph, doc Validated) (*graph.Graph, diag.Result) {
+func BuildGraph(ctx context.Context, s schema.Schema, base *graph.Graph, doc Validated) (*graph.Graph, diag.Result) {
 	g := base
 	if g == nil {
 		g = graph.New(s)
 	}
-	collector := diag.NewCollectorUnlimited()
+	collector := diag.NewCollector(diag.NoLimit)
 	valids := doc.Valids()
-	added := make(map[*instance.ValidInstance]diag.Result, len(valids))
+	added := make(map[instance.ValidInstance]error, len(valids))
 	refusals := false
 	for _, valid := range valids {
-		result := g.Add(ctx, valid)
-		collector.Merge(result)
-		added[valid] = result
-		refusals = refusals || result.HasErrors()
+		err := g.Add(ctx, valid)
+		added[valid] = err
+		refusals = refusals || err != nil
 	}
-	check := g.Check(ctx)
+	check := FailureIssues(g.Check(ctx))
+	var dv verdict
 	if ctx.Err() == nil && (refusals || len(valids) < doc.rootCount()) {
-		verdict := documentVerdict(s, g, base != nil, doc, added)
-		check = verdict.explain(check)
-		collector.Merge(verdict.duplicates)
+		dv = documentVerdict(s, g, base != nil, doc, added)
+		check = dv.explain(check)
 	}
+	for _, valid := range valids {
+		if !dv.renamed[valid] {
+			collector.Merge(FailureIssues(added[valid]))
+		}
+	}
+	collector.Merge(dv.duplicates)
 	collector.Merge(check)
 	return g, collector.Result()
 }
@@ -205,9 +187,22 @@ func (d Validated) rootCount() int {
 	return n
 }
 
+// FailureIssues returns the failures err holds as one result, the empty result
+// for a nil err. An err that holds no [diag.ResultError] breaks its call's
+// contract and reads as one Fatal E_INTERNAL.
+func FailureIssues(err error) diag.Result {
+	c := diag.NewCollector(diag.NoLimit)
+	if re, ok := errors.AsType[*diag.ResultError](err); ok {
+		c.Merge(re.Result)
+	} else if err != nil {
+		c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, err.Error()).Build())
+	}
+	return c.Result()
+}
+
 // MergeResults merges multiple diagnostic results into one.
 func MergeResults(results ...diag.Result) diag.Result {
-	collector := diag.NewCollectorUnlimited()
+	collector := diag.NewCollector(diag.NoLimit)
 	for _, r := range results {
 		collector.Merge(r)
 	}
@@ -223,59 +218,22 @@ func WriteTo(data []byte, path string, w io.Writer) error {
 	return err
 }
 
-// IsSnapshotFile reports whether the file at path is a yammm snapshot (.ys)
-// file using content-based detection. It reads the first bytes and checks
-// for the {"yammm_snapshot": prefix.
-//
-// Returns (false, nil) for non-snapshot files (including non-JSON files).
-// Returns (false, err) only for genuine I/O errors.
-func IsSnapshotFile(path string) (bool, error) {
-	f, err := Open(path)
-	if err != nil {
-		return false, fmt.Errorf("open file: %w", err)
-	}
-	defer f.Close()
-
-	dec := json.NewDecoder(io.LimitReader(f, 512))
-
-	// First token must be '{'.
-	tok, err := dec.Token()
-	if err != nil {
-		return false, nil // not valid JSON — not a snapshot
-	}
-	delim, ok := tok.(json.Delim)
-	if !ok || delim != '{' {
-		return false, nil
-	}
-
-	// Second token must be the string "yammm_snapshot".
-	tok, err = dec.Token()
-	if err != nil {
-		return false, nil
-	}
-	key, ok := tok.(string)
-	if !ok {
-		return false, nil
-	}
-	return key == "yammm_snapshot", nil
-}
-
-// LoadSnapshotFile reads a .ys file and loads it into a [*graph.Snapshot],
+// LoadSnapshotFile reads a .ys file and loads it into a [graph.Snapshot],
 // beside the header that document carries.
 //
 // The header comes back because [graph.Snapshot] exposes no metadata or
 // created_at accessor, so a caller re-marshaling what it read has no other
-// route to it; it is nil when the header cannot be parsed. Returns
-// (T, diag.Result, error) following the CLI helper convention: error captures
-// I/O failures, diag.Result captures semantic issues.
-func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts ...snapshot.LoadOption) (*graph.Snapshot, *snapshot.HeaderInfo, diag.Result, error) {
+// route to it. It is the header the load accepted, whatever its size, and nil
+// when the error is not. A document the load refuses returns a
+// *[diag.ResultError]; any other error is an I/O failure.
+func LoadSnapshotFile(ctx context.Context, path string, s schema.Schema) (graph.Snapshot, *snapshot.Header, error) {
 	data, err := ReadFile(path)
 	if err != nil {
-		return nil, nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
+		return graph.Snapshot{}, nil, fmt.Errorf("read snapshot file: %w", err)
 	}
-	snap, result := snapshot.Load(ctx, data, s, opts...)
-	// Load has checked the whole document and reported its issues, so the header
-	// is read at header cost and its diagnostics are dropped, not reported twice.
-	header, _ := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
-	return snap, header, result, nil
+	snap, header, err := snapread.UnmarshalWithHeader(ctx, data, s)
+	if err != nil {
+		return graph.Snapshot{}, nil, err
+	}
+	return snap, header.(*snapshot.Header), nil
 }

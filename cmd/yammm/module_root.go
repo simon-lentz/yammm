@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/internal/hostpath"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -19,15 +20,15 @@ func registerModuleRootFlag(cmd *cobra.Command) {
 }
 
 // moduleRootOptions returns --module-root as an absolute root and the load
-// options for it, including the sink's source capture so a failed load renders
-// its excerpt. An unset flag yields "" and no root option, so the loader
-// discovers the root; a given root is judged as a path operand is, and a
-// working directory that cannot be read is a filesystem answer.
-func moduleRootOptions(cmd *cobra.Command, sink *cli.DiagnosticSink) (string, []schema.LoadOption, error) {
+// options for it, among them the sink's, which keep the load's sources and its
+// warnings for [cli.DiagnosticSink.AddSchemaLoad]. An unset flag yields "" and
+// no root option, so the loader discovers the root; a given root is judged as
+// a path operand is, and a working directory that cannot be read is a
+// filesystem answer.
+func moduleRootOptions(cmd *cobra.Command, sink *cli.DiagnosticSink) (string, []schema.Option, error) {
 	root, _ := cmd.Flags().GetString("module-root")
-	capture := sink.CaptureSchemaSources()
 	if !cmd.Flags().Changed("module-root") {
-		return "", []schema.LoadOption{capture}, nil
+		return "", sink.SchemaLoadOptions(), nil
 	}
 	if err := cli.CheckSourceOperand("module root", root); err != nil {
 		return "", nil, err
@@ -36,12 +37,13 @@ func moduleRootOptions(cmd *cobra.Command, sink *cli.DiagnosticSink) (string, []
 	if err != nil {
 		return "", nil, cli.Runtimef("resolve module root %q: %v", root, err)
 	}
-	return abs, []schema.LoadOption{schema.WithModuleRoot(abs), capture}, nil
+	return abs, append(sink.SchemaLoadOptions(), schema.WithModuleRoot(abs)), nil
 }
 
 // schemaOperand returns the absolute path of a schema operand, refusing one
 // [cli.CheckSourceOperand] refuses. A working directory that cannot be read is a
-// filesystem answer, so it exits 3.
+// filesystem answer, so it exits 3. An operand that names a directory keeps a
+// trailing separator, so the loader refuses a regular file spelled that way.
 func schemaOperand(path string) (string, error) {
 	if err := cli.CheckSourceOperand("schema file", path); err != nil {
 		return "", err
@@ -50,5 +52,5 @@ func schemaOperand(path string) (string, error) {
 	if err != nil {
 		return "", cli.Runtimef("resolve schema file %q: %v", path, err)
 	}
-	return abs, nil
+	return hostpath.DirectoryForm(path, abs), nil
 }

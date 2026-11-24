@@ -2,6 +2,7 @@ package schema_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -15,10 +16,10 @@ import (
 // unresolvable qualified relation target is already handled. Silently dropping it would
 // strip the child of every inherited member with no diagnostic.
 func TestLoad_QualifiedExtends_UndefinedAlias_Errors(t *testing.T) {
-	_, res := schema.LoadString(context.Background(),
+	_, err := schema.LoadString(context.Background(),
 		"schema \"geo\"\n\ntype Doc extends nope.Base {\n\tid String primary\n}\n", "doc.yammm")
-	if !res.HasErrors() || !res.HasCode(diag.E_UNKNOWN_TYPE) {
-		t.Fatalf("expected E_UNKNOWN_TYPE for an extends clause with an undefined qualifier; got: %v", res.Err())
+	if err == nil || !errors.Is(err, diag.E_UNKNOWN_TYPE) {
+		t.Fatalf("expected E_UNKNOWN_TYPE for an extends clause with an undefined qualifier; got: %v", err)
 	}
 }
 
@@ -29,9 +30,9 @@ func TestLoad_QualifiedExtends_MissingType_Errors(t *testing.T) {
 		"main.yammm": []byte("schema \"main\"\n\nimport \"base.yammm\" as base\n\ntype Doc extends base.Missing {\n\tid String primary\n}\n"),
 		"base.yammm": []byte("schema \"base\"\n\nabstract type Entity {\n\tid String primary\n}\n"),
 	}
-	_, res := schema.LoadSourcesWithEntry(context.Background(), sources, "main.yammm", ".")
-	if !res.HasErrors() || !res.HasCode(diag.E_UNKNOWN_TYPE) {
-		t.Fatalf("expected E_UNKNOWN_TYPE for an extends clause referencing a missing imported type; got: %v", res.Err())
+	_, err := schema.LoadSourcesWithEntry(context.Background(), sources, "main.yammm", schema.WithModuleRoot("."))
+	if err == nil || !errors.Is(err, diag.E_UNKNOWN_TYPE) {
+		t.Fatalf("expected E_UNKNOWN_TYPE for an extends clause referencing a missing imported type; got: %v", err)
 	}
 }
 
@@ -43,8 +44,8 @@ func TestLoad_QualifiedExtends_Resolvable_OK(t *testing.T) {
 		"main.yammm": []byte("schema \"main\"\n\nimport \"base.yammm\" as base\n\ntype Doc extends base.Entity {\n\ttitle String required\n}\n"),
 		"base.yammm": []byte("schema \"base\"\n\nabstract type Entity {\n\tid String primary\n}\n"),
 	}
-	_, res := schema.LoadSourcesWithEntry(context.Background(), sources, "main.yammm", ".")
-	if res.HasErrors() {
-		t.Fatalf("a resolvable qualified extends must load cleanly; got: %v", res.Err())
+	_, err := schema.LoadSourcesWithEntry(context.Background(), sources, "main.yammm", schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("a resolvable qualified extends must load cleanly; got: %v", err)
 	}
 }

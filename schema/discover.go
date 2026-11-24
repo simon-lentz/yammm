@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/simon-lentz/yammm/internal/hostpath"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // ModuleRootMarker is the file name that marks a directory as a module root.
@@ -58,20 +59,22 @@ func (e *MalformedModuleRootError) Error() string {
 // FindModuleRoot walks from dir to the filesystem root looking for a
 // [ModuleRootMarker] file. It returns the canonical directory holding the
 // nearest one and true; "" and false when no ancestor holds one; and an error
-// when a marker exists but is malformed or cannot be read.
+// when the resolver refuses dir, when a marker exists but is malformed or
+// cannot be read, and when a look for a marker fails other than as absent.
 //
 // A miss returns "" rather than dir so a caller can insert its own tier
 // between discovery and its default — the editor's workspace folder does
 // exactly that. dir must be a directory: pass filepath.Dir of a file path.
 //
-// The walk runs on the chain [location.ResolveHostPath] answers with, so a
+// The walk runs on the chain [location.SourceIDFromPath] resolves, so a
 // marker reachable only through a symlinked spelling is normally not
-// consulted. A path the resolver refuses is an error; a directory the process
-// cannot traverse is kept as typed, as the resolver keeps it. Discovery itself
+// consulted. A path the resolver refuses is an error. A directory the process
+// cannot traverse is kept as typed, as the resolver keeps it, and the look for
+// a marker beneath it then fails with the permission error. Discovery itself
 // is not sandboxed and cannot be: it runs before any root exists, and costs one
 // os.Lstat per ancestor level.
 func FindModuleRoot(dir string) (string, bool, error) {
-	canonical, err := location.ResolveHostPath(dir)
+	canonical, err := hostpath.Resolve(dir)
 	if err != nil {
 		return "", false, fmt.Errorf("canonicalize %q: %w", dir, err)
 	}
@@ -204,7 +207,8 @@ func checkMarkerContent(path string, content []byte) error {
 // A [MalformedModuleRootError] becomes an Error-severity
 // E_LOAD_MODULE_ROOT_MALFORMED carrying the marker's directory and the origin
 // "discovered"; any other error becomes a Fatal E_LOAD_IO_FAILURE, the shape
-// every other I/O failure in the loader takes. The issue carries no span: the
+// of the loader's other fatal I/O failures (a failed import read is an
+// Error-severity issue instead). The issue carries no span: the
 // source registry holds .yammm sources only.
 //
 // Exported because the editor reports the same failure without going through

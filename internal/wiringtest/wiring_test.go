@@ -73,6 +73,7 @@ type job struct {
 	Env      map[string]string `yaml:"env"`
 	Defaults runDefaults       `yaml:"defaults"`
 	Steps    []step            `yaml:"steps"`
+	Secrets  any               `yaml:"secrets"`
 	// keys holds every key the job's mapping sets, those no field names too.
 	keys []string
 	// runnerGroup is the group a mapping runs-on names, which RunsOn drops.
@@ -872,7 +873,7 @@ func TestGateFindings_RefusesEachWeakening(t *testing.T) {
 var knownEnv = map[string][]string{
 	"workflow": nil,
 	"job":      {"GOEXPERIMENT"},
-	"step":     {"TEST_DURATIONS", "YAMMM_NEO4J_TEST_IMAGE"},
+	"step":     {"TEST_DURATIONS", "YAMMM_GOLANGCI_LINT", "YAMMM_NEO4J_TEST_IMAGE"},
 }
 
 // runFindings reports what can run a step's script other than as written: a
@@ -967,7 +968,7 @@ func TestRunFindings_RefusesEachChange(t *testing.T) {
 		{"a Windows host job with no bash default", []string{"jobs.test can run on windows-2025 with no bash default, so its steps run under pwsh"}, edit("test", 0, func(j *job, _ *step) { j.Defaults = runDefaults{} })},
 		{"a job env that runs no test", []string{"jobs.jsonv2's env sets GOFLAGS, which knownEnv does not name"}, edit("jsonv2", 0, func(j *job, _ *step) { j.Env["GOFLAGS"] = "-run=^$" })},
 		{"a job env that sources a file", []string{"jobs.test's env sets BASH_ENV"}, edit("test", 0, func(j *job, _ *step) { j.Env = map[string]string{"BASH_ENV": "scripts/clear.sh"} })},
-		{"a step env that runs no test", []string{"jobs.test step 7 (Test)'s env sets GOFLAGS"}, edit("test", 6, func(_ *job, s *step) { s.Env["GOFLAGS"] = "-run=^$" })},
+		{"a step env that runs no test", []string{"jobs.test step 8 (Test)'s env sets GOFLAGS"}, edit("test", 7, func(_ *job, s *step) { s.Env["GOFLAGS"] = "-run=^$" })},
 		{"a workflow env", []string{"the workflow's env sets GOTOOLCHAIN"}, func(wf *workflow) { wf.Env = map[string]string{"GOTOOLCHAIN": "go1.27.1"} }},
 		{"a write to GITHUB_ENV", []string{"jobs.jsonv2 step 1 (Checkout) writes GITHUB_ENV"}, edit("jsonv2", 0, func(_ *job, s *step) { s.Run = `echo "GOEXPERI""MENT=" >> "$GITHUB_ENV"` })},
 		{"a job in a container", []string{"jobs.jsonv2 runs in a container"}, edit("jsonv2", 0, func(j *job, _ *step) { j.keys = append(j.keys, "container") })},
@@ -1195,7 +1196,7 @@ func TestExperimentSettings_ReadEachConstraint(t *testing.T) {
 func TestExperimentFindings_RefusesEachBrokenLink(t *testing.T) {
 	t.Parallel()
 	const after = "${{ !cancelled() }}"
-	files := []string{"adapter/json/nesting_jsonv2.go"}
+	files := []string{"cmd/yammm/internal/jsondata/nesting_jsonv2.go"}
 	needs := map[string][]string{"jsonv2": files}
 	// with returns a workflow of a host's test job and a jsonv2 job, edited.
 	with := func(edit func(j, test *job)) workflow {
@@ -1218,7 +1219,7 @@ func TestExperimentFindings_RefusesEachBrokenLink(t *testing.T) {
 	if f := experimentFindings(with(nil), needs); len(f) != 0 {
 		t.Fatalf("a whole job reports %q", f)
 	}
-	unbuilt := "no job sets GOEXPERIMENT=jsonv2, so no job builds what adapter/json/nesting_jsonv2.go select under it"
+	unbuilt := "no job sets GOEXPERIMENT=jsonv2, so no job builds what cmd/yammm/internal/jsondata/nesting_jsonv2.go select under it"
 	for _, tt := range []struct {
 		name  string
 		want  []string // a part of each finding, in order
@@ -1305,10 +1306,10 @@ func TestVetCommands_OnePerConfiguration(t *testing.T) {
 }
 
 // Every target scripts/vet.sh lists is vetted, in a job of its own. On a
-// Linux host scripts/vet.sh makes twelve vet runs over eleven targets where
-// --host makes two over one, which took the Vet step of a host job 255 to
-// 382 s against the other hosts' under 30 s and made that job the longest of
-// the workflow in two of three measured runs. One job runs it, because a
+// Linux host scripts/vet.sh makes fifteen vet runs over fourteen targets where
+// --host makes two over one; at twelve over eleven they took the Vet step of a
+// host job 255 to 382 s against the other hosts' under 30 s and made that job
+// the longest of the workflow in two of three measured runs. One job runs it, because a
 // second would pay the cost twice, and the release calls this workflow whole,
 // so a tag still waits for it.
 func TestTestWorkflow_VetsEveryTargetInAJobOfItsOwn(t *testing.T) {
@@ -1333,13 +1334,15 @@ func TestTestWorkflow_VetsEveryTargetInAJobOfItsOwn(t *testing.T) {
 // jobMargins holds, per job of the test workflow, how far every go test
 // timeout the job runs must stay below the job's own timeout: at least as long
 // as the job takes to start its last test binary, so a hung binary prints its
-// stack before the job is killed. Measured on CI, a test job ended at most
-// 795 s in, with no cache entry to restore, and the integration job's test
+// stack before the job is killed. Measured on CI with no cache entry to
+// restore, a passing test job ended at most 862 s in, one that built the pinned
+// linter for 103 s before its tests ended 859 s in, and one whose two packages
+// ran to their -timeout ended 1,000 s in; the integration job's test
 // step started at most 23 s in. The mermaid job's test binary starts after npm
 // ci, which took 37 s from an empty npm cache, and a build, which took under
 // 6 s with a cold build cache. Each margin adds headroom to its measurement.
 var jobMargins = map[string]time.Duration{
-	"test":        15 * time.Minute,
+	"test":        20 * time.Minute,
 	"integration": 5 * time.Minute,
 	"mermaid":     5 * time.Minute,
 	// It lints and vets before its suite: with no cache entry a Linux check
@@ -1829,8 +1832,12 @@ func TestTestWorkflow_EveryJobTimesOutAfterItsTests(t *testing.T) {
 	}
 }
 
-// mermaidPkgDir is the npm package the mermaid job installs.
-const mermaidPkgDir = "adapter/markdown/testdata/mermaid"
+// mermaidPkg is the Go package the mermaid job tests, and mermaidPkgDir the
+// npm package it installs, which that package's mermaid-tagged test reads.
+const (
+	mermaidPkg    = "schema/markdown"
+	mermaidPkgDir = mermaidPkg + "/testdata/mermaid"
+)
 
 // mermaidInstall is the mermaid job's install command. npm ci runs a package's
 // lifecycle scripts, which could write GITHUB_ENV, unless told not to; the
@@ -1851,7 +1858,7 @@ var mermaidActions = map[string]map[string]string{
 }
 
 // mermaidJobFindings reports each link of the mermaid job's chain that does
-// not hold: mermaidInstall installs the lock-filed package; adapter/markdown
+// not hold: mermaidInstall installs the lock-filed package; schema/markdown
 // holds a test the mermaid build tag admits on the job's runner, and none that
 // needs the tag and the runner does not build (tagged and unbuilt, from
 // taggedTestFiles); one step runs every test of the package under that tag; the
@@ -1901,7 +1908,7 @@ func mermaidJobFindings(wf workflow, tagged, unbuilt, lintTags []string, gitigno
 		findings = append(findings, "no step of jobs.mermaid runs "+mermaidInstall+" in "+mermaidPkgDir)
 	}
 	if len(tagged) == 0 {
-		findings = append(findings, "adapter/markdown declares no test behind the mermaid build tag that the job's runner builds")
+		findings = append(findings, mermaidPkg+" declares no test behind the mermaid build tag that the job's runner builds")
 	}
 	for _, name := range unbuilt {
 		findings = append(findings, name+" declares a test behind the mermaid build tag that the job's runner does not build")
@@ -2010,10 +2017,10 @@ var mermaidGoTestFlags = map[string]bool{"count": true, "tags": true, "timeout":
 var unplainChar = regexp.MustCompile(`[^A-Za-z0-9 \t._/=,-]`)
 
 // mermaidStepFindings holds the mermaid job's go test step to the one form that
-// runs every test of adapter/markdown under the mermaid tag: a run of one line
+// runs every test of schema/markdown under the mermaid tag: a run of one line
 // of plain text, so no comment, continuation or second line reaches bash; go
 // test first; only mermaidGoTestFlags, with -count present and positive, -tags
-// mermaid alone and -v true; the one package ./adapter/markdown/; and no step
+// mermaid alone and -v true; the one package ./schema/markdown/; and no step
 // key beyond name, run and timeout-minutes.
 func mermaidStepFindings(s step) []string {
 	findings := stepKeyFindings("the go test step", s, "name", "run", "timeout-minutes")
@@ -2071,8 +2078,8 @@ func mermaidStepFindings(s step) []string {
 	if tags != "mermaid" {
 		findings = append(findings, fmt.Sprintf("the go test step's -tags is %q, want mermaid alone, the tag the check builds with", tags))
 	}
-	if len(pkgs) != 1 || (pkgs[0] != "./adapter/markdown/" && pkgs[0] != "./adapter/markdown") {
-		findings = append(findings, fmt.Sprintf("the go test step runs %q, want the one package ./adapter/markdown/", pkgs))
+	if len(pkgs) != 1 || (pkgs[0] != "./"+mermaidPkg+"/" && pkgs[0] != "./"+mermaidPkg) {
+		findings = append(findings, fmt.Sprintf("the go test step runs %q, want the one package ./%s/", pkgs, mermaidPkg))
 	}
 	return findings
 }
@@ -2134,7 +2141,7 @@ func runnerBuild(t *testing.T) build.Context {
 	return ctx
 }
 
-// taggedTestFiles reads srcs, adapter/markdown's test files by name, in the
+// taggedTestFiles reads srcs, schema/markdown's test files by name, in the
 // runner's build context. tagged holds each file that declares a test and that
 // runner compiles with the mermaid tag and not without it. unbuilt holds each
 // file that declares a test, whose build constraint needs the tag, and that
@@ -2301,13 +2308,13 @@ func isGoTestFunc(fn *ast.FuncDecl) bool {
 	return false
 }
 
-// The mermaid job parses adapter/markdown's diagrams with real Mermaid only
+// The mermaid job parses schema/markdown's diagrams with real Mermaid only
 // when every link of its chain holds.
 func TestTestWorkflow_TheMermaidJobParsesTheDiagrams(t *testing.T) {
 	t.Parallel()
 	var wf workflow
 	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
-	names, err := filepath.Glob(fromRoot("adapter/markdown/*_test.go"))
+	names, err := filepath.Glob(fromRoot(mermaidPkg + "/*_test.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2336,6 +2343,12 @@ func TestTestWorkflow_TheMermaidJobParsesTheDiagrams(t *testing.T) {
 	for _, f := range mermaidJobFindings(wf, tagged, unbuilt, lint.Run.BuildTags, string(ignore)) {
 		t.Error(f)
 	}
+	// The job's install step runs npm ci in mermaidPkgDir, which needs the
+	// lock-filed package there; the workflow check compares spellings alone.
+	lockFiled := func(rel string) bool { return rel == "package.json" || rel == "package-lock.json" }
+	if got := trackedFiles(t, fromRoot(mermaidPkgDir), lockFiled); len(got) != 2 {
+		t.Errorf("%s tracks %q, want package.json and package-lock.json, which the mermaid job's %s installs", mermaidPkgDir, got, mermaidInstall)
+	}
 }
 
 // The check itself: each form it refuses draws one finding naming the break,
@@ -2343,7 +2356,7 @@ func TestTestWorkflow_TheMermaidJobParsesTheDiagrams(t *testing.T) {
 func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 	t.Parallel()
 	const (
-		run    = "go test -count=1 -tags mermaid -timeout 5m -v ./adapter/markdown/"
+		run    = "go test -count=1 -tags mermaid -timeout 5m -v ./schema/markdown/"
 		ignore = "x\n" + mermaidPkgDir + "/node_modules/\n"
 		// The job's steps by index.
 		checkout, setupGo, npm, goTest = 0, 1, 3, 4
@@ -2376,8 +2389,8 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		tagged []string
 	}{
 		"the known form":           {good, tagged},
-		"flags as -f=v and --f":    {withRun("go test --count=2 -tags=mermaid --timeout=5m -v=true ./adapter/markdown"), tagged},
-		"the last -tags applies":   {withRun("go test -count=1 -tags x -tags mermaid ./adapter/markdown/"), tagged},
+		"flags as -f=v and --f":    {withRun("go test --count=2 -tags=mermaid --timeout=5m -v=true ./schema/markdown"), tagged},
+		"the last -tags applies":   {withRun("go test -count=1 -tags x -tags mermaid ./schema/markdown/"), tagged},
 		"a block scalar's newline": {withRun(run + "\n"), tagged},
 		"a step timeout":           {wfOf(func(_ *workflow, _ *job, s *step) { s.TimeoutMinutes = 5 }), tagged},
 		"setup-go without inputs":  {wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[setupGo].With = nil }), tagged},
@@ -2395,15 +2408,15 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 	}{
 		{"no job", "is not set", workflow{Jobs: map[string]job{}}, tagged, []string{"mermaid"}, ignore},
 		{"no npm ci", "no step of jobs.mermaid runs npm ci", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps = slices.Delete(j.Steps, npm, npm+1) }), tagged, []string{"mermaid"}, ignore},
-		{"npm ci elsewhere", "the install step runs in", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[npm].WorkDir = "adapter/markdown" }), tagged, []string{"mermaid"}, ignore},
+		{"npm ci elsewhere", "the install step runs in", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[npm].WorkDir = "schema/markdown" }), tagged, []string{"mermaid"}, ignore},
 		{"npm ci running scripts", `runs "npm ci", want`, wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[npm].Run = "npm ci" }), tagged, []string{"mermaid"}, ignore},
 		{"an env on npm ci", "the install step sets env", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[npm].Env = map[string]string{"X": "1"} }), tagged, []string{"mermaid"}, ignore},
 		{"no go test step", "in 0 steps", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps = j.Steps[:goTest] }), tagged, []string{"mermaid"}, ignore},
 		{"two go test steps", "in 2 steps", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps = append(j.Steps, step{Run: run}) }), tagged, []string{"mermaid"}, ignore},
 		{"no tag", `-tags is ""`, withRun(strings.Replace(run, "-tags mermaid ", "", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a tag beside mermaid", `-tags is "mermaid,x"`, withRun(strings.Replace(run, "-tags mermaid", "-tags mermaid,x", 1)), tagged, []string{"mermaid"}, ignore},
-		{"another package", "want the one package", withRun(strings.Replace(run, "./adapter/markdown/", "./...", 1)), tagged, []string{"mermaid"}, ignore},
-		{"a second package", "want the one package", withRun(run + " ./adapter/json/"), tagged, []string{"mermaid"}, ignore},
+		{"another package", "want the one package ./schema/markdown/", withRun(strings.Replace(run, "./schema/markdown/", "./...", 1)), tagged, []string{"mermaid"}, ignore},
+		{"a second package", "want the one package ./schema/markdown/", withRun(run + " ./cmd/yammm/internal/jsondata/"), tagged, []string{"mermaid"}, ignore},
 		{"a -run", "passes -run", withRun(strings.Replace(run, " ./", " -run TestA ./", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a -skip", "passes -skip", withRun(strings.Replace(run, " ./", " -skip=TestA ./", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a -test.run", "passes -test.run", withRun(strings.Replace(run, " ./", " -test.run=TestA ./", 1)), tagged, []string{"mermaid"}, ignore},
@@ -2412,12 +2425,12 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"-count=0", "runs no test", withRun(strings.Replace(run, "-count=1", "-count=0", 1)), tagged, []string{"mermaid"}, ignore},
 		{"-v=false", "passes -v=false", withRun(strings.Replace(run, "-v ", "-v=false ", 1)), tagged, []string{"mermaid"}, ignore},
 		{"an -exec", "passes -exec=true", withRun(strings.Replace(run, " ./", " -exec=true ./", 1)), tagged, []string{"mermaid"}, ignore},
-		{"a -coverpkg decoy", "passes -coverpkg", withRun("go test -count=1 -tags mermaid -coverpkg ./adapter/markdown/ ./adapter/json/"), tagged, []string{"mermaid"}, ignore},
+		{"a -coverpkg decoy", "passes -coverpkg", withRun("go test -count=1 -tags mermaid -coverpkg ./schema/markdown/ ./cmd/yammm/internal/jsondata/"), tagged, []string{"mermaid"}, ignore},
 		{"go test not first", "does not start with go test", withRun("echo " + run), tagged, []string{"mermaid"}, ignore},
 		{"another go", "does not start with go test", withRun("./" + run), tagged, []string{"mermaid"}, ignore},
 		{"a second command line", "more than one line", withRun(run + "\necho done"), tagged, []string{"mermaid"}, ignore},
 		{"a comment line", "more than one line", withRun("# every test\n" + run), tagged, []string{"mermaid"}, ignore},
-		{"a continued line", "more than one line", withRun("go test -count=1 \\\n  -tags mermaid -v ./adapter/markdown/"), tagged, []string{"mermaid"}, ignore},
+		{"a continued line", "more than one line", withRun("go test -count=1 \\\n  -tags mermaid -v ./schema/markdown/"), tagged, []string{"mermaid"}, ignore},
 		{"a comment", `holds '#'`, withRun(run + " # every test"), tagged, []string{"mermaid"}, ignore},
 		{"a trailing backslash", `holds '\\'`, withRun(run + " \\"), tagged, []string{"mermaid"}, ignore},
 		{"a form feed", `holds '\f'`, withRun("\f" + run), tagged, []string{"mermaid"}, ignore},
@@ -2430,7 +2443,7 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"a second command on the line", `holds ';'`, withRun(strings.Replace(run, "-timeout 5m", "-timeout=5m;true", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a quoted word", `holds '\''`, withRun(strings.Replace(run, "-tags mermaid", "-tags 'mermaid'", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a GitHub expression", `holds '$'`, withRun(strings.Replace(run, "-tags mermaid", "-tags ${{ env.TAGS }}", 1)), tagged, []string{"mermaid"}, ignore},
-		{"a glob", `holds '*'`, withRun(strings.Replace(run, "./adapter/markdown/", "./adapter/mark*/", 1)), tagged, []string{"mermaid"}, ignore},
+		{"a glob", `holds '*'`, withRun(strings.Replace(run, "./schema/markdown/", "./schema/mark*/", 1)), tagged, []string{"mermaid"}, ignore},
 		{"an env on the step", "the go test step sets env", wfOf(func(_ *workflow, _ *job, s *step) { s.Env = map[string]string{"GOENV": "/tmp/go.env"} }), tagged, []string{"mermaid"}, ignore},
 		{"an env on the job", "jobs.mermaid sets env", wfOf(func(_ *workflow, j *job, _ *step) { j.Env = map[string]string{"GOFLAGS": "-run=TestA"} }), tagged, []string{"mermaid"}, ignore},
 		{"an env on the workflow", "the workflow sets env", wfOf(func(wf *workflow, _ *job, _ *step) { wf.Env = map[string]string{"CGO_ENABLED": "0"} }), tagged, []string{"mermaid"}, ignore},
@@ -2441,8 +2454,8 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"a runner group", `in group "any"`, wfOf(func(_ *workflow, j *job, _ *step) { j.runnerGroup = "any" }), tagged, []string{"mermaid"}, ignore},
 		{"continue-on-error", "the go test step sets continue-on-error", wfOf(func(_ *workflow, _ *job, s *step) { s.ContinueOnError = true }), tagged, []string{"mermaid"}, ignore},
 		{"a shell", "sets shell", wfOf(func(_ *workflow, _ *job, s *step) { s.Shell = "python" }), tagged, []string{"mermaid"}, ignore},
-		{"a working directory", "the go test step sets working-directory", wfOf(func(_ *workflow, _ *job, s *step) { s.WorkDir = "adapter" }), tagged, []string{"mermaid"}, ignore},
-		{"workflow defaults", "the workflow sets defaults", wfOf(func(wf *workflow, _ *job, _ *step) { wf.Defaults.Run.WorkingDirectory = "adapter" }), tagged, []string{"mermaid"}, ignore},
+		{"a working directory", "the go test step sets working-directory", wfOf(func(_ *workflow, _ *job, s *step) { s.WorkDir = "schema" }), tagged, []string{"mermaid"}, ignore},
+		{"workflow defaults", "the workflow sets defaults", wfOf(func(wf *workflow, _ *job, _ *step) { wf.Defaults.Run.WorkingDirectory = "schema" }), tagged, []string{"mermaid"}, ignore},
 		{"job defaults", "jobs.mermaid sets defaults", wfOf(func(_ *workflow, j *job, _ *step) { j.Defaults.Run.Shell = "sh" }), tagged, []string{"mermaid"}, ignore},
 		{"a container", "jobs.mermaid sets container", wfOf(func(_ *workflow, j *job, _ *step) { j.keys = append(j.keys, "container") }), tagged, []string{"mermaid"}, ignore},
 		{"a matrix", "jobs.mermaid sets strategy", wfOf(func(_ *workflow, j *job, _ *step) { j.Strategy.Matrix.Axes = map[string][]string{"go": {"1.26"}} }), tagged, []string{"mermaid"}, ignore},
@@ -2454,7 +2467,7 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"checkout of another ref", "passes ref", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[checkout].With = map[string]any{"ref": "main"} }), tagged, []string{"mermaid"}, ignore},
 		{"another Go", "passes go-version-file", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[setupGo].With["go-version-file"] = "old/go.mod" }), tagged, []string{"mermaid"}, ignore},
 		{"an env on an action", `"Set up Go" sets env`, wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[setupGo].Env = map[string]string{"X": "1"} }), tagged, []string{"mermaid"}, ignore},
-		{"no tagged test", "declares no test", good, nil, []string{"mermaid"}, ignore},
+		{"no tagged test", "schema/markdown declares no test", good, nil, []string{"mermaid"}, ignore},
 		{"a linter blind to the tag", "linter", good, tagged, []string{"neo4j_integration"}, ignore},
 		{"node_modules tracked", ".gitignore", good, tagged, []string{"mermaid"}, "x\n"},
 	} {
@@ -2493,8 +2506,14 @@ func TestRunnerBuild_IgnoresTheCallersGoEnvironment(t *testing.T) {
 		t.Fatalf("go env printed %q, want three values", out)
 	}
 	home := t.TempDir()
-	for _, dir := range []string{filepath.Join(home, "Library", "Application Support", "go"), filepath.Join(home, "go")} {
-		if err := os.MkdirAll(dir, 0o750); err != nil {
+	configDirs := []string{filepath.Join(home, "Library", "Application Support", "go"), filepath.Join(home, "go")}
+	for _, dir := range configDirs {
+		// The go command's telemetry child outlives it and holds its counter
+		// files open, which on Windows fails the TempDir's removal.
+		if err := os.MkdirAll(filepath.Join(dir, "telemetry"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "telemetry", "mode"), []byte("off\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "env"), []byte("GOAMD64=v3\nGOEXPERIMENT=nodwarf5\n"), 0o600); err != nil {
@@ -2510,6 +2529,14 @@ func TestRunnerBuild_IgnoresTheCallersGoEnvironment(t *testing.T) {
 		t.Setenv(k, v)
 	}
 	got := runnerBuild(t)
+	for _, dir := range configDirs {
+		switch _, err := os.Stat(filepath.Join(dir, "telemetry", "local")); {
+		case err == nil:
+			t.Errorf("the go command wrote telemetry under the caller's config directory %s", dir)
+		case !errors.Is(err, fs.ErrNotExist):
+			t.Fatal(err)
+		}
+	}
 	if got.GOOS != want.GOOS || got.GOARCH != want.GOARCH || got.CgoEnabled != want.CgoEnabled ||
 		!slices.Equal(got.ToolTags, want.ToolTags) || !slices.Equal(got.ReleaseTags, want.ReleaseTags) {
 		t.Errorf("runnerBuild under the caller's environment = %s/%s cgo %v %q %q, want %s/%s cgo %v %q %q",
@@ -3283,6 +3310,113 @@ func floatingRunners(workflows map[string]workflow) []string {
 	return findings
 }
 
+// fullVetRun finds each scripts/vet.sh call, its group set when --host follows
+// it; toFullVetOrCommitTest finds the calls that reach the full vet.sh run or
+// scripts/committest.sh by another route: committest.sh itself, make gate,
+// whose manual stage runs the full vet.sh, and pre-commit run, whose hooks run
+// committest.sh at the pre-commit stage, a plain run's default, and the full
+// vet.sh at the manual stage. mutationHarness finds a step that names the
+// mutation harness's package, which scripts/test.sh runs only as its benchmark
+// runner, out of any step's sight.
+var (
+	fullVetRun            = regexp.MustCompile(`scripts/vet\.sh([ \t]+--host\b)?`)
+	toFullVetOrCommitTest = regexp.MustCompile(`scripts/committest\.sh|\bmake\b[^\n]*\bgate\b|\bpre-commit[ \t]+run\b`)
+	mutationHarness       = regexp.MustCompile(`internal/mutants\b`)
+)
+
+// windowsUntestedModes reports each step of a job of workflows that can run on
+// a Windows image and runs the full scripts/vet.sh or scripts/committest.sh,
+// or a route to either, or names internal/mutants, whose judging run no Windows
+// job makes. internal/scripttest and internal/mutants skip those modes' tests
+// on Windows, so such a step needs its tests back there.
+// A job that calls a reusable workflow is read in that workflow's own file.
+func windowsUntestedModes(workflows map[string]workflow) []string {
+	var findings []string
+	for _, file := range slices.Sorted(maps.Keys(workflows)) {
+		wf := workflows[file]
+		for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+			j := wf.Jobs[name]
+			var labels []string
+			for _, l := range j.RunsOn {
+				labels = append(labels, perCombination(l, j.Strategy.Matrix.combinations())...)
+			}
+			i := slices.IndexFunc(labels, func(l string) bool { return strings.HasPrefix(strings.ToLower(l), "windows") })
+			if i < 0 {
+				continue
+			}
+			for k, st := range j.Steps {
+				at := fmt.Sprintf("%s: jobs.%s step %d (%s) can run on %s and", file, name, k+1, st.Name, labels[i])
+				if slices.ContainsFunc(fullVetRun.FindAllStringSubmatch(st.Run, -1), func(m []string) bool { return m[1] == "" }) {
+					findings = append(findings, at+" runs the full scripts/vet.sh, whose tests internal/scripttest skips on Windows")
+				}
+				if m := toFullVetOrCommitTest.FindString(st.Run); m != "" {
+					findings = append(findings, fmt.Sprintf("%s runs %q, which reaches a script mode whose tests internal/scripttest skips on Windows", at, m))
+				}
+				if mutationHarness.MatchString(st.Run) {
+					findings = append(findings, at+" names internal/mutants, whose judging run's tests internal/mutants skips on Windows")
+				}
+			}
+		}
+	}
+	return findings
+}
+
+// No Windows job runs a script mode internal/scripttest leaves untested on
+// Windows.
+func TestWorkflows_RunNoModeUntestedOnWindows(t *testing.T) {
+	t.Parallel()
+	for _, f := range windowsUntestedModes(trackedWorkflows(t, repoRoot)) {
+		t.Error(f)
+	}
+}
+
+// The check itself, against each route to an untested mode.
+func TestWindowsUntestedModes_FindsEachRoute(t *testing.T) {
+	t.Parallel()
+	on := func(runsOn []string, matrixOS []string, run string) map[string]workflow {
+		j := job{RunsOn: runsOn, Steps: []step{{Name: "S", Run: run}}}
+		for _, o := range matrixOS {
+			j.Strategy.Matrix.Include = append(j.Strategy.Matrix.Include, map[string]string{"os": o})
+		}
+		return map[string]workflow{"w.yml": {Jobs: map[string]job{"j": j}}}
+	}
+	windows := []string{"windows-2025"}
+	matrix := []string{"${{ matrix.os }}"}
+	for _, tt := range []struct {
+		name      string
+		workflows map[string]workflow
+		want      []string
+	}{
+		{"the full vet on Windows", on(windows, nil, "scripts/vet.sh"), []string{"w.yml: jobs.j step 1 (S) can run on windows-2025 and runs the full scripts/vet.sh"}},
+		{"the full vet with arguments", on(windows, nil, "bash scripts/vet.sh --verbose"), []string{"runs the full scripts/vet.sh"}},
+		{"the host's vet on Windows", on(windows, nil, "scripts/vet.sh --host"), nil},
+		{"the host's vet, then the full", on(windows, nil, "scripts/vet.sh --host\nscripts/vet.sh\n"), []string{"runs the full scripts/vet.sh"}},
+		{"the commit test on Windows", on(windows, nil, "scripts/committest.sh"), []string{`runs "scripts/committest.sh"`}},
+		{"make gate on Windows", on(windows, nil, "make -j2 gate"), []string{`runs "make -j2 gate"`}},
+		{"pre-commit on Windows", on(windows, nil, "pre-commit run --all-files"), []string{`runs "pre-commit run"`}},
+		{"a Windows host of a matrix", on(matrix, []string{"ubuntu-24.04", "windows-2025"}, "scripts/committest.sh"), []string{"can run on windows-2025"}},
+		{"Linux hosts alone", on(matrix, []string{"ubuntu-24.04", "macos-26"}, "scripts/vet.sh\nscripts/committest.sh\nmake gate\npre-commit run"), nil},
+		{"a label in another case", on([]string{"Windows-2025"}, nil, "scripts/vet.sh"), []string{"can run on Windows-2025"}},
+		{"the harness built on Windows", on(windows, nil, "go build -o bin/mutants ./internal/mutants"), []string{"names internal/mutants"}},
+		{"the harness run on Windows", on(windows, nil, "go run ./internal/mutants . m out"), []string{"names internal/mutants"}},
+		{"the test script on Windows", on(windows, nil, "scripts/test.sh"), nil},
+		{"another package of that name's prefix", on(windows, nil, "go test ./internal/mutantsx/"), nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := windowsUntestedModes(tt.workflows)
+			if len(got) != len(tt.want) {
+				t.Fatalf("findings %q, want %d naming %q", got, len(tt.want), tt.want)
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(got[i], want) {
+					t.Errorf("finding %q, want one naming %q", got[i], want)
+				}
+			}
+		})
+	}
+}
+
 // Every job names its image's OS release, so the gate moves to a new release
 // only in a commit that says so. GitHub's weekly rebuilds of one release still
 // change its preinstalled tools.
@@ -3447,30 +3581,297 @@ func TestFloatingRunners_RefusesEachWayAJobCanFloat(t *testing.T) {
 	}
 }
 
-func TestReleaseWorkflow_BuildsOnlyAfterTheTestWorkflow(t *testing.T) {
-	t.Parallel()
-	var wf workflow
-	decodeYAML(t, fromRoot(".github/workflows/release.yml"), &wf)
+// publishWorkflow is the workflow that publishes the VS Code extension.
+const publishWorkflow = "./.github/workflows/publish_vscode.yml"
 
+// releaseFindings reports each way release lets an asset or the extension
+// ship without the test workflow: no job calls it, the publish workflow is not
+// called, a job that is conditional or needs no job that calls it, a job that
+// calls another workflow among them, and a publish workflow that runs on any
+// event but a call, or cannot be called. It also reports each way a tag
+// package.json does not carry can ship, by [versionFindings].
+func releaseFindings(release, publish workflow) []string {
+	var findings []string
 	var callers []string
-	for name, j := range wf.Jobs {
-		if j.Uses == testWorkflow {
+	for _, name := range slices.Sorted(maps.Keys(release.Jobs)) {
+		if release.Jobs[name].Uses == testWorkflow {
 			callers = append(callers, name)
 		}
 	}
 	if len(callers) == 0 {
-		t.Fatalf("no job calls %s", testWorkflow)
+		return []string{"no job calls " + testWorkflow}
 	}
-	for name, j := range wf.Jobs {
+	published := false
+	for _, name := range slices.Sorted(maps.Keys(release.Jobs)) {
+		j := release.Jobs[name]
 		if j.If != "" {
-			t.Errorf("job %s runs only if %q: a condition can skip the tests or build after they fail", name, j.If)
+			findings = append(findings, fmt.Sprintf("job %s runs only if %q: a condition can skip the tests or ship after they fail", name, j.If))
 		}
-		if len(j.Steps) == 0 {
+		if j.Uses == publishWorkflow {
+			published = true
+		}
+		if slices.Contains(callers, name) {
 			continue
 		}
 		if !slices.ContainsFunc(j.Needs, func(n string) bool { return slices.Contains(callers, n) }) {
-			t.Errorf("job %s needs %q, none of which calls the test workflow %q", name, j.Needs, callers)
+			findings = append(findings, fmt.Sprintf("job %s needs %q, none of which calls the test workflow %q", name, []string(j.Needs), callers))
 		}
+	}
+	if !published {
+		findings = append(findings, "no job calls "+publishWorkflow+", so the extension is not published from the tag")
+	}
+	for _, name := range slices.Sorted(maps.Keys(release.Jobs)) {
+		j := release.Jobs[name]
+		if j.Uses != publishWorkflow {
+			continue
+		}
+		if secrets, _ := j.Secrets.(map[string]any); j.Secrets != "inherit" && secrets["VSCE_PAT"] == nil {
+			findings = append(findings, fmt.Sprintf("job %s passes the publish workflow no VSCE_PAT, so it cannot publish", name))
+		}
+	}
+	findings = append(findings, versionFindings(release, callers)...)
+	findings = append(findings, publishFindings(publish)...)
+	for _, event := range slices.Sorted(maps.Keys(publish.On)) {
+		if event != "workflow_call" {
+			findings = append(findings, fmt.Sprintf("%s runs on %s, which reaches it without the release's tests", publishWorkflow, event))
+		}
+	}
+	if _, ok := publish.On["workflow_call"]; !ok {
+		findings = append(findings, publishWorkflow+" cannot be called")
+	}
+	return findings
+}
+
+// versionJob is the release's job that refuses a tag package.json does not carry.
+const versionJob = "version"
+
+// versionCheckRun is the whole text of versionJob's check. A part of it proves
+// nothing: exit 0 in place of exit 1, or && in place of ||, leaves every other
+// word in place and refuses no tag.
+const versionCheckRun = `VERSION="v$(jq -r .version editors/vscode/package.json)"
+if [ "${GITHUB_REF_TYPE}" != tag ] || [ "${GITHUB_REF_NAME}" != "${VERSION}" ]; then
+  echo "::error::package.json's version is ${VERSION}, and this run is ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}: a release ships only from the tag package.json carries"
+  exit 1
+fi`
+
+// versionFindings reports a release that can ship at a tag package.json does
+// not carry. It holds [versionJob] to one form, a checkout and then
+// [versionCheckRun], on one Linux runner with nothing that changes the shell,
+// the directory or the outcome, and it reports a job other than the test
+// callers that does not need the check.
+func versionFindings(release workflow, callers []string) []string {
+	var findings []string
+	if len(release.Env) > 0 {
+		findings = append(findings, "the release workflow sets env, which reaches "+versionJob+"'s check")
+	}
+	if release.Defaults != (runDefaults{}) {
+		findings = append(findings, "the release workflow sets defaults, which reach "+versionJob+"'s check")
+	}
+	check := release.Jobs[versionJob]
+	for _, k := range jobKeys(check) {
+		// releaseFindings reports a condition on any job.
+		if !slices.Contains([]string{"needs", "runs-on", "timeout-minutes", "steps", "if"}, k) {
+			findings = append(findings, fmt.Sprintf("job %s sets %s, which can let a run past its check", versionJob, k))
+		}
+	}
+	if !slices.Equal(check.RunsOn, []string{"ubuntu-24.04"}) {
+		findings = append(findings, fmt.Sprintf("job %s runs on %q, want ubuntu-24.04", versionJob, []string(check.RunsOn)))
+	}
+	if !isVersionCheck(check.Steps) {
+		findings = append(findings, fmt.Sprintf("job %s is not a checkout and the step that refuses a run whose tag is not package.json's version", versionJob))
+	}
+	for _, name := range slices.Sorted(maps.Keys(release.Jobs)) {
+		if name != versionJob && !slices.Contains(callers, name) && !slices.Contains(release.Jobs[name].Needs, versionJob) {
+			findings = append(findings, fmt.Sprintf("job %s does not need %s, so it can ship at a tag package.json does not carry", name, versionJob))
+		}
+	}
+	return findings
+}
+
+// isVersionCheck reports whether steps are a bare checkout and then a step that
+// sets nothing but its name and [versionCheckRun].
+func isVersionCheck(steps []step) bool {
+	return len(steps) == 2 &&
+		strings.HasPrefix(steps[0].Uses, "actions/checkout@") && len(stepKeyFindings("", steps[0], "uses")) == 0 &&
+		strings.TrimSpace(steps[1].Run) == versionCheckRun && len(stepKeyFindings("", steps[1], "name", "run")) == 0
+}
+
+// publishFindings reports a publish workflow whose bundled server is stamped
+// with something other than the tag's name, or stamped only conditionally. It
+// reads the steps' text.
+func publishFindings(publish workflow) []string {
+	for _, s := range publish.Jobs["build"].Steps {
+		if s.If == "" && strings.Contains(s.Run, "-X main.version=${GITHUB_REF_NAME}") {
+			return nil
+		}
+	}
+	return []string{publishWorkflow + "'s build job does not stamp the server with the tag's name"}
+}
+
+// publishCallers reports each job outside the release workflow that calls the
+// publish workflow. The publish workflow holds no check of its own: the release
+// workflow's version job is what keeps a branch from publishing.
+func publishCallers(workflows map[string]workflow) []string {
+	var findings []string
+	for _, file := range slices.Sorted(maps.Keys(workflows)) {
+		for _, name := range slices.Sorted(maps.Keys(workflows[file].Jobs)) {
+			if file != "release.yml" && strings.Contains(workflows[file].Jobs[name].Uses, path.Base(publishWorkflow)) {
+				findings = append(findings, fmt.Sprintf("%s: job %s calls %s, which only the release workflow may call", file, name, publishWorkflow))
+			}
+		}
+	}
+	return findings
+}
+
+// Nothing but the release workflow, and its version job, reaches a publish.
+func TestWorkflows_OnlyTheReleaseCallsThePublish(t *testing.T) {
+	t.Parallel()
+	for _, f := range publishCallers(trackedWorkflows(t, repoRoot)) {
+		t.Error(f)
+	}
+}
+
+func TestPublishCallers_RefusesEveryOtherCaller(t *testing.T) {
+	t.Parallel()
+	calling := workflow{Jobs: map[string]job{"rogue": {Uses: publishWorkflow}}}
+	for _, tt := range []struct {
+		name      string
+		workflows map[string]workflow
+		want      []string
+	}{
+		{"the release", map[string]workflow{"release.yml": calling}, nil},
+		{"no caller", map[string]workflow{"ci.yaml": {Jobs: map[string]job{"check": {Uses: testWorkflow}}}}, nil},
+		{"another workflow", map[string]workflow{"ci.yaml": calling}, []string{"ci.yaml: job rogue calls " + publishWorkflow + ", which only the release workflow may call"}},
+		{"a pinned spelling", map[string]workflow{"hotfix.yml": {Jobs: map[string]job{"rogue": {Uses: "simon-lentz/yammm/.github/workflows/publish_vscode.yml@main"}}}}, []string{"hotfix.yml: job rogue calls " + publishWorkflow + ", which only the release workflow may call"}},
+		{"in file then job order", map[string]workflow{"b.yml": calling, "a.yml": {Jobs: map[string]job{"y": {Uses: publishWorkflow}, "x": {Uses: publishWorkflow}}}}, []string{
+			"a.yml: job x calls " + publishWorkflow + ", which only the release workflow may call",
+			"a.yml: job y calls " + publishWorkflow + ", which only the release workflow may call",
+			"b.yml: job rogue calls " + publishWorkflow + ", which only the release workflow may call",
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := publishCallers(tt.workflows); !slices.Equal(got, tt.want) {
+				t.Errorf("findings %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The release builds no asset and publishes no extension before every job of
+// the test workflow has passed at the tag.
+func TestReleaseWorkflow_BuildsOnlyAfterTheTestWorkflow(t *testing.T) {
+	t.Parallel()
+	var release, publish workflow
+	decodeYAML(t, fromRoot(".github/workflows/release.yml"), &release)
+	decodeYAML(t, fromRoot(".github/workflows/publish_vscode.yml"), &publish)
+	for _, f := range releaseFindings(release, publish) {
+		t.Error(f)
+	}
+}
+
+// The check itself, against each way to ship before the tests.
+func TestReleaseFindings_RefusesEachWayToShipBeforeTheTests(t *testing.T) {
+	t.Parallel()
+	read := func() (workflow, workflow) {
+		var release, publish workflow
+		decodeYAML(t, fromRoot(".github/workflows/release.yml"), &release)
+		decodeYAML(t, fromRoot(".github/workflows/publish_vscode.yml"), &publish)
+		return release, publish
+	}
+	edit := func(name string, change func(j *job)) func(release, publish *workflow) {
+		return func(release, _ *workflow) {
+			j := release.Jobs[name]
+			change(&j)
+			release.Jobs[name] = j
+		}
+	}
+	editCheck := func(change func(s *step)) func(release, publish *workflow) {
+		return edit(versionJob, func(j *job) {
+			j.Steps = slices.Clone(j.Steps)
+			for i := range j.Steps {
+				if strings.Contains(j.Steps[i].Run, "GITHUB_REF_TYPE") {
+					change(&j.Steps[i])
+				}
+			}
+		})
+	}
+	for _, tt := range []struct {
+		name   string
+		change func(release, publish *workflow)
+		want   []string // a part of each finding, in order
+	}{
+		{"the repository's workflows", func(_, _ *workflow) {}, nil},
+		{"a publish that needs nothing", edit("publish", func(j *job) { j.Needs = nil }), []string{`job publish needs [], none of which calls the test workflow`, "job publish does not need version"}},
+		{"assets that need nothing", edit("release", func(j *job) { j.Needs = nil }), []string{`job release needs [], none of which calls the test workflow`, "job release does not need version"}},
+		{"a publish that needs only the tests", edit("publish", func(j *job) { j.Needs = stringList{"test"} }), []string{"job publish does not need version"}},
+		{"assets that need only the tests", edit("release", func(j *job) { j.Needs = stringList{"test"} }), []string{"job release does not need version"}},
+		{"a conditional publish", edit("publish", func(j *job) { j.If = "always()" }), []string{`job publish runs only if "always()"`}},
+		{"no publish", func(release, _ *workflow) { delete(release.Jobs, "publish") }, []string{"no job calls " + publishWorkflow}},
+		{"no test call", func(release, _ *workflow) { delete(release.Jobs, "test") }, []string{"no job calls " + testWorkflow}},
+		{"a publish by hand", func(_, publish *workflow) { publish.On["workflow_dispatch"] = nil }, []string{publishWorkflow + " runs on workflow_dispatch"}},
+		{"a publish at every tag push", func(_, publish *workflow) { publish.On["push"] = &trigger{} }, []string{publishWorkflow + " runs on push"}},
+		{"a publish with no secret", edit("publish", func(j *job) { j.Secrets = nil }), []string{"job publish passes the publish workflow no VSCE_PAT"}},
+		{"a publish that inherits the secrets", edit("publish", func(j *job) { j.Secrets = "inherit" }), nil},
+		{"no version check", func(release, _ *workflow) { delete(release.Jobs, versionJob) }, []string{`job version runs on []`, "job version is not a checkout"}},
+		{"a version check of another tag", editCheck(func(s *step) { s.Run = strings.ReplaceAll(s.Run, "GITHUB_REF_NAME", "GITHUB_SHA") }), []string{"job version is not a checkout"}},
+		{"a version check that passes every tag", editCheck(func(s *step) { s.Run = strings.ReplaceAll(s.Run, "||", "&&") }), []string{"job version is not a checkout"}},
+		{"a version check that exits 0", editCheck(func(s *step) { s.Run = strings.ReplaceAll(s.Run, "exit 1", "exit 0") }), []string{"job version is not a checkout"}},
+		{"a version check after an exit", editCheck(func(s *step) { s.Run = "exit 0\n" + s.Run }), []string{"job version is not a checkout"}},
+		{"a conditional version check", editCheck(func(s *step) { s.If = "false" }), []string{"job version is not a checkout"}},
+		{"a version step that may fail", editCheck(func(s *step) { s.ContinueOnError = true }), []string{"job version is not a checkout"}},
+		{"a version step under another shell", editCheck(func(s *step) { s.Shell = "true {0}" }), []string{"job version is not a checkout"}},
+		{"a version step in another directory", editCheck(func(s *step) { s.WorkDir = "editors/vscode" }), []string{"job version is not a checkout"}},
+		{"a version step with its own env", editCheck(func(s *step) { s.Env = map[string]string{"VERSION": "v0"} }), []string{"job version is not a checkout"}},
+		{"a version job with no checkout", edit(versionJob, func(j *job) { j.Steps = slices.Clone(j.Steps)[1:] }), []string{"job version is not a checkout"}},
+		{"a version job that checks out nothing", edit(versionJob, func(j *job) {
+			j.Steps = slices.Clone(j.Steps)
+			j.Steps[0] = step{Uses: "actions/setup-go@v7"}
+		}), []string{"job version is not a checkout"}},
+		{"a version job that checks out another ref", edit(versionJob, func(j *job) {
+			j.Steps = slices.Clone(j.Steps)
+			j.Steps[0].With = map[string]any{"ref": "main"}
+		}), []string{"job version is not a checkout"}},
+		{"a version job with another step", edit(versionJob, func(j *job) { j.Steps = append(slices.Clone(j.Steps), step{Run: "exit 0"}) }), []string{"job version is not a checkout"}},
+		{"a version job that may fail", edit(versionJob, func(j *job) { j.ContinueOnError = true }), []string{"job version sets continue-on-error"}},
+		{"a version job in a container", edit(versionJob, func(j *job) { j.keys = append(slices.Clone(j.keys), "container") }), []string{"job version sets container"}},
+		{"a version job on another runner", edit(versionJob, func(j *job) { j.RunsOn = runnerLabels{"windows-2025"} }), []string{`job version runs on ["windows-2025"], want ubuntu-24.04`}},
+		{"a conditional version job", edit(versionJob, func(j *job) { j.If = "false" }), []string{`job version runs only if "false"`}},
+		{"a release that sets env", func(release, _ *workflow) { release.Env = map[string]string{"VERSION": "v0"} }, []string{"the release workflow sets env"}},
+		{"a release that sets defaults", func(release, _ *workflow) { release.Defaults.Run.Shell = "true {0}" }, []string{"the release workflow sets defaults"}},
+		{"a conditional stamp", func(_, publish *workflow) {
+			j := publish.Jobs["build"]
+			j.Steps = slices.Clone(j.Steps)
+			for i := range j.Steps {
+				if strings.Contains(j.Steps[i].Run, "main.version") {
+					j.Steps[i].If = "false"
+				}
+			}
+			publish.Jobs["build"] = j
+		}, []string{"does not stamp the server with the tag's name"}},
+		{"another stamp", func(_, publish *workflow) {
+			j := publish.Jobs["build"]
+			j.Steps = slices.Clone(j.Steps)
+			for i := range j.Steps {
+				j.Steps[i].Run = strings.ReplaceAll(j.Steps[i].Run, "main.version=${GITHUB_REF_NAME}", "main.version=dev")
+			}
+			publish.Jobs["build"] = j
+		}, []string{"does not stamp the server with the tag's name"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			release, publish := read()
+			tt.change(&release, &publish)
+			got := releaseFindings(release, publish)
+			if len(got) != len(tt.want) {
+				t.Fatalf("findings %q, want %d naming %q", got, len(tt.want), tt.want)
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(got[i], want) {
+					t.Errorf("finding %q, want one naming %q", got[i], want)
+				}
+			}
+		})
 	}
 }
 
@@ -3516,8 +3917,10 @@ var gateHooks = map[string]map[string]any{
 
 // hookFindings reports each way config departs from the two gates: a top-level
 // key beside repos, two hooks of one id, a gate hook that is missing, not local
-// or outside its one form, and any other hook that names stages. A hook that
-// names none runs at the stages its own manifest gives it.
+// or outside its one form, any other hook that names stages, and a hook that
+// runs `go tool` over pre-commit's file batches without require_serial: true,
+// whose parallel batches can execute the tool's cached binary while another
+// writes it. A hook that names no stages runs at those its own manifest gives it.
 func hookFindings(config preCommitConfig) []string {
 	var findings []string
 	for _, k := range config.keys {
@@ -3538,6 +3941,10 @@ func hookFindings(config preCommitConfig) []string {
 			if !gate {
 				if stages, ok := h["stages"]; ok {
 					findings = append(findings, fmt.Sprintf("hook %s names stages %v, so a gate may leave it out", id, stages))
+				}
+				entry, _ := h["entry"].(string)
+				if strings.HasPrefix(entry, "go tool ") && h["pass_filenames"] != false && h["require_serial"] != true {
+					findings = append(findings, fmt.Sprintf("hook %s runs go tool over parallel file batches without require_serial: true, so one batch can execute the tool's cached binary while another writes it", id))
 				}
 				continue
 			}
@@ -3582,7 +3989,7 @@ func TestPreCommitHooks_RunTheGateScripts(t *testing.T) {
 	}
 	for pattern, fires := range map[string][]string{
 		lintConfigFiles: {".golangci.yml", "go.mod", "go.sum"},
-		goFiles:         {"schema/load.go", "location/host_path_windows.go"},
+		goFiles:         {"schema/load.go", "internal/hostpath/resolve_windows.go"},
 		goBuildFiles:    {"schema/load.go", "go.mod", "go.sum"},
 	} {
 		files := regexp.MustCompile(pattern)
@@ -3662,6 +4069,14 @@ func TestHookFindings_RefusesEachDepartureFromTheTwoGates(t *testing.T) {
 		{"a stage on the config hook", set("golangci-lint-config", "stages", []any{"pre-commit"}), []string{"hook golangci-lint-config sets stages"}},
 		{"a stage on another local hook", set("gofumpt", "stages", []any{"pre-commit"}), []string{"hook gofumpt names stages"}},
 		{"a stage on a third-party hook", set("actionlint", "stages", []any{"pre-commit"}), []string{"hook actionlint names stages"}},
+		{"a go tool hook in parallel batches", drop("gofumpt", "require_serial"), []string{"hook gofumpt runs go tool over parallel file batches"}},
+		{"a go tool hook not serial", set("goimports", "require_serial", false), []string{"hook goimports runs go tool over parallel file batches"}},
+		{"a go tool hook given no files", func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			h := hook(t, c, "gofumpt")
+			delete(h, "require_serial")
+			h["pass_filenames"] = false
+		}, nil},
 		{"a gate hook renamed", set("go-vet", "id", "vet"), []string{"hook vet names stages", "no hook go-vet"}},
 		{"a gate hook removed", func(t *testing.T, c *preCommitConfig) {
 			t.Helper()
@@ -3697,9 +4112,10 @@ func TestHookFindings_RefusesEachDepartureFromTheTwoGates(t *testing.T) {
 	}
 }
 
-// gateCommand is the one command that runs the full gate. --hook-stage manual
+// gateCommand is the one command that runs the full gate: scripts/stagedtree.sh
+// refuses a working tree that is not the index, then --hook-stage manual
 // selects the three hooks no commit runs, beside every hook that names no stage.
-const gateCommand = "pre-commit run --all-files --hook-stage manual"
+const gateCommand = "scripts/stagedtree.sh && pre-commit run --all-files --hook-stage manual"
 
 // ruleFindings holds target's rule in the makefile text to one form: a .PHONY
 // line naming it alone, the line "target:", one recipe line holding command,
@@ -3970,7 +4386,7 @@ func TestCIWorkflow_CachesWhereTheExtensionTestsDownload(t *testing.T) {
 		t.Fatalf("ci.yaml caches the VS Code test install in %d steps, want 1: %q", len(cached), cached)
 	}
 
-	script, err := os.ReadFile(fromRoot("lsp/editors/vscode/tests/integration/runTest.mjs"))
+	script, err := os.ReadFile(fromRoot("editors/vscode/tests/integration/runTest.mjs"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,16 +5,17 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/value"
 )
 
 // The three readers of a list position read every list shape alike, through
 // value.ListElems: asSlice keeps the builtins' nil-is-empty rule in front of
-// it, toSlice refuses nil, and both read an immutable.Slice and a typed slice
-// — and neither reads a fixed-size array, which is how a scalar carrier is
-// spelled (uuid.UUID is [16]byte).
+// it for every value that holds none, toSlice refuses one, and both read an
+// immutable.Slice and a typed slice — and neither reads a fixed-size array,
+// which is how a scalar carrier is spelled (uuid.UUID is [16]byte).
 func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 	t.Parallel()
-	s := immutable.Wrap([]any{int64(1), "a"}).Unwrap()
+	s := immutable.Wrap([]any{int64(1), "a"}).Any()
 	for _, tc := range []struct {
 		name string
 		in   any
@@ -28,9 +29,9 @@ func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := toSlice(tc.in)
+			got, ok := value.ListElems(tc.in)
 			if ok != tc.ok || (ok && !reflect.DeepEqual(got, tc.want)) {
-				t.Errorf("toSlice(%T) = %#v, %v; want %#v, %v", tc.in, got, ok, tc.want, tc.ok)
+				t.Errorf("value.ListElems(%T) = %#v, %v; want %#v, %v", tc.in, got, ok, tc.want, tc.ok)
 			}
 			got2, err := asSlice("T", tc.in)
 			if (err == nil) != tc.ok || (tc.ok && !reflect.DeepEqual(got2, tc.want)) {
@@ -38,33 +39,12 @@ func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 			}
 		})
 	}
-	if got, err := asSlice("T", nil); err != nil || len(got) != 0 {
-		t.Errorf("asSlice(nil) = %#v, %v; want an empty list", got, err)
-	}
-	if _, ok := toSlice(nil); ok {
-		t.Error("toSlice(nil) = ok, want not a list")
-	}
-}
-
-// Every datatype check expr.IsDatatypeCheck admits has a checker, and a name
-// it does not admit is an error: no name falls through to another kind's
-// checker by default.
-func TestDatatypeChecker_CoversTheSetAndRefusesTheRest(t *testing.T) {
-	t.Parallel()
-	e := NewEvaluator()
-	for _, name := range []string{"String", "Integer", "Float", "Boolean", "UUID", "Timestamp", "Date", "date", "DATE"} {
-		if c, err := e.datatypeChecker(name); err != nil || c == nil {
-			t.Errorf("datatypeChecker(%q) = %v, %v; want a checker", name, c, err)
+	for _, none := range []any{nil, []any(nil), []string(nil), immutable.Wrap([]any(nil)).Any()} {
+		if got, err := asSlice("T", none); err != nil || got == nil || len(got) != 0 {
+			t.Errorf("asSlice(%#v) = %#v, %v; want an empty list", none, got, err)
 		}
-	}
-	for _, name := range []string{"Vector", "List", "Enum", "Pattern", "number", ""} {
-		if _, err := e.datatypeChecker(name); err == nil {
-			t.Errorf("datatypeChecker(%q) = nil error, want unknown datatype", name)
+		if _, ok := value.ListElems(none); ok {
+			t.Errorf("value.ListElems(%#v) = ok, want not a list", none)
 		}
-	}
-	// A String check must not answer as a Date check would.
-	c, _ := e.datatypeChecker("String")
-	if ok, _ := c(int64(5)); ok {
-		t.Error("the String checker accepted an integer")
 	}
 }

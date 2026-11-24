@@ -1,32 +1,36 @@
 package graph_test
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // identitySchema loads a one-type schema whose sole primary key carries the
 // given declaration, so the test submits one value under one key.
-func identitySchema(t *testing.T, keyDecl string) *schema.Schema {
+func identitySchema(t *testing.T, keyDecl string) schema.Schema {
 	t.Helper()
 	src := "schema \"identity\"\n\ntype Item {\n\tid " + keyDecl + " primary\n}\n"
-	s, result := schema.LoadString(t.Context(), src, "identity.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load %q schema: %s", keyDecl, result)
+	s, err := schema.LoadString(t.Context(), src, "identity.yammm")
+	if err != nil {
+		t.Fatalf("load %q schema: %s", keyDecl, err)
 	}
 	return s
 }
 
 // addSpellings validates each value as an Item and adds it to one graph,
 // returning the distinct rendered keys and the resulting snapshot.
-func addSpellings(t *testing.T, s *schema.Schema, vals []any) ([]string, *graph.Snapshot) {
+func addSpellings(t *testing.T, s schema.Schema, vals []any) ([]string, graph.Snapshot) {
 	t.Helper()
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -34,18 +38,20 @@ func addSpellings(t *testing.T, s *schema.Schema, vals []any) ([]string, *graph.
 	seen := map[string]bool{}
 	var keys []string
 	for _, val := range vals {
-		valid, res := v.ValidateOne(t.Context(), "Item", instance.RawInstance{
+		valid, err := v.ValidateOne(t.Context(), "Item", instance.RawInstance{
 			Properties: map[string]any{"id": val},
 		})
-		if !res.OK() {
-			t.Fatalf("validating %#v: %s", val, res)
+		if err != nil {
+			t.Fatalf("validating %#v: %s", val, err)
 		}
 		k := valid.PrimaryKey().String()
 		if !seen[k] {
 			seen[k] = true
 			keys = append(keys, k)
 		}
-		g.Add(t.Context(), valid)
+		if err := g.Add(t.Context(), valid); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+			t.Errorf("Add: %v", err)
+		}
 	}
 	return keys, g.Snapshot()
 }
@@ -54,16 +60,16 @@ func addSpellings(t *testing.T, s *schema.Schema, vals []any) ([]string, *graph.
 // exists for: every accepted spelling of one value is one instance under one
 // key. Before it, each spelling produced its own key and the graph reported no
 // duplicate — two rows for one entity, silently.
-func assertOneIdentity(t *testing.T, s *schema.Schema, vals []any) {
+func assertOneIdentity(t *testing.T, s schema.Schema, vals []any) {
 	t.Helper()
 	keys, snap := addSpellings(t, s, vals)
 	if len(keys) != 1 {
 		t.Fatalf("%d spellings produced %d distinct keys: %v", len(vals), len(keys), keys)
 	}
-	if n := len(snap.InstancesOf(mustTypeID(t, s, "Item"))); n != 1 {
+	if n := len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Item")))); n != 1 {
 		t.Errorf("graph holds %d instances for one value, want 1", n)
 	}
-	if n := len(snap.Duplicates()); n != len(vals)-1 {
+	if n := len(slices.Collect(snap.Duplicates())); n != len(vals)-1 {
 		t.Errorf("graph reported %d duplicates, want %d — every repeat of one value is a duplicate",
 			n, len(vals)-1)
 	}
@@ -117,15 +123,14 @@ func TestIdentity_DistinctValuesStayDistinct(t *testing.T) {
 	if len(keys) != 2 {
 		t.Errorf("two UUIDs produced %d keys: %v", len(keys), keys)
 	}
-	if n := len(snap.Duplicates()); n != 0 {
+	if n := len(slices.Collect(snap.Duplicates())); n != 0 {
 		t.Errorf("two distinct UUIDs reported %d duplicates", n)
 	}
 }
 
-// rebuildSchema declares a canonicalizing kind in every parts position
-// RebuildSnapshot fills: instance property, composed-child property and edge
-// property.
-func rebuildSchema(t *testing.T) *schema.Schema {
+// rebuildSchema declares a canonicalizing kind in every position a rebuild
+// fills: instance property, composed-child property and edge property.
+func rebuildSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "rebuild_canonical"
 
@@ -148,22 +153,21 @@ type Sensor {
 	*-> READINGS (many) Reading
 }
 `
-	s, result := schema.LoadString(t.Context(), src, "rebuild_canonical.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load rebuild schema: %s", result)
+	s, err := schema.LoadString(t.Context(), src, "rebuild_canonical.yammm")
+	if err != nil {
+		t.Fatalf("load rebuild schema: %s", err)
 	}
 	return s
 }
 
-// TestRebuildSnapshot_CanonicalizesEveryPropertyPosition kills the rebuild
-// arm. RebuildSnapshot accepts pre-resolved parts and runs no validation, so
-// without it a caller-supplied time.Time reaches Properties() untouched and a
-// graph rebuilt from parts is not equal to one built through validation.
-func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
+// TestRebuild_CanonicalizesEveryPropertyPosition pins that a rebuild stores what
+// a validator stores: a rebuild runs no validation, so a document's raw spelling
+// would otherwise reach Properties() untouched and the graph would not equal one
+// built through validation.
+func TestRebuild_CanonicalizesEveryPropertyPosition(t *testing.T) {
 	t.Parallel()
 	s := rebuildSchema(t)
-	when := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
-	const wantText = "2026-08-19T12:00:00Z"
+	const spelled, wantText = "2026-08-19T12:00:00+00:00", "2026-08-19T12:00:00Z"
 	const id = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
 
 	sensorID := mustTypeID(t, s, "Sensor")
@@ -173,9 +177,9 @@ func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
 	sensorKey := immutable.WrapKey([]any{"s1"})
 	stationKey := immutable.WrapKey([]any{"st1"})
 
-	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{sensorID, stationID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     stationID,
 				PrimaryKey: stationKey,
@@ -186,41 +190,37 @@ func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
 				PrimaryKey: sensorKey,
 				Properties: immutable.WrapProperties(map[string]any{
 					"id":         "s1",
-					"created_at": when,
-					// A non-canonical spelling of the same instant.
-					"run_id": strings.ToUpper(id),
+					"created_at": spelled,
+					"run_id":     strings.ToUpper(id),
 				}),
-				Composed: map[string][]graph.InstanceParts{
+				Composed: map[string][]snapparts.Instance{
 					"READINGS": {{
 						TypeID:     readingID,
 						PrimaryKey: immutable.WrapKey([]any{"r1"}),
 						Properties: immutable.WrapProperties(map[string]any{
-							"name": "r1", "taken_at": when,
+							"name": "r1", "taken_at": spelled,
 						}),
 					}},
 				},
 			},
 		},
-		Edges: []graph.EdgeParts{{
+		Edges: []snapparts.Edge{{
 			Relation:   "FEED",
 			SourceType: sensorID,
 			SourceKey:  sensorKey,
 			TargetKey:  stationKey,
-			Properties: immutable.WrapProperties(map[string]any{"seen_at": when}),
+			Properties: immutable.WrapProperties(map[string]any{"seen_at": spelled}),
 		}},
 	})
-	if result.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", result)
-	}
 
-	sensor := snap.InstancesOf(sensorID)[0]
+	sensor := slices.Collect(snap.InstancesOf(sensorID))[0]
 	assertProp(t, sensor.Properties(), "created_at", wantText)
 	assertProp(t, sensor.Properties(), "run_id", id)
 
-	reading := sensor.Composed("READINGS")[0]
+	reading := slices.Collect(sensor.Composed("READINGS"))[0]
 	assertProp(t, reading.Properties(), "taken_at", wantText)
 
-	edges := snap.EdgesFrom(sensor)
+	edges := slices.Collect(snap.EdgesFrom(sensor))
 	if len(edges) != 1 {
 		t.Fatalf("want 1 edge, got %d", len(edges))
 	}
@@ -233,23 +233,23 @@ func assertProp(t *testing.T, props immutable.Properties, name, want string) {
 	if !ok {
 		t.Fatalf("property %q missing", name)
 	}
-	if got := v.Unwrap(); got != want {
+	if got := v.Any(); got != want {
 		t.Errorf("property %q = %#v, want %q", name, got, want)
 	}
 }
 
-// TestRebuildSnapshot_KeepsWhatItCannotRender is the other half of the arm's
-// contract. A value the constraint cannot render survives, because this entry
-// point reconstructs a document rather than validating one — and a document
-// written before the rule existed has to keep loading.
-func TestRebuildSnapshot_KeepsWhatItCannotRender(t *testing.T) {
+// TestRebuild_KeepsWhatItCannotRender is the other half of the contract. A value
+// the constraint cannot render survives, because a rebuild reconstructs a document
+// rather than validating one, and a document written before the rule existed has
+// to keep loading.
+func TestRebuild_KeepsWhatItCannotRender(t *testing.T) {
 	t.Parallel()
 	s := rebuildSchema(t)
 	sensorID := mustTypeID(t, s, "Sensor")
 
-	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{sensorID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
@@ -261,11 +261,8 @@ func TestRebuildSnapshot_KeepsWhatItCannotRender(t *testing.T) {
 			},
 		},
 	})
-	if result.HasErrors() {
-		t.Fatalf("RebuildSnapshot refused a non-conforming value: %s", result)
-	}
 
-	props := snap.InstancesOf(sensorID)[0].Properties()
+	props := slices.Collect(snap.InstancesOf(sensorID))[0].Properties()
 	assertProp(t, props, "created_at", "not-a-timestamp")
 	assertProp(t, props, "run_id", "not-a-uuid")
 }

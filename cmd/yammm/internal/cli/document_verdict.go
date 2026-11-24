@@ -1,12 +1,12 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -37,7 +37,9 @@ type heldKey struct {
 type holder struct {
 	at       heldKey
 	typeName string
-	prov     *location.Provenance
+	prov     instance.Provenance
+	// valid is the instance the validator built, zero for a refused root.
+	valid instance.ValidInstance
 	// installed reports that Add put the instance in the graph; graphDuplicate
 	// that Add refused it as a duplicate and said so.
 	installed      bool
@@ -46,29 +48,36 @@ type holder struct {
 
 // verdict is what [documentVerdict] adds to and removes from a graph's answer.
 type verdict struct {
-	s *schema.Schema
+	s schema.Schema
 	// refused holds the keys of roots the pipeline refused for a reason other
 	// than a duplicate.
 	refused    map[heldKey]bool
 	duplicates diag.Result
+	// renamed holds each instance whose Add duplicate the verdict raises in
+	// place of the graph's: the graph named a later holder than the key's first.
+	renamed map[instance.ValidInstance]bool
+	// rendered maps each closure type's [schema.TagForm] under s, the name the
+	// graph's issues carry, to its identity.
+	rendered map[string]schema.TypeID
 }
 
 // documentVerdict reads the document's roots against g once every valid one was
-// added; added holds each valid instance's Add result. fromBase reports that g
+// added; added holds each valid instance's Add error. fromBase reports that g
 // held instances before the document's, which count as earlier holders of a key.
-func documentVerdict(s *schema.Schema, g *graph.Graph, fromBase bool, doc Validated, added map[*instance.ValidInstance]diag.Result) verdict {
+func documentVerdict(s schema.Schema, g *graph.Graph, fromBase bool, doc Validated, added map[instance.ValidInstance]error) verdict {
 	var holders []holder
 	for _, b := range doc.batches {
 		for i, raw := range b.raws {
-			if i < len(b.valids) && b.valids[i] != nil {
+			if i < len(b.valids) && !b.valids[i].IsZero() {
 				valid := b.valids[i]
-				result := added[valid]
+				err := added[valid]
 				holders = append(holders, holder{
-					at:             heldKey{id: valid.TypeID(), key: valid.PrimaryKey().String()},
+					at:             heldKey{id: valid.Type().ID(), key: valid.PrimaryKey().String()},
 					typeName:       valid.TypeName(),
 					prov:           valid.Provenance(),
-					installed:      !result.HasErrors(),
-					graphDuplicate: result.HasCode(diag.E_DUPLICATE_PK),
+					valid:          valid,
+					installed:      err == nil,
+					graphDuplicate: errors.Is(err, diag.E_DUPLICATE_PK),
 				})
 				continue
 			}
@@ -80,7 +89,7 @@ func documentVerdict(s *schema.Schema, g *graph.Graph, fromBase bool, doc Valida
 		}
 	}
 
-	v := verdict{s: s, refused: make(map[heldKey]bool)}
+	v := verdict{s: s, refused: make(map[heldKey]bool), renamed: make(map[instance.ValidInstance]bool)}
 	fromDocument := make(map[heldKey]bool, len(holders))
 	for _, h := range holders {
 		if h.installed {
@@ -89,35 +98,56 @@ func documentVerdict(s *schema.Schema, g *graph.Graph, fromBase bool, doc Valida
 			v.refused[h.at] = true
 		}
 	}
-	var snap *graph.Snapshot
+	var snap graph.Snapshot
 	if fromBase {
 		snap = g.Snapshot()
 	}
-	seen := make(map[heldKey]bool, len(holders))
-	collector := diag.NewCollectorUnlimited()
+	// first holds each key's earliest holder: a base instance, else the
+	// document's first holder of the key. The graph names the holder it holds,
+	// which is the first one unless the validator refused the first one.
+	first := make(map[heldKey]firstHolder, len(holders))
+	collector := diag.NewCollector(diag.NoLimit)
 	for _, h := range holders {
-		earlier, known := seen[h.at]
-		if !known && snap != nil && !fromDocument[h.at] {
-			_, earlier = snap.InstanceByKey(h.at.id, h.at.key)
+		earliest, earlier := first[h.at]
+		if !earlier && !fromDocument[h.at] {
+			var held graph.Instance
+			if held, earlier = snap.InstanceByKey(h.at.id, h.at.key); earlier {
+				earliest = firstHolder{prov: held.Provenance(), inGraph: true}
+				first[h.at] = earliest
+			}
 		}
-		if earlier && !h.graphDuplicate {
-			collector.Collect(duplicateIssue(h))
+		switch {
+		case !earlier:
+			first[h.at] = firstHolder{prov: h.prov, inGraph: h.installed}
+		case !h.graphDuplicate:
+			collector.Collect(duplicateIssue(h, earliest.prov))
+		case !earliest.inGraph:
+			v.renamed[h.valid] = true
+			collector.Collect(duplicateIssue(h, earliest.prov))
 		}
-		seen[h.at] = true
 	}
 	v.duplicates = collector.Result()
 	return v
 }
 
+// firstHolder is the earliest holder of a key: its provenance, and whether the
+// graph holds it.
+type firstHolder struct {
+	prov    instance.Provenance
+	inGraph bool
+}
+
 // duplicateIssue is the E_DUPLICATE_PK [graph.Graph.Add] raises, for a holder
-// of a key an earlier holder states where the graph reported no duplicate.
-func duplicateIssue(h holder) diag.Issue {
+// of a key an earlier holder states where the graph reported no duplicate. It
+// names the earlier holder as a related location when that holder has a span.
+func duplicateIssue(h holder, earlier instance.Provenance) diag.Issue {
 	b := diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
-		fmt.Sprintf("duplicate primary key %s for type %q", h.at.key, h.typeName)).
+		fmt.Sprintf("duplicate primary key %s for type %q", diag.CutValue(h.at.key), h.typeName)).
 		WithDetail(diag.DetailKeyTypeName, h.typeName).
-		WithDetail(diag.DetailKeyPrimaryKey, h.at.key)
-	if h.prov != nil {
-		b = b.WithSpan(h.prov.Span())
+		WithDetail(diag.DetailKeyPrimaryKey, h.at.key).
+		WithSpan(h.prov.Span())
+	if span := earlier.Span(); !span.IsZero() {
+		b.WithRelated(diag.RelatedInfo{Span: span, Message: "first declared here"})
 	}
 	return b.Build()
 }
@@ -130,7 +160,13 @@ func (v verdict) explain(check diag.Result) diag.Result {
 	if len(v.refused) == 0 || !check.HasCode(diag.E_UNRESOLVED_REQUIRED) || check.LimitReached() {
 		return check
 	}
-	collector := diag.NewCollectorUnlimited()
+	v.rendered = make(map[string]schema.TypeID)
+	for sc := range v.s.Closure() {
+		for t := range sc.Types() {
+			v.rendered[schema.TagForm(v.s, t.ID())] = t.ID()
+		}
+	}
+	collector := diag.NewCollector(diag.NoLimit)
 	for issue := range check.Issues() {
 		if issue.Code() == diag.E_UNRESOLVED_REQUIRED && v.refused[v.missingTarget(issue)] {
 			continue
@@ -142,8 +178,7 @@ func (v verdict) explain(check diag.Result) diag.Result {
 
 // missingTarget returns the target an E_UNRESOLVED_REQUIRED names as missing,
 // typed by the relation it is reported under, or the zero key when it names
-// none. The source type resolves by the name the issue carries, the graph's
-// name for its instance's type.
+// none. The source type is the one whose rendering the issue carries.
 func (v verdict) missingTarget(issue diag.Issue) heldKey {
 	details := make(map[string]string, len(issue.Details()))
 	for _, d := range issue.Details() {
@@ -152,10 +187,11 @@ func (v verdict) missingTarget(issue diag.Issue) heldKey {
 	if details[diag.DetailKeyReason] != "target_missing" {
 		return heldKey{}
 	}
-	source, ok := v.s.ResolveTypeName(details[diag.DetailKeyTypeName])
+	id, ok := v.rendered[details[diag.DetailKeyTypeName]]
 	if !ok {
 		return heldKey{}
 	}
+	source, _ := v.s.TypeByID(id)
 	rel, ok := source.Relation(details[diag.DetailKeyRelationName])
 	if !ok {
 		return heldKey{}

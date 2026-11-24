@@ -6,7 +6,7 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1062,7 +1062,8 @@ func TestBuiltin_TypeOf(t *testing.T) {
 		{"float32", float32(1.5), "float"},
 		{"bool", true, "boolean"},
 		{"nil", nil, "nil"},
-		{"regexp", regexp.MustCompile("a"), "pattern"},
+		// A pattern is no value an expression holds.
+		{"regexp", regexp.MustCompile("a"), "unknown"},
 		{"slice", []any{1, 2, 3}, "list"},
 		{"typed_slice", []string{"a"}, "list"},
 		// An array is not a list, so TypeOf names its Go type rather than
@@ -1071,8 +1072,8 @@ func TestBuiltin_TypeOf(t *testing.T) {
 		{"immutable_slice", immutable.WrapSlice([]any{int64(1)}), "list"},
 		{"map", map[string]any{"a": 1}, "map"},
 		{"typed_map", map[int]string{}, "map"},
-		{"immutable_map", immutable.WrapMap(map[string]any{}), "map"},
-		{"func", eval.TypeChecker(nil), "unknown"},
+		{"immutable_map", immutable.WrapProperties(map[string]any{}), "map"},
+		{"func", func() {}, "unknown"},
 		{"struct", struct{}{}, "unknown"},
 	}
 
@@ -1094,6 +1095,29 @@ func TestBuiltin_IsNil(t *testing.T) {
 		e := makeBuiltinCall(expr.NewLiteral("hello"), "IsNil", nil, nil, nil)
 		evalEq(t, e, false)
 	})
+
+	// IsNil is the value layer's absence rule: a nil slice, map or immutable
+	// container holds none, and a pointer, a channel or a function is a value
+	// of no form, a nil one too.
+	for name, tc := range map[string]struct {
+		val  any
+		want bool
+	}{
+		"a nil slice":               {[]any(nil), true},
+		"a nil slice of strings":    {[]string(nil), true},
+		"a nil map":                 {map[string]any(nil), true},
+		"a nil immutable container": {immutable.Wrap([]any(nil)).Any(), true},
+		"an empty list":             {[]any{}, false},
+		"an empty string":           {"", false},
+		"a nil pointer":             {(*string)(nil), false},
+		"a pointer to a string":     {new("x"), false},
+		"a nil channel":             {(chan int)(nil), false},
+		"a nil function":            {(func())(nil), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			evalEq(t, makeBuiltinCall(expr.NewLiteral(tc.val), "IsNil", nil, nil, nil), tc.want)
+		})
+	}
 }
 
 func TestBuiltin_Default(t *testing.T) {

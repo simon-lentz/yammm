@@ -5,10 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
+	"github.com/simon-lentz/yammm/instance"
+
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -21,17 +26,9 @@ import (
 // drive the pairs that two earlier attempts at "total" left equal. In-package
 // because the comparators are unexported and are the thing under test.
 
-func orderingTypeID(name string) schema.TypeID {
-	return schema.NewTypeID(location.MustNewSourceID("test://ordering.yammm"), name)
-}
-
-func orderingInstance(t *testing.T, name, key string) *Instance {
+func orderingTypeID(t *testing.T, name string) schema.TypeID {
 	t.Helper()
-	return rebuildInstance(tagForms(nil), InstanceParts{
-		TypeID:     orderingTypeID(name),
-		PrimaryKey: immutable.WrapKey([]any{key}),
-		Properties: immutable.WrapProperties(map[string]any{"id": key}),
-	})
+	return instancetest.TypeID(t, "ordering.yammm", name)
 }
 
 // TestCompareProps_SeparatorsDoNotCollide drives the values a rendered
@@ -107,11 +104,11 @@ func TestCompareProps_OrdersCompositeValuesByContent(t *testing.T) {
 	}{
 		{"a map holding a slice", func() any { return map[string]any{"x": int64(1), "y": []any{"a"}} }},
 		{"a slice holding a map", func() any { return []any{map[string]any{"k": int64(1)}} }},
-		// A container reached through a map the package stores as given. Only a
-		// Map[string] carries a pointer, so a nested one decides the order by the
-		// address of its memoised view unless the clone reads through it.
-		{"a stored-as-is map holding a Map[string]", func() any {
-			return map[int]any{1: immutable.WrapMap(map[string]any{"a": int64(1)})}
+		// A container reached through a map with a non-string key. A Properties
+		// carries a pointer to its sorted view, so a nested one decides the order
+		// by that address unless the clone reads through it.
+		{"a map with an int key holding a Properties", func() any {
+			return map[int]any{1: immutable.WrapProperties(map[string]any{"a": int64(1)})}
 		}},
 		{"a stored-as-is map holding a Properties of a map", func() any {
 			return map[int]any{1: immutable.WrapProperties(map[string]any{"a": map[string]any{"b": int64(1)}})}
@@ -147,77 +144,33 @@ func TestCompareProps_OrdersCompositeValuesByContent(t *testing.T) {
 	}
 }
 
-// TestCompareDuplicates_ParentDiscriminates drives two composed-child
-// duplicates rejected from different parent slots. The wire carries the parent
-// coordinates, so they are different records; a comparator that ignores the
-// parent leaves their order to the input.
-func TestCompareDuplicates_ParentDiscriminates(t *testing.T) {
-	t.Parallel()
-
-	child := orderingInstance(t, "Child", "c1")
-	conflict := orderingInstance(t, "Child", "c1")
-	parentA := orderingInstance(t, "Parent", "p1")
-	parentB := orderingInstance(t, "Parent", "p2")
-
-	a := newDuplicate(child, conflict, parentA, "CHILDREN", diag.Issue{})
-	b := newDuplicate(child, conflict, parentB, "CHILDREN", diag.Issue{})
-
-	if compareDuplicates(a, b) == 0 {
-		t.Error("two duplicates differing only in the parent slot compare equal, so their order on the wire is whatever the input order was")
-	}
-	if compareDuplicates(a, b) != -compareDuplicates(b, a) {
-		t.Error("compareDuplicates is not antisymmetric across the parent arm")
-	}
-	if c := compareDuplicates(a, a); c != 0 {
-		t.Errorf("compareDuplicates(a, a) = %d, want 0", c)
-	}
-}
-
-// TestCompareDuplicates_RootAndComposedDoNotCollide pins the boundary between a
-// root duplicate, which has no parent, and a composed one that does.
-func TestCompareDuplicates_RootAndComposedDoNotCollide(t *testing.T) {
-	t.Parallel()
-
-	inst := orderingInstance(t, "Child", "c1")
-	conflict := orderingInstance(t, "Child", "c1")
-	parent := orderingInstance(t, "Parent", "p1")
-
-	root := newDuplicate(inst, conflict, nil, "", diag.Issue{})
-	composed := newDuplicate(inst, conflict, parent, "CHILDREN", diag.Issue{})
-
-	if compareDuplicates(root, composed) == 0 {
-		t.Error("a root duplicate and a composed one compare equal")
-	}
-}
-
-// TestCompareDuplicates_PropertiesDiscriminate drives the final arm: two
-// rejections of one key against one conflict, from one slot, differing only
-// in the rejected instance's payload. Every earlier arm ties, so nothing but
+// TestCompareDuplicates_PropertiesDiscriminate drives the properties arm: two
+// rejections of one key differing only in the rejected instance's payload. Every earlier arm ties, so nothing but
 // the properties can separate them and the wire order would otherwise be the
 // input order.
 func TestCompareDuplicates_PropertiesDiscriminate(t *testing.T) {
 	t.Parallel()
 
-	withName := func(name string) *Instance {
-		return rebuildInstance(tagForms(nil), InstanceParts{
-			TypeID:     orderingTypeID("Person"),
+	withName := func(name string) Instance {
+		return rebuildInstance(tagForms(schema.Schema{}), snapparts.Instance{
+			TypeID:     orderingTypeID(t, "Person"),
 			PrimaryKey: immutable.WrapKey([]any{"p1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": name}),
 		})
 	}
 	conflict := withName("first")
 
-	a := newDuplicate(withName("alice"), conflict, nil, "", diag.Issue{})
-	b := newDuplicate(withName("bob"), conflict, nil, "", diag.Issue{})
+	a := newDuplicate(withName("alice"), conflict)
+	b := newDuplicate(withName("bob"), conflict)
 
-	if compareDuplicates(a, b) == 0 {
+	if compareDuplicates(nil, a, b) == 0 {
 		t.Error("two rejections differing only in the instance payload compare equal, so their order on the wire is the input order")
 	}
-	if compareDuplicates(a, b) != -compareDuplicates(b, a) {
+	if compareDuplicates(nil, a, b) != -compareDuplicates(nil, b, a) {
 		t.Error("compareDuplicates is not antisymmetric across the properties arm")
 	}
-	if c := compareDuplicates(a, a); c != 0 {
-		t.Errorf("compareDuplicates(a, a) = %d, want 0", c)
+	if c := compareDuplicates(nil, a, a); c != 0 {
+		t.Errorf("compareDuplicates(nil, a, a) = %d, want 0", c)
 	}
 }
 
@@ -247,27 +200,27 @@ func TestCompareProps_LengthArm(t *testing.T) {
 func TestCompareDuplicates_ProvenanceDiscriminates(t *testing.T) {
 	t.Parallel()
 
-	at := func(line int) *Instance {
-		return newInstance("Person", orderingTypeID("Person"),
+	at := func(line int) Instance {
+		return newInstance("Person", orderingTypeID(t, "Person"),
 			immutable.WrapKey([]any{"p1"}),
 			immutable.WrapProperties(map[string]any{"id": "p1"}),
-			location.NewProvenance("people.json", path.Root().Index(line),
+			instance.NewProvenance("people.json", path.Root.Index(line),
 				location.Span{Start: location.Position{Line: line, Column: 1}}),
 			false)
 	}
 	conflict := at(1)
 
-	a := newDuplicate(at(7), conflict, nil, "", diag.Issue{})
-	b := newDuplicate(at(9), conflict, nil, "", diag.Issue{})
+	a := newDuplicate(at(7), conflict)
+	b := newDuplicate(at(9), conflict)
 
-	if compareDuplicates(a, b) == 0 {
+	if compareDuplicates(nil, a, b) == 0 {
 		t.Error("two rejections differing only in source position compare equal, so their order on the wire is the input order")
 	}
-	if compareDuplicates(a, b) != -compareDuplicates(b, a) {
+	if compareDuplicates(nil, a, b) != -compareDuplicates(nil, b, a) {
 		t.Error("compareDuplicates is not antisymmetric across the provenance arm")
 	}
-	if c := compareDuplicates(a, a); c != 0 {
-		t.Errorf("compareDuplicates(a, a) = %d, want 0", c)
+	if c := compareDuplicates(nil, a, a); c != 0 {
+		t.Errorf("compareDuplicates(nil, a, a) = %d, want 0", c)
 	}
 }
 
@@ -280,28 +233,29 @@ func TestCompareProps_DiscriminatesByStoredTypeBeforeContent(t *testing.T) {
 	t.Parallel()
 	props := func(v any) immutable.Properties { return immutable.WrapProperties(map[string]any{"p": v}) }
 
-	sameContent := props(immutable.WrapProperties(map[string]any{"a": int64(1)}))
-	asMap := props(immutable.WrapMap(map[string]any{"a": int64(1)}))
-	if compareProps(sameContent, asMap) == 0 {
-		t.Error("a Properties and a Map[string] of one content compare equal; the stored type does not reach the key")
+	// A Slice and a Key of one component clone to one []any.
+	sameContent := props(immutable.WrapSlice([]any{int64(1)}))
+	asKey := props(immutable.WrapKey([]any{int64(1)}))
+	if compareProps(sameContent, asKey) == 0 {
+		t.Error("a Slice and a Key of one content compare equal; the stored type does not reach the key")
 	}
-	if compareProps(sameContent, asMap) != -compareProps(asMap, sameContent) {
+	if compareProps(sameContent, asKey) != -compareProps(asKey, sameContent) {
 		t.Error("compareProps is not antisymmetric over two container types of one content")
 	}
 
-	// Map[string] sorts below Properties by type name, and above it by content,
-	// so a key that leads with the content reverses this pair.
-	lo := props(immutable.WrapMap(map[string]any{"z": int64(1)}))
-	hi := props(immutable.WrapProperties(map[string]any{"a": int64(1)}))
+	// Key sorts below Slice by type name, and above it by content, so a key
+	// that leads with the content reverses this pair.
+	lo := props(immutable.WrapKey([]any{"z"}))
+	hi := props(immutable.WrapSlice([]any{"a"}))
 	if compareProps(lo, hi) >= 0 {
-		t.Error("a Map[string] does not sort below a Properties; the key leads with the content, not the type")
+		t.Error("a Key does not sort below a Slice; the key leads with the content, not the type")
 	}
 }
 
 // TestRenderValue_SeparatorAppearsOnceForEveryStoredType holds the claim
 // renderValue's godoc rests on: the type and the content are split on a byte
-// no Go type name can hold. A type argument carries its whole import path, so
-// a separator drawn from that alphabet splits in the wrong place.
+// no Go type name can hold. A named key type prints its package name, so a
+// separator drawn from an identifier's alphabet splits in the wrong place.
 func TestRenderValue_SeparatorAppearsOnceForEveryStoredType(t *testing.T) {
 	t.Parallel()
 	values := []any{
@@ -312,7 +266,7 @@ func TestRenderValue_SeparatorAppearsOnceForEveryStoredType(t *testing.T) {
 		map[int]any{1: "a"},
 		immutable.WrapProperties(map[string]any{"a": int64(1)}),
 		immutable.WrapKey([]any{int64(1)}),
-		immutable.WrapMap(map[schema.TypeID]any{orderingTypeID("T"): int64(1)}),
+		map[schema.TypeID]any{orderingTypeID(t, "T"): int64(1)},
 	}
 	for _, in := range values {
 		v, ok := immutable.WrapProperties(map[string]any{"p": in}).Get("p")
@@ -323,9 +277,48 @@ func TestRenderValue_SeparatorAppearsOnceForEveryStoredType(t *testing.T) {
 		if n := strings.Count(got, "|"); n != 1 {
 			t.Errorf("renderValue writes %d separators for %T, want 1: %s", n, in, got)
 		}
-		wantType := fmt.Sprintf("%T", v.Unwrap())
+		wantType := fmt.Sprintf("%T", v.Any())
 		if prefix, _, _ := strings.Cut(got, "|"); prefix != wantType {
 			t.Errorf("renderValue's type half reads %q for %T, want %q", prefix, in, wantType)
 		}
+	}
+}
+
+// TestCompareDuplicates_ProvenanceOrdersByWhatADocumentWrites holds the arm to a
+// document's source name and path before any span, since a load's spans are zero.
+func TestCompareDuplicates_ProvenanceOrdersByWhatADocumentWrites(t *testing.T) {
+	t.Parallel()
+	dup := func(prov instance.Provenance) Duplicate {
+		inst := func(p instance.Provenance) Instance {
+			return newInstance("Person", orderingTypeID(t, "Person"),
+				immutable.WrapKey([]any{"p1"}),
+				immutable.WrapProperties(map[string]any{"id": "p1"}), p, false)
+		}
+		return newDuplicate(inst(prov), inst(instance.Provenance{}))
+	}
+	at := func(line int) location.Span { return location.Span{Start: location.Position{Line: line}} }
+	root := path.Root
+	for _, c := range []struct {
+		name          string
+		before, after instance.Provenance
+	}{
+		{"no provenance before one", instance.Provenance{}, instance.NewProvenance("", root, location.Span{})},
+		{"source name before path", instance.NewProvenance("a", root.Index(2), at(0)), instance.NewProvenance("b", root.Index(1), at(0))},
+		{"path before span", instance.NewProvenance("a", root.Index(1), at(9)), instance.NewProvenance("a", root.Index(2), at(1))},
+		{"a path as written", instance.NewProvenance("a", "x", at(0)), instance.NewProvenance("a", "y", at(0))},
+		{"span start", instance.NewProvenance("a", root, at(1)), instance.NewProvenance("a", root, at(2))},
+		{"span end", instance.NewProvenance("a", root, location.Span{End: location.Position{Column: 1}}), instance.NewProvenance("a", root, location.Span{End: location.Position{Column: 2}})},
+		{"span start byte", instance.NewProvenance("a", root, location.Span{Start: location.Position{Offset: 1}}), instance.NewProvenance("a", root, location.Span{Start: location.Position{Offset: 2}})},
+		{"span source", instance.NewProvenance("a", root, location.Span{Source: sourcetest.ID("test://a")}), instance.NewProvenance("a", root, location.Span{Source: sourcetest.ID("test://b")})},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := compareDuplicates(nil, dup(c.before), dup(c.after)); got >= 0 {
+				t.Errorf("compareDuplicates(nil, before, after) = %d, want negative", got)
+			}
+			if got := compareDuplicates(nil, dup(c.after), dup(c.before)); got <= 0 {
+				t.Errorf("compareDuplicates(nil, after, before) = %d, want positive", got)
+			}
+		})
 	}
 }

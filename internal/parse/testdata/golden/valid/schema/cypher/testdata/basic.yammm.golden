@@ -1,0 +1,170 @@
+{
+  "name": "\"basic_test\"",
+  "span": {
+    "s": 0,
+    "e": 19
+  },
+  "types": [
+    {
+      "name": "Entity",
+      "name_span": {
+        "s": 26,
+        "e": 32
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 51,
+              "e": 57
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 39,
+            "e": 65
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 82,
+              "e": 88
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 70,
+            "e": 97
+          }
+        },
+        {
+          "name": "description",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 114,
+              "e": 120
+            }
+          },
+          "span": {
+            "s": 102,
+            "e": 120
+          }
+        },
+        {
+          "name": "count",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 137,
+              "e": 144
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 125,
+            "e": 153
+          }
+        },
+        {
+          "name": "score",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 170,
+              "e": 175
+            }
+          },
+          "span": {
+            "s": 158,
+            "e": 175
+          }
+        },
+        {
+          "name": "active",
+          "constraint": {
+            "kind": "Boolean",
+            "span": {
+              "s": 192,
+              "e": 199
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 180,
+            "e": 208
+          }
+        },
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 225,
+              "e": 234
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 213,
+            "e": 243
+          }
+        },
+        {
+          "name": "birth_date",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 260,
+              "e": 264
+            }
+          },
+          "span": {
+            "s": 248,
+            "e": 264
+          }
+        },
+        {
+          "name": "ref",
+          "constraint": {
+            "kind": "UUID",
+            "span": {
+              "s": 281,
+              "e": 285
+            }
+          },
+          "span": {
+            "s": 269,
+            "e": 285
+          }
+        },
+        {
+          "name": "embedding",
+          "constraint": {
+            "kind": "Vector",
+            "args": [
+              "3"
+            ],
+            "span": {
+              "s": 302,
+              "e": 311
+            }
+          },
+          "span": {
+            "s": 290,
+            "e": 311
+          }
+        }
+      ],
+      "span": {
+        "s": 21,
+        "e": 313
+      }
+    }
+  ]
+}

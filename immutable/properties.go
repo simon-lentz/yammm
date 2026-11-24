@@ -4,98 +4,68 @@ import (
 	"iter"
 	"maps"
 	"slices"
+	"sync"
 )
 
-// Properties provides immutable access to instance property values.
-//
-// Properties is a specialized wrapper for string-keyed maps that appear
-// in instance property access patterns. It provides case-insensitive lookup
-// via [Properties.GetFold] and deterministic iteration via [Properties.SortedKeys].
+// Properties holds a string-keyed map immutably, such as an instance's or an
+// edge's properties. [Wrap] makes one of each string-keyed map it reaches, save
+// inside a map with a non-string key. [Properties.Get] reads a name exactly,
+// and its iterators visit the names in sorted order.
 //
 // Properties is safe for concurrent read access.
 type Properties struct {
 	entries map[string]Value
 
-	// sortedKeys is the precomputed sorted key list, computed at construction.
-	// Nil for zero-value Properties or empty properties.
-	sortedKeys []string
-
-	// foldedIndex maps lowercase (ASCII-folded) keys to original keys.
-	// Used for O(1) case-insensitive lookup in GetFold.
-	// When multiple keys collide under folding, the alphabetically first wins.
-	foldedIndex map[string]string
+	// view holds the sorted names, computed on first use and shared by every
+	// copy. It is nil exactly when entries is.
+	view *propertiesView
 }
 
-// WrapProperties wraps a property map with ownership transfer semantics.
-//
-// After calling WrapProperties, the caller MUST NOT retain or use any reference
-// to props or any mutable value reachable from props. Mutation after WrapProperties
-// is undefined behavior.
-//
-// Pass [WithClone] with true to deep-clone what would be stored as-is — a
-// non-string-keyed map and its contents — so the caller can retain it.
-func WrapProperties(props map[string]any, opts ...Option) Properties {
+// propertiesView is the sorted-name list of one entry set, computed once, so
+// building a Properties pays for no sort until a sorted read.
+type propertiesView struct {
+	sortOnce   sync.Once
+	sortedKeys []string
+}
+
+// newProperties returns a Properties over entries, which it takes.
+func newProperties(entries map[string]Value) Properties {
+	return Properties{entries: entries, view: &propertiesView{}}
+}
+
+// sorted returns the names in sorted order. Safe for concurrent first use.
+func (p Properties) sorted() []string {
+	if p.view == nil {
+		return nil
+	}
+	p.view.sortOnce.Do(func() {
+		p.view.sortedKeys = slices.Sorted(maps.Keys(p.entries))
+	})
+	return p.view.sortedKeys
+}
+
+// WrapProperties returns props held immutably. It copies the map, and wraps
+// each value as [Wrap] does, so a later change to props reaches nothing it
+// returned, save through a value Wrap stores as given, such as a struct, a
+// pointer or an array. A nil map gives the zero Properties.
+func WrapProperties(props map[string]any) Properties {
 	if props == nil {
 		return Properties{}
 	}
-
-	cfg := resolveConfig(opts)
 	entries := make(map[string]Value, len(props))
 	for k, v := range props {
-		entries[k] = Value{val: wrapValue(v, cfg.clone)}
+		entries[k] = Value{val: wrapValue(v)}
 	}
-	sortedKeys := slices.Sorted(maps.Keys(entries))
-	return Properties{
-		entries:     entries,
-		sortedKeys:  sortedKeys,
-		foldedIndex: computeFoldedIndex(sortedKeys),
-	}
-}
-
-// PropertiesOf returns a Properties over the entries of m, sharing them: both
-// are immutable, so one wrapped map can be read as a Properties (folded
-// lookup, sorted iteration) and as a [Map] without a second wrap.
-func PropertiesOf(m Map[string]) Properties {
-	if m.entries == nil {
-		return Properties{}
-	}
-	if m.folded == nil {
-		sortedKeys := slices.Sorted(maps.Keys(m.entries))
-		return Properties{entries: m.entries, sortedKeys: sortedKeys, foldedIndex: computeFoldedIndex(sortedKeys)}
-	}
-	sortedKeys, foldedIndex := m.folded.get(m.entries)
-	return Properties{entries: m.entries, sortedKeys: sortedKeys, foldedIndex: foldedIndex}
+	return newProperties(entries)
 }
 
 // Get returns the value for the given property name and true if it exists.
 // Returns (zero Value, false) if the property does not exist.
 //
-// This performs an exact, case-sensitive match. Use [Properties.GetFold]
-// for case-insensitive lookup.
+// The match is exact.
 func (p Properties) Get(name string) (Value, bool) {
 	v, ok := p.entries[name]
 	return v, ok
-}
-
-// GetFold returns the value for a property name using ASCII case-insensitive matching.
-//
-// Only ASCII letters (a-z, A-Z) are folded; other characters must match exactly.
-// A key that matches name exactly wins. Otherwise, of the keys that fold to name
-// (e.g., "Name" and "NAME"), the alphabetically first wins, so the result is
-// deterministic.
-//
-// Returns (zero Value, false) if no matching property exists.
-func (p Properties) GetFold(name string) (Value, bool) {
-	// First try exact match (common case, O(1))
-	if v, ok := p.entries[name]; ok {
-		return v, ok
-	}
-
-	// Use folded index for O(1) case-insensitive lookup
-	if originalKey, ok := p.foldedIndex[toLowerASCII(name)]; ok {
-		return p.entries[originalKey], true
-	}
-	return Value{}, false
 }
 
 // Len returns the number of properties.
@@ -103,36 +73,24 @@ func (p Properties) Len() int {
 	return len(p.entries)
 }
 
-// Keys returns an iterator over property names.
-//
-// The iteration order is not guaranteed to be consistent across calls.
-// Use [Properties.SortedKeys] for deterministic ordering.
+// Keys returns an iterator over the property names in sorted order.
 func (p Properties) Keys() iter.Seq[string] {
-	return maps.Keys(p.entries)
+	// One closure and no other statement keeps Keys inlinable, so a range over
+	// it allocates nothing; the closure reads the sorted names when it runs.
+	return func(yield func(string) bool) {
+		for _, k := range p.sorted() {
+			if !yield(k) {
+				return
+			}
+		}
+	}
 }
 
-// SortedKeys returns an iterator over property names in sorted order.
-//
-// This provides deterministic iteration order for stable output.
-// The sorted keys are precomputed at construction time.
-func (p Properties) SortedKeys() iter.Seq[string] {
-	return slices.Values(p.sortedKeys)
-}
-
-// Range returns an iterator over property name-value pairs.
-//
-// The iteration order is not guaranteed to be consistent across calls.
-func (p Properties) Range() iter.Seq2[string, Value] {
-	return maps.All(p.entries)
-}
-
-// SortedRange returns an iterator over property name-value pairs in sorted key order.
-//
-// This provides deterministic iteration order for stable output.
-// The sorted keys are precomputed at construction time.
-func (p Properties) SortedRange() iter.Seq2[string, Value] {
+// All returns an iterator over the name-value pairs in sorted name order.
+func (p Properties) All() iter.Seq2[string, Value] {
+	// One closure and no other statement keeps All inlinable, as Keys.
 	return func(yield func(string, Value) bool) {
-		for _, k := range p.sortedKeys {
+		for _, k := range p.sorted() {
 			if !yield(k, p.entries[k]) {
 				return
 			}
@@ -140,10 +98,10 @@ func (p Properties) SortedRange() iter.Seq2[string, Value] {
 	}
 }
 
-// Clone returns a deep copy of the properties as a mutable map[string]any.
-//
-// This is the escape hatch for callers who need to modify values.
-// The returned map is independent of the immutable Properties.
+// Clone returns the properties as a new map[string]any, each value as
+// [Value.Clone] returns it: a container at every depth is copied, and what
+// [Value.Clone] shares is shared with the Properties. The zero Properties
+// clones to nil, and any other Properties to a non-nil map.
 func (p Properties) Clone() map[string]any {
 	if p.entries == nil {
 		return nil
@@ -154,46 +112,4 @@ func (p Properties) Clone() map[string]any {
 		result[k] = cloneValue(v)
 	}
 	return result
-}
-
-// computeFoldedIndex builds a map from lowercase (ASCII-folded) keys to original keys.
-// Keys are processed in sorted order, so collisions resolve to the alphabetically first key.
-func computeFoldedIndex(sortedKeys []string) map[string]string {
-	if len(sortedKeys) == 0 {
-		return nil
-	}
-
-	index := make(map[string]string, len(sortedKeys))
-	for _, k := range sortedKeys {
-		folded := toLowerASCII(k)
-		// First key (alphabetically) wins on collision
-		if _, exists := index[folded]; !exists {
-			index[folded] = k
-		}
-	}
-	return index
-}
-
-// toLowerASCII converts ASCII letters (A-Z) to lowercase (a-z).
-// Non-ASCII characters are left unchanged.
-func toLowerASCII(s string) string {
-	// Fast path: check if any conversion is needed
-	needsConversion := false
-	for i := range len(s) {
-		if 'A' <= s[i] && s[i] <= 'Z' {
-			needsConversion = true
-			break
-		}
-	}
-	if !needsConversion {
-		return s
-	}
-
-	b := []byte(s)
-	for i, c := range b {
-		if 'A' <= c && c <= 'Z' {
-			b[i] = c + ('a' - 'A')
-		}
-	}
-	return string(b)
 }

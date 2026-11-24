@@ -5,158 +5,44 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/typeorder"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// SnapshotParts holds the pre-resolved data needed to construct a Snapshot
-// without running the graph construction pipeline. Edges and records address
-// instances by (type identity, key), never by pointer; [RebuildSnapshot]
-// resolves them through the instance index.
-// Every type reference below is a [schema.TypeID]. A name cannot carry a
-// transitively imported type or separate two same-named types, so no position
-// takes one.
-//
-// Instances holds every root instance, and each is filed under its own
-// [InstanceParts.TypeID]: a root carries one identity, so no group key beside
-// it can disagree with it. Types lists the types the snapshot denotes; every
-// root's type joins it, so an instance cannot be filed under a type the
-// snapshot does not report.
-type SnapshotParts struct {
-	Types      []schema.TypeID
-	Instances  []InstanceParts
-	Edges      []EdgeParts
-	Duplicates []DuplicateParts
-	Unresolved []UnresolvedParts
-
-	// Attestation carries the loaded header's validity claim verbatim, and is
-	// nil for a document that carries none. RebuildSnapshot stores it without
-	// derivation: a rebuilt instance cannot prove validity, only the writing
-	// library's claim survives — and a document that claimed nothing must not
-	// come back claiming both dimensions are false.
-	Attestation *Attestation
+func init() {
+	snapparts.Hook = func(s schema.Schema, parts snapparts.Parts) any {
+		return rebuildSnapshot(s, parts)
+	}
 }
 
-// InstanceParts holds the data for a single instance. Composed children
-// are nested recursively. The instance's name is rendered from TypeID under
-// the schema, as [Graph.Add] renders it.
-//
-// Composed children keep the order the caller gives: RebuildSnapshot does not
-// re-sort them, and the writers emit them in that order.
-type InstanceParts struct {
-	TypeID     schema.TypeID
-	PrimaryKey immutable.Key
-	Properties immutable.Properties
-	Composed   map[string][]InstanceParts
-	Provenance *location.Provenance
-}
-
-// EdgeParts holds the data for a single resolved edge. The source is
-// identified by (type identity, primary key) and the target by its key alone:
-// its type is the association's declared target, which RebuildSnapshot reads
-// from the relation as [Graph.Add] does, so no part can state another.
-type EdgeParts struct {
-	Relation   string
-	SourceType schema.TypeID
-	SourceKey  immutable.Key
-	TargetKey  immutable.Key
-	Properties immutable.Properties
-}
-
-// DuplicateParts holds the data for a single duplicate record: the rejected
-// instance and, for a composed-child duplicate, the parent slot it was
-// rejected from, named by ParentType, ParentKey and Relation. No field states
-// the conflict: RebuildSnapshot derives it from the position, as [Graph.Add]
-// records it — the root at the instance's own type and key, or the occupant of
-// the parent's slot at its key, or a (one) slot's sole occupant.
-type DuplicateParts struct {
-	Instance   InstanceParts
-	ParentType schema.TypeID
-	ParentKey  immutable.Key
-	Relation   string
-}
-
-// UnresolvedParts holds the data for a single unresolved edge record.
-//
-// Properties carries the edge property values declared on the forward
-// reference. Populated only when Reason is "target_missing"; empty
-// otherwise. Loaded from the "properties" field on unresolved-edge
-// entries, which every readable wire format carries.
-//
-// No field states the target type or whether the association is required:
-// RebuildSnapshot reads both from the relation, as [Graph.Add] does, so a
-// record cannot disagree with the association it names.
-type UnresolvedParts struct {
-	SourceType schema.TypeID
-	SourceKey  immutable.Key
-	Relation   string
-	TargetKey  immutable.Key
-	Reason     string
-	Properties immutable.Properties
-}
-
-// RebuildSnapshot constructs a Snapshot from pre-resolved parts.
-//
-// This is the deserialization entry point for the snapshot package.
-// It accepts fully-resolved data (instances, edges, diagnostics) and
-// assembles them into an immutable Snapshot without re-running validation
-// or edge resolution.
-//
-// Most users should construct snapshots via [Graph.Add] + [Graph.Snapshot].
-// RebuildSnapshot exists for [snapshot.Load] and testing.
-//
-// RebuildSnapshot does not accept a context.Context. Its work is
-// proportional to the already-decoded Parts data and completes in bounded
-// time. Context cancellation is checked during the streaming decode phase
-// that precedes RebuildSnapshot; see snapshot.Load.
+// rebuildSnapshot constructs a Snapshot from the parts of a document the
+// snapshot package's reader accepted. The reader holds a document to the package
+// doc's "Structural facts" first, so every reference below resolves and this
+// constructor refuses nothing. It judges no property value's constraint.
 //
 // Property values are rewritten into the representation their schema
-// constraint stores — a Timestamp, Date or UUID reaches the same text a
-// validated value would. A value the constraint cannot render is kept as it
-// arrived, because this entry point reconstructs a document rather than
-// validating one, and a document written before that rule existed must still
-// load. Primary keys are rewritten the same way, before the instance index is
-// built, and every position that addresses an instance moves with them, so an
-// edge or a duplicate record spelled another way still resolves.
-//
-// Parts are held to the package doc's "Structural facts", under the codes it
-// names: Fatal E_INTERNAL for identity, root and denoted types, declared names,
-// root addresses, reasons, records and duplicate records, and Add's codes for slots,
-// keys and associations. An edge or record addressing an instance the parts do
-// not hold is Fatal E_INTERNAL too. snapshot.Load holds a document to the same facts
-// first, so a failure it passes here is a bug in the reader.
-//
-// Panics if s is nil (programmer error).
-func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Result) {
-	if s == nil {
-		panic("graph.RebuildSnapshot: nil Schema")
-	}
-	collector := diag.NewCollector(0)
-
-	// Values arrive in whatever representation the caller assembled them in.
-	// Rewriting them here is what keeps a graph rebuilt from parts equal to
-	// one built through validation, so a snapshot round trip reaches a
-	// fixpoint on the first pass.
+// constraint stores, so a graph rebuilt from a document equals one built through
+// validation and a snapshot round trip reaches a fixpoint on the first pass. A
+// value the constraint cannot render is kept as it arrived. Keys are taken as
+// written: the reader refuses a key component its kind stores as other text, so
+// every address is already the one a validator stores.
+func rebuildSnapshot(s schema.Schema, parts snapparts.Parts) Snapshot {
 	canon := newCanonicalizer(s)
-
-	validateParts(&structureRules{s: s, canon: canon, c: collector, op: "RebuildSnapshot"}, parts)
-	if collector.HasErrors() {
-		return nil, collector.Result()
-	}
 
 	// Step 1: Create Instance objects, each filed under its own identity.
 	perType := make(map[schema.TypeID]int)
 	for _, ip := range parts.Instances {
 		perType[ip.TypeID]++
 	}
-	instances := make(map[schema.TypeID][]*Instance, len(perType))
-	instanceIndex := make(map[schema.TypeID]map[string]*Instance, len(perType))
+	instances := make(map[schema.TypeID][]Instance, len(perType))
+	instanceIndex := make(map[schema.TypeID]map[string]Instance, len(perType))
 	types := slices.Clone(parts.Types)
 	for typeID, n := range perType {
-		instances[typeID] = make([]*Instance, 0, n)
-		instanceIndex[typeID] = make(map[string]*Instance, n)
+		instances[typeID] = make([]Instance, 0, n)
+		instanceIndex[typeID] = make(map[string]Instance, n)
 		types = append(types, typeID)
 	}
 	name := tagForms(s)
@@ -165,89 +51,34 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		typeID := ip.TypeID
 		idx := instanceIndex[typeID]
 		inst := rebuildInstance(name, canon.instance(ip))
-		// Indexed by the key the instance CARRIES, never the caller's
-		// spelling: every lookup below canonicalizes first, and the
-		// snapshot's own accessors read this same index. The address rule
-		// has refused two parts at one address.
 		keyStr := inst.PrimaryKey().String()
 		instances[typeID] = append(instances[typeID], inst)
 		idx[keyStr] = inst
 	}
 
-	// Step 2: Create Edge objects, resolving pointers.
-	edges := make([]*Edge, 0, len(parts.Edges))
+	// Step 2: Create Edge records, resolving references.
+	edges := make([]Edge, 0, len(parts.Edges))
 	for _, ep := range parts.Edges {
-		// Canonicalized BEFORE the lookup: step 1 rewrote the instance keys the
-		// index is built from, so an endpoint resolved from the caller's
-		// spelling would miss an instance that is present.
-		ep = canon.edge(ep)
-		targetType := associationTarget(s, ep.SourceType, ep.Relation)
+		ep.Properties = canon.edgeProperties(ep.SourceType, ep.Relation, ep.Properties)
 		source := lookupInstance(instanceIndex, ep.SourceType, ep.SourceKey.String())
-		target := lookupInstance(instanceIndex, targetType, ep.TargetKey.String())
-
-		if source == nil {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: edge source %s[%s] not found in instance index",
-					ep.SourceType, ep.SourceKey.String())).Build())
-			continue
-		}
-		if target == nil {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: edge target %s[%s] not found in instance index",
-					targetType, ep.TargetKey.String())).Build())
-			continue
-		}
-
+		target := lookupInstance(instanceIndex, associationTarget(s, ep.SourceType, ep.Relation), ep.TargetKey.String())
 		edges = append(edges, newEdge(ep.Relation, source, target, ep.Properties))
 	}
 
-	// Step 3: Create Duplicate records.
-	duplicates := make([]*Duplicate, 0, len(parts.Duplicates))
-	root := func(id schema.TypeID, key string) *Instance { return lookupInstance(instanceIndex, id, key) }
-	for i, dp := range parts.Duplicates {
-		// Every address in the record moves with the instances step 1 rewrote.
-		dp = canon.duplicate(dp)
-		dupInst := rebuildInstance(name, dp.Instance)
-		// Defense-in-depth: duplicate instances must not have composed children.
-		if len(dp.Instance.Composed) > 0 {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: duplicate record %d, %s[%s], has composed children",
-					i, dp.Instance.TypeID, dupInst.PrimaryKey().String())).Build())
-			continue
-		}
-		var parent *Instance
-		if dp.Relation != "" {
-			if parent = root(dp.ParentType, dp.ParentKey.String()); parent == nil {
-				collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-					fmt.Sprintf("RebuildSnapshot: duplicate record %d names parent %s[%s], which is not a root",
-						i, dp.ParentType, dp.ParentKey.String())).Build())
-				continue
-			}
-		}
-		conflict, why := derivedConflict(s, canon, root, dupInst, parent, dp.Relation)
-		if conflict == nil {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: duplicate record %d, %s[%s], %s",
-					i, dp.Instance.TypeID, dupInst.PrimaryKey().String(), why)).Build())
-			continue
-		}
-		duplicates = append(duplicates, newDuplicate(dupInst, conflict, parent, dp.Relation, diag.Issue{}))
+	// Step 3: Create Duplicate records, each conflicting with the root at its own
+	// type and key, as [Graph.Add] records it.
+	duplicates := make([]Duplicate, 0, len(parts.Duplicates))
+	for _, ip := range parts.Duplicates {
+		dupInst := rebuildInstance(name, canon.instance(ip))
+		conflict := lookupInstance(instanceIndex, dupInst.typeID, dupInst.primaryKey.String())
+		duplicates = append(duplicates, newDuplicate(dupInst, conflict))
 	}
 
 	// Step 4: Create UnresolvedEdge records.
-	unresolvedEdges := make([]*UnresolvedEdge, 0, len(parts.Unresolved))
+	unresolvedEdges := make([]UnresolvedEdge, 0, len(parts.Unresolved))
 	for _, up := range parts.Unresolved {
-		// Both addresses move: the source with the instances step 1 rewrote,
-		// the target under the relation's declared target type, as the Add
-		// path rendered it.
-		up = canon.unresolved(up)
+		up.Properties = canon.edgeProperties(up.SourceType, up.Relation, up.Properties)
 		source := lookupInstance(instanceIndex, up.SourceType, up.SourceKey.String())
-		if source == nil {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: unresolved source %s[%s] not found in instance index",
-					up.SourceType, up.SourceKey.String())).Build())
-			continue
-		}
 
 		// Key.String() renders a keyless key as "[]", but UnresolvedEdge.TargetKey
 		// is empty for the "absent" and "empty" reasons, which carry no target.
@@ -258,81 +89,22 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 
 		unresolvedEdges = append(unresolvedEdges,
 			newUnresolvedEdge(source, up.Relation, associationTarget(s, up.SourceType, up.Relation), targetKey,
-				requiredUnder(s, up.SourceType, up.Relation), up.Reason, up.Properties))
-	}
-
-	if collector.HasErrors() {
-		return nil, collector.Result()
+				requiredUnder(s, up.SourceType, up.Relation), unresolvedReason(up.Reason), up.Properties))
 	}
 
 	// Step 5: Assemble the Snapshot. newSnapshot establishes every ordering
 	// and drops the repeats step 1 appended.
-	if types == nil {
-		types = []schema.TypeID{}
+	var claim *Attestation
+	if a := parts.Attestation; a != nil {
+		claim = &Attestation{Values: a.Values, Associations: a.Associations}
 	}
-
-	snap := newSnapshot(s, canon, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK(), parts.Attestation)
-	return snap, diag.OK()
+	return newSnapshot(s, canon, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, claim)
 }
 
-// validateParts holds parts to the structural rules ([structureRules]) at
-// every position: the types entries, each root and its composed children at
-// every depth, each duplicate's instance, and each edge and unresolved record.
-func validateParts(r *structureRules, parts SnapshotParts) {
-	for i, id := range parts.Types {
-		r.typesEntry(i, id)
-	}
-
-	counts := make(map[schema.TypeID]int)
-	var order []schema.TypeID
-	for _, ip := range parts.Instances {
-		if counts[ip.TypeID] == 0 {
-			order = append(order, ip.TypeID)
-		}
-		counts[ip.TypeID]++
-	}
-	for _, typeID := range order {
-		r.rootType(typeID, counts[typeID])
-	}
-	for _, ip := range parts.Instances {
-		checkTree(r, "instance", ip)
-		if _, ok := r.s.TypeByID(ip.TypeID); ok {
-			r.address(ip.TypeID, ip.PrimaryKey)
-		}
-	}
-
-	for _, ep := range parts.Edges {
-		r.identity(ep.SourceType, positionAt("edge source", ep.SourceKey.String()))
-		r.association(associationRecord{
-			position: "edge from", source: ep.SourceType, sourceKey: ep.SourceKey, relation: ep.Relation,
-			targetKey: ep.TargetKey, properties: ep.Properties,
-		})
-	}
-
-	for _, dp := range parts.Duplicates {
-		// A root duplicate names no parent, so its ParentType is zero by right.
-		if dp.Relation != "" {
-			r.identity(dp.ParentType, positionAt("duplicate parent", dp.ParentKey.String()))
-		}
-		checkTree(r, "duplicate instance", dp.Instance)
-	}
-
-	for _, up := range parts.Unresolved {
-		r.identity(up.SourceType, positionAt("unresolved source", up.SourceKey.String()))
-		r.unresolvedReason(up.Reason, up.TargetKey, up.Properties)
-		r.association(associationRecord{
-			position: "unresolved record of", source: up.SourceType, sourceKey: up.SourceKey, relation: up.Relation,
-			targetKey: up.TargetKey, reason: up.Reason, properties: up.Properties,
-		})
-	}
-	r.oneOverflow()
-	recordFacts(r, parts)
-}
-
-// rebuildInstance creates an Instance from InstanceParts, recursing into
-// composed children. Rebuilt instances never report Validated: the wire
-// carries the header attestation as a claim, not a per-instance proof.
-func rebuildInstance(name func(schema.TypeID) string, ip InstanceParts) *Instance {
+// rebuildInstance creates an Instance from its parts, recursing into composed
+// children. Rebuilt instances never report Validated: the wire carries the
+// header attestation as a claim, not a per-instance proof.
+func rebuildInstance(name func(schema.TypeID) string, ip snapparts.Instance) Instance {
 	inst := newInstance(name(ip.TypeID), ip.TypeID, ip.PrimaryKey, ip.Properties, ip.Provenance, false)
 
 	for relName, children := range ip.Composed {
@@ -347,7 +119,7 @@ func rebuildInstance(name func(schema.TypeID) string, ip InstanceParts) *Instanc
 
 // tagForms returns [schema.TagForm] under s, rendered once per identity: a
 // snapshot holds few types and many instances.
-func tagForms(s *schema.Schema) func(schema.TypeID) string {
+func tagForms(s schema.Schema) func(schema.TypeID) string {
 	names := make(map[schema.TypeID]string)
 	return func(id schema.TypeID) string {
 		n, ok := names[id]
@@ -360,19 +132,19 @@ func tagForms(s *schema.Schema) func(schema.TypeID) string {
 }
 
 // lookupInstance finds an instance in the index by type identity and key string.
-func lookupInstance(index map[schema.TypeID]map[string]*Instance, id schema.TypeID, keyStr string) *Instance {
+func lookupInstance(index map[schema.TypeID]map[string]Instance, id schema.TypeID, keyStr string) Instance {
 	typeIdx := index[id]
 	if typeIdx == nil {
-		return nil
+		return Instance{}
 	}
 	return typeIdx[keyStr]
 }
 
-// compareEdges provides the sorting comparator for edges.
-// Sorts by (sourceType, sourceKey, relation, targetType, targetKey), comparing
-// types by identity so two types rendering one name do not interleave.
-func compareEdges(a, b *Edge) int {
-	if c := cmp.Compare(a.source.typeID.String(), b.source.typeID.String()); c != 0 {
+// compareEdges orders edges by (sourceType, sourceKey, relation, targetType,
+// targetKey), types as o orders them. A snapshot holds one edge per source,
+// association and target, so no two of its edges tie.
+func compareEdges(o typeorder.Order, a, b Edge) int {
+	if c := o.Compare(a.source.typeID, b.source.typeID); c != 0 {
 		return c
 	}
 	if c := cmp.Compare(a.source.primaryKey.String(), b.source.primaryKey.String()); c != 0 {
@@ -381,35 +153,31 @@ func compareEdges(a, b *Edge) int {
 	if c := cmp.Compare(a.relation, b.relation); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.target.typeID.String(), b.target.typeID.String()); c != 0 {
+	if c := o.Compare(a.target.typeID, b.target.typeID); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.target.primaryKey.String(), b.target.primaryKey.String()); c != 0 {
-		return c
-	}
-	return compareProps(a.properties, b.properties)
+	return cmp.Compare(a.target.primaryKey.String(), b.target.primaryKey.String())
 }
 
 // compareProps orders two property sets by walking both in sorted key order.
 //
 // It compares field by field rather than rendering each set to one string:
 // a "name=value;" rendering collides whenever a value holds the separators, so
-// an ordinary String edge property containing ';' or '=' made two distinct sets
+// an ordinary String property containing ';' or '=' made two distinct sets
 // compare equal and put map-iteration order back into the document. Values are
 // discriminated by type before value, so an int64 1 and the string "1" do not
 // tie.
 //
 // What this does not promise: two values of one type whose %v forms are equal
-// still tie. For the scalar types an edge property can hold, %#v is injective.
+// still tie. For the scalar types a property can hold, %#v is injective.
 // A composite renders by its content (see renderValue), so allocation never
 // decides, and quoting keeps one string apart from two.
 func compareProps(a, b immutable.Properties) int {
-	// The key order is precomputed at construction, so collecting it costs one
-	// allocation and no sort. An earlier rewrite walked two iter.Pull2
-	// coroutines to save that allocation and paid a coroutine pair per call
-	// instead — inside three comparators a sort runs O(n log n) times.
-	an := slices.Collect(a.SortedKeys())
-	bn := slices.Collect(b.SortedKeys())
+	// Keys reads the order a Properties sorts once and keeps, so collecting it
+	// costs one allocation after that sort; a pair of iter.Pull2 coroutines
+	// costs more per call.
+	an := slices.Collect(a.Keys())
+	bn := slices.Collect(b.Keys())
 	for i := range min(len(an), len(bn)) {
 		if c := cmp.Compare(an[i], bn[i]); c != 0 {
 			return c
@@ -429,17 +197,17 @@ func compareProps(a, b immutable.Properties) int {
 // %#v, which quotes strings and writes a nil container apart from an empty one; a
 // container's own %v would print its address.
 func renderValue(v immutable.Value) string {
-	return fmt.Sprintf("%T|%#v", v.Unwrap(), v.Clone())
+	return fmt.Sprintf("%T|%#v", v.Any(), v.Clone())
 }
 
-// compareUnresolved orders unresolved records. Graph.pending is a map,
-// so the slice these are collected into arrives in map-iteration order; an
-// ordering that leaves any two distinct records equal hands their positions to
-// that order, and Marshal's documented determinism fails across process runs.
-// Reproduced before this comparator was completed: sixty tied pairs spread
-// across sixty pending buckets produced ten distinct documents in ten runs.
-func compareUnresolved(a, b *UnresolvedEdge) int {
-	if c := cmp.Compare(a.source.TypeID().String(), b.source.TypeID().String()); c != 0 {
+// compareUnresolved orders unresolved records by (sourceType, sourceKey,
+// relation, targetType, targetKey), types as o orders them. Graph.pending is a
+// map, so the records arrive in map-iteration order, and only a total order
+// keeps Marshal deterministic. It is total: a source holds one record per
+// association and target, and its one "absent" or "empty" record there carries
+// the empty key.
+func compareUnresolved(o typeorder.Order, a, b UnresolvedEdge) int {
+	if c := o.Compare(a.source.TypeID(), b.source.TypeID()); c != 0 {
 		return c
 	}
 	if c := cmp.Compare(a.source.PrimaryKey().String(), b.source.PrimaryKey().String()); c != 0 {
@@ -448,80 +216,57 @@ func compareUnresolved(a, b *UnresolvedEdge) int {
 	if c := cmp.Compare(a.relation, b.relation); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.targetType.String(), b.targetType.String()); c != 0 {
+	if c := o.Compare(a.targetType, b.targetType); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.targetKey, b.targetKey); c != 0 {
-		return c
-	}
-	if c := cmp.Compare(a.reason, b.reason); c != 0 {
-		return c
-	}
-	if a.required != b.required {
-		if a.required {
-			return 1
-		}
-		return -1
-	}
-	return compareProps(a.properties, b.properties)
+	return cmp.Compare(a.targetKey, b.targetKey)
 }
 
-// compareDuplicates orders duplicate records. Two rejections of one
-// key against one conflict differ only in the instance they carry, so the
-// rejected instance's properties are the last discriminator.
-func compareDuplicates(a, b *Duplicate) int {
-	if c := cmp.Compare(a.instance.TypeID().String(), b.instance.TypeID().String()); c != 0 {
+// compareDuplicates orders duplicate records by type, as o orders types, then
+// key. Two rejections of one key differ only in the instance they carry, so its
+// properties and its provenance are the last discriminators.
+func compareDuplicates(o typeorder.Order, a, b Duplicate) int {
+	if c := o.Compare(a.instance.TypeID(), b.instance.TypeID()); c != 0 {
 		return c
 	}
 	if c := cmp.Compare(a.instance.PrimaryKey().String(), b.instance.PrimaryKey().String()); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.relation, b.relation); c != 0 {
-		return c
-	}
-	if c := cmp.Compare(a.conflict.TypeID().String(), b.conflict.TypeID().String()); c != 0 {
-		return c
-	}
-	if c := cmp.Compare(a.conflict.PrimaryKey().String(), b.conflict.PrimaryKey().String()); c != 0 {
-		return c
-	}
-	if c := cmp.Compare(parentKeyOf(a), parentKeyOf(b)); c != 0 {
-		return c
-	}
 	if c := compareProps(a.instance.Properties(), b.instance.Properties()); c != 0 {
 		return c
 	}
-	// Two rows of one file can collide with one instance carrying identical
-	// properties, and differ only in where they came from. Without this arm
-	// they tie, and slices.SortFunc is not stable, so a consumer pairing the
-	// Nth record with the Nth input row pairs the wrong span.
-	return cmp.Compare(provenanceKeyOf(a.instance), provenanceKeyOf(b.instance))
+	return compareProvenance(a.instance.Provenance(), b.instance.Provenance())
 }
 
-// provenanceKeyOf renders an instance's source position for ordering.
-//
-// A loaded instance carries a provenance only when the document's instance did:
-// the decoder guards on a present provenance and the writer emits none for an
-// instance without one. Where it does, the span is zero because the decoder
-// builds it that way, so within one source name every loaded record ties at 0:0
-// and across source names the arm orders by name — a stable order, kept. An
-// instance with no provenance renders empty and ties.
-func provenanceKeyOf(i *Instance) string {
-	prov := i.Provenance()
-	if prov == nil {
-		return ""
+// compareProvenance orders by what a document writes first, the source name and
+// the path, so a load derives the order Marshal wrote: a load's spans are zero. The
+// span then separates two records no document can tell apart. No provenance sorts first.
+func compareProvenance(a, b instance.Provenance) int {
+	if a.IsZero() != b.IsZero() {
+		if a.IsZero() {
+			return -1
+		}
+		return 1
 	}
-	span := prov.Span()
-	return fmt.Sprintf("%s\x00%d:%d", prov.SourceName(), span.Start.Line, span.Start.Column)
+	return cmp.Or(
+		cmp.Compare(a.SourceName(), b.SourceName()),
+		cmp.Compare(a.Path(), b.Path()),
+		a.Span().Compare(b.Span()),
+	)
 }
 
-// parentKeyOf renders a duplicate's parent slot, or the empty string for a root
-// duplicate. The wire carries the parent coordinates, so two composed
-// duplicates rejected from different slots are different records and an
-// ordering that ignores the parent leaves their positions to the input order.
-func parentKeyOf(d *Duplicate) string {
-	if d.parent == nil {
-		return ""
-	}
-	return d.parent.TypeID().String() + "\x00" + d.parent.PrimaryKey().String()
+// associationTarget returns the declared target of relation, an association of
+// source under s. The reader refuses a record under any other name first.
+func associationTarget(s schema.Schema, source schema.TypeID, relation string) schema.TypeID {
+	t, _ := s.TypeByID(source)
+	rel, _ := t.Relation(relation)
+	return rel.TargetID()
+}
+
+// requiredUnder reports whether relation, an association of source under s, is
+// required, as [Graph.Add] derives an unresolved record's Required.
+func requiredUnder(s schema.Schema, source schema.TypeID, relation string) bool {
+	t, _ := s.TypeByID(source)
+	rel, _ := t.Relation(relation)
+	return !rel.IsOptional()
 }

@@ -15,6 +15,7 @@ func TestInternalErrorKind_String(t *testing.T) {
 	}{
 		{KindInvariantPanic, "invariant evaluation panic"},
 		{KindConstraintPanic, "constraint checking panic"},
+		{InternalErrorKind(0), "unknown"},
 		{InternalErrorKind(999), "unknown"},
 	}
 	for _, tt := range tests {
@@ -150,4 +151,12 @@ func TestInternalError_Is(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInternalFailure,
 			"all InternalError should match ErrInternalFailure")
 	})
+}
+
+// ErrInternalFailure's text names its package.
+func TestErrInternalFailure_TextNamesThePackage(t *testing.T) {
+	t.Parallel()
+	if got, want := ErrInternalFailure.Error(), "instance: internal validation failure"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
 }

@@ -1,11 +1,12 @@
 package instance_test
 
 import (
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -15,15 +16,15 @@ import (
 // imported-type declarations, name shadowing, and cross-schema inheritance.
 
 // loadCrossSchema loads an in-memory multi-source schema rooted at entry.yammm.
-func loadCrossSchema(t *testing.T, sources map[string]string) *schema.Schema {
+func loadCrossSchema(t *testing.T, sources map[string]string) schema.Schema {
 	t.Helper()
 	m := make(map[string][]byte, len(sources))
 	for k, v := range sources {
 		m[k] = []byte(v)
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), m, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load: %v", result.Err())
+	s, err := schema.LoadSourcesWithEntry(t.Context(), m, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 	return s
 }
@@ -58,20 +59,20 @@ type Basin {
 	})
 
 	v := instance.NewValidator(s)
-	valid, result := v.ValidateOne(t.Context(), "common.Region", instance.RawInstance{
+	valid, err := v.ValidateOne(t.Context(), "common.Region", instance.RawInstance{
 		Properties: map[string]any{
 			"code":     "R0001",
 			"in_basin": map[string]any{"_target_id": "B1"},
 		},
 	})
-	if !result.OK() {
-		t.Fatalf("imported-type edge must validate: %s", result)
+	if err != nil {
+		t.Fatalf("imported-type edge must validate: %s", err)
 	}
 	edge, ok := valid.Edge("IN_BASIN")
 	if !ok {
 		t.Fatal("IN_BASIN edge missing from validated instance")
 	}
-	if got := len(edge.Targets()); got != 1 {
+	if got := len(slices.Collect(edge.Targets())); got != 1 {
 		t.Errorf("target count = %d, want 1", got)
 	}
 }
@@ -79,7 +80,7 @@ type Basin {
 // shadowedRegionSchema declares Region in both the entry and the imported
 // schema with different primary keys; common.City's unqualified target must
 // resolve to common's Region (PK "id"), never the entry's (PK "code").
-func shadowedRegionSchema(t *testing.T) *schema.Schema {
+func shadowedRegionSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	return loadCrossSchema(t, map[string]string{
 		"entry.yammm": `schema "app"
@@ -109,35 +110,35 @@ func TestValidate_ShadowedEdgeTarget(t *testing.T) {
 	v := instance.NewValidator(s)
 
 	t.Run("correct FK for the declaring schema's target is accepted", func(t *testing.T) {
-		valid, result := v.ValidateOne(t.Context(), "common.City", instance.RawInstance{
+		valid, err := v.ValidateOne(t.Context(), "common.City", instance.RawInstance{
 			Properties: map[string]any{
 				"code":      "C1",
 				"in_region": map[string]any{"_target_id": "R1"},
 			},
 		})
-		if !result.OK() {
-			t.Fatalf("correct-keyed edge must validate: %s", result)
+		if err != nil {
+			t.Fatalf("correct-keyed edge must validate: %s", err)
 		}
-		if valid == nil {
+		if valid.IsZero() {
 			t.Fatal("validated instance is nil")
 		}
 	})
 
 	t.Run("FK keyed by the shadowing entry type is rejected", func(t *testing.T) {
-		valid, result := v.ValidateOne(t.Context(), "common.City", instance.RawInstance{
+		valid, err := v.ValidateOne(t.Context(), "common.City", instance.RawInstance{
 			Properties: map[string]any{
 				"code":      "C1",
 				"in_region": map[string]any{"_target_code": "R1"},
 			},
 		})
-		if valid != nil {
+		if !valid.IsZero() {
 			t.Error("wrong-keyed edge must not produce a valid instance")
 		}
-		if result.OK() {
+		if err == nil {
 			t.Fatal("wrong-keyed edge must be rejected")
 		}
-		if !result.HasCode(instance.ErrMissingFKTarget) {
-			t.Errorf("want E_MISSING_FK_TARGET, got: %s", result)
+		if !errors.Is(err, diag.E_MISSING_FK_TARGET) {
+			t.Errorf("want E_MISSING_FK_TARGET, got: %s", err)
 		}
 	})
 }
@@ -168,7 +169,7 @@ part type Piece {
 	})
 
 	v := instance.NewValidator(s)
-	valid, result := v.ValidateOne(t.Context(), "common.Widget", instance.RawInstance{
+	valid, err := v.ValidateOne(t.Context(), "common.Widget", instance.RawInstance{
 		Properties: map[string]any{
 			"id": "W1",
 			"has_piece": []any{
@@ -177,14 +178,12 @@ part type Piece {
 			},
 		},
 	})
-	if !result.OK() {
-		t.Fatalf("imported-type composition must validate: %s", result)
+	if err != nil {
+		t.Fatalf("imported-type composition must validate: %s", err)
 	}
 	foundPiece := false
-	for rel, children := range valid.Compositions() {
-		if rel == "HAS_PIECE" && !children.IsNil() {
-			foundPiece = true
-		}
+	for range valid.Composed("HAS_PIECE") {
+		foundPiece = true
 	}
 	if !foundPiece {
 		t.Fatal("HAS_PIECE children missing from validated instance")
@@ -193,7 +192,7 @@ part type Piece {
 
 // crossInheritanceSchema gives the entry type a cross-schema abstract parent
 // whose association and composition targets are declaring-schema-local names.
-func crossInheritanceSchema(t *testing.T) *schema.Schema {
+func crossInheritanceSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	return loadCrossSchema(t, map[string]string{
 		"entry.yammm": `schema "app"
@@ -226,28 +225,26 @@ func TestValidate_CrossSchemaInheritedRelations(t *testing.T) {
 	s := crossInheritanceSchema(t)
 	v := instance.NewValidator(s)
 
-	valid, result := v.ValidateOne(t.Context(), "City", instance.RawInstance{
+	valid, err := v.ValidateOne(t.Context(), "City", instance.RawInstance{
 		Properties: map[string]any{
 			"code":       "C1",
 			"in_region":  map[string]any{"_target_id": "R1"},
 			"has_marker": []any{map[string]any{"label": "m1"}},
 		},
 	})
-	if !result.OK() {
-		t.Fatalf("inherited cross-schema members must validate: %s", result)
+	if err != nil {
+		t.Fatalf("inherited cross-schema members must validate: %s", err)
 	}
 	edge, ok := valid.Edge("IN_REGION")
 	if !ok {
 		t.Fatal("IN_REGION edge missing from validated instance")
 	}
-	if got := len(edge.Targets()); got != 1 {
+	if got := len(slices.Collect(edge.Targets())); got != 1 {
 		t.Errorf("target count = %d, want 1", got)
 	}
 	foundMarker := false
-	for rel, children := range valid.Compositions() {
-		if rel == "HAS_MARKER" && !children.IsNil() {
-			foundMarker = true
-		}
+	for range valid.Composed("HAS_MARKER") {
+		foundMarker = true
 	}
 	if !foundMarker {
 		t.Fatal("HAS_MARKER children missing from validated instance")
@@ -284,7 +281,7 @@ part type Item {
 	})
 
 	v := instance.NewValidator(s)
-	valid, result := v.ValidateOne(t.Context(), "common.Box", instance.RawInstance{
+	valid, err := v.ValidateOne(t.Context(), "common.Box", instance.RawInstance{
 		Properties: map[string]any{
 			"id": "B1",
 			"holds": []any{
@@ -293,14 +290,14 @@ part type Item {
 			},
 		},
 	})
-	if valid != nil {
+	if !valid.IsZero() {
 		t.Error("duplicate composed PKs must not produce a valid instance")
 	}
-	if result.OK() {
+	if err == nil {
 		t.Fatal("duplicate composed PKs must be rejected")
 	}
-	if !result.HasCode(instance.ErrDuplicateComposedPK) {
-		t.Errorf("want E_DUPLICATE_COMPOSED_PK, got: %s", result)
+	if !errors.Is(err, diag.E_DUPLICATE_COMPOSED_PK) {
+		t.Errorf("want E_DUPLICATE_COMPOSED_PK, got: %s", err)
 	}
 }
 
@@ -330,11 +327,11 @@ func TestSchemaBuilder_CrossSchemaTargets(t *testing.T) {
 		}
 
 		v := instance.NewValidator(s)
-		valid, result := v.ValidateOne(t.Context(), "City", raw)
-		if !result.OK() {
-			t.Fatalf("built instance must validate: %s", result)
+		valid, validateErr := v.ValidateOne(t.Context(), "City", raw)
+		if validateErr != nil {
+			t.Fatalf("built instance must validate: %s", validateErr)
 		}
-		if valid == nil {
+		if valid.IsZero() {
 			t.Fatal("validated instance is nil")
 		}
 	})
@@ -342,21 +339,21 @@ func TestSchemaBuilder_CrossSchemaTargets(t *testing.T) {
 
 // TestValidate_DanglingQualifiedTargetRejectedAtBuild pins that the dangling
 // cross-schema relation target the instance layer once had to handle at
-// validation time is now rejected at schema construction: a registry-less
-// Builder draws E_UNKNOWN_TYPE and nils the schema, so no validator can see a
+// validation time is now rejected at load: the unresolved reference draws
+// E_UNKNOWN_TYPE and nils the schema, so no validator can see a
 // zero-TargetID relation through a public entry point.
 func TestValidate_DanglingQualifiedTargetRejectedAtBuild(t *testing.T) {
-	s, result := schema.NewBuilder().
-		WithName("app").
-		AddType("Node").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("LINKED", schema.NewTypeRef("ext", "Thing", location.Span{}), true, false).
-		Done().
-		Build()
-	if s != nil {
+	s, err := schema.LoadString(t.Context(), `schema "app"
+
+type Node {
+	id String primary
+	--> LINKED (_:one) ext.Thing
+}
+`, "app.yammm")
+	if !s.IsZero() {
 		t.Fatal("a dangling qualified relation target must nil the schema")
 	}
-	if !result.HasCode(diag.E_UNKNOWN_TYPE) {
-		t.Errorf("want E_UNKNOWN_TYPE, got: %s", result)
+	if !errors.Is(err, diag.E_UNKNOWN_TYPE) {
+		t.Errorf("want E_UNKNOWN_TYPE, got: %s", err)
 	}
 }

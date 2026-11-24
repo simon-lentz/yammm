@@ -12,7 +12,7 @@ Every `.yammm` file begins with a schema declaration:
 schema "inventory"
 ```
 
-The name is a quoted string. One schema per file.
+The name is a quoted identifier: an ASCII letter, then ASCII letters, digits and underscores (`E_INVALID_NAME` otherwise). One schema per file.
 
 ---
 
@@ -29,7 +29,7 @@ import "./defaults"                        // alias auto-derived as "defaults"
 
 - The `as alias` clause is optional. When omitted, the alias is auto-derived from the last path segment of the import path.
 - Aliases must start with a letter (a-z, A-Z).
-- Reserved keywords cannot be used as aliases: `schema`, `import`, `as`, `type`, `datatype`, `abstract`, `part`, `extends`, `includes`, `required`, `primary`, `one`, `many`, `in`. The literals `true`, `false`, and `nil` are also reserved. Built-in type names (`Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`) are reserved because the lexer tokenizes them as literal tokens rather than identifiers.
+- Reserved keywords cannot be used as aliases: `schema`, `import`, `as`, `type`, `datatype`, `abstract`, `part`, `extends`, `includes`, `required`, `primary`, `one`, `many`, `in`. The literals `true`, `false`, and `nil` are also reserved. Built-in type names (`Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`) are reserved too. The lexer reads every keyword as a plain word: the grammar refuses a written alias that spells one (`E_SYNTAX`), and a derived alias that spells one draws `E_INVALID_ALIAS`.
 - Circular imports are detected and rejected.
 - Paths are sandboxed and cannot escape the module root.
 - The module root is the directory holding the nearest `yammm.mod` marker above the schema, unless the caller supplies one explicitly; failing both, it is the schema's own directory.
@@ -49,8 +49,8 @@ type Tags = List<String[1, 50]>
 
 - Declared with uppercase names using `type Name = BuiltInType`.
 - Aliases preserve the declared case (not lowercased internally).
-- Can chain: alias A wraps a built-in, alias B wraps A.
-- Cycles are detected and rejected during schema completion.
+- An alias target must be a built-in, so `type B = A` over an alias `A` draws `E_SYNTAX`. A `List` target can name another alias as its element.
+- Cycles through `List` elements are detected and rejected during schema completion.
 - Imported aliases require qualification: `common.Money`.
 
 ---
@@ -100,7 +100,7 @@ type Document extends Auditable, Named {
 }
 ```
 
-Multiple parents allowed (comma-separated). Inherits properties, associations, compositions, and invariants. An invariant's message is its identity: a child's declaration overrides an inherited one of the same name; declaring one message twice on a type is `E_DUPLICATE_INVARIANT`, and inheriting two different expressions under one message from two parents is `E_INVARIANT_CONFLICT`. A part type may not inherit an association.
+Multiple parents allowed (comma-separated). A supertype is abstract or of the subtype's own kind, so an abstract type extends abstract types alone (`E_INVALID_SUPERTYPE`). Inherits properties, associations, compositions, invariants and type-level `@@` annotations. A property two parents define is the definition that narrows the other, in either order; with none, it is `E_PROPERTY_CONFLICT`, unless a definition's type is unknown, whose own issue is then the report. An invariant's message is its identity: a child's declaration overrides an inherited one of the same name; declaring one message twice on a type is `E_DUPLICATE_INVARIANT`, and inheriting two different expressions under one message from two parents is `E_INVARIANT_CONFLICT` (a literal with no value, which already refuses the source, matches any literal of its kind). A part type may not inherit an association.
 
 ---
 
@@ -123,11 +123,11 @@ field_name Type            // optional (nullable)
 | `Integer` | `Integer[min, max]` | Signed integer with inclusive bounds |
 | `Float` | `Float[min, max]` | Floating point with inclusive bounds |
 | `Boolean` | `Boolean` | True/false, no parameters |
-| `Timestamp` | `Timestamp` or `Timestamp["fmt"]` | Date-time, default RFC3339 |
+| `Timestamp` | `Timestamp` | Date-time in RFC 3339 |
 | `Date` | `Date` | Date only, no parameters |
 | `UUID` | `UUID` | UUID string, no parameters |
 | `Enum` | `Enum["a", "b", ...]` | Fixed set, minimum 2 options |
-| `Pattern` | `Pattern["regex"]` or `Pattern["r1", "r2"]` | Regex-validated string. Max 2 patterns; both must match (conjunction). |
+| `Pattern` | `Pattern["regex"]` | Regex-validated string. One pattern; a match is a search, so anchor with `^` and `$`. |
 | `Vector` | `Vector[dims]` | Fixed-dimension numeric vector |
 | `List` | `List<Type>[min, max]` | Ordered collection, optional length bounds |
 
@@ -159,9 +159,10 @@ References between independently existing types:
 
 Associations cannot target part types.
 
-Relation names are UPPER_SNAKE (`E_INVALID_NAME` otherwise). The relation's
-field name — its key in instance data and in invariant expressions — is the
-name in lower case: `WORKS_AT` is read as `works_at`.
+Relation names are UPPER_SNAKE (`E_INVALID_NAME` otherwise; a reserved word or a datatype keyword in that place, such as `type` or `String`, is `E_SYNTAX`). The relation's
+field name — its key in instance data — is the name in lower case: `WORKS_AT`
+arrives as `works_at`, and under no other spelling. An invariant reads the relation by its declared name
+alone: `WORKS_AT`, `$self.WORKS_AT`, `$WORKS_AT`.
 
 ### Edge Properties
 
@@ -199,7 +200,7 @@ Composition targets must be `part type`.
 
 ## Annotations
 
-Validated metadata that downstream adapters turn into store DDL (indexes, write-once markers). Property-level annotations trail a property with a single `@`; type-level annotations are body members with a doubled `@@`.
+Validated metadata that downstream tools read: the index annotations become store DDL, and write-once markers split a write. Property-level annotations trail a property with a single `@`; type-level annotations are body members with a doubled `@@`.
 
 ```yammm-snippet
 state        String      @index
@@ -214,9 +215,9 @@ Blessed annotations:
 
 | Annotation | Placement | Arguments | Target |
 | - | - | - | - |
-| `@index` | property | none | a scalar property that is not the sole primary key |
-| `@@index(p, …)` | type | one or more property references (ordered) | scalar properties; primary-key members allowed |
-| `@vector(sim)` | property | `cosine` \| `euclidean` | a `Vector[N]` property |
+| `@index` | property | none | a scalar property; refused only when every concrete type that emits it keys on that property alone (a `part` type never does; an emitter in another schema file is not seen) |
+| `@@index(p, …)` | type | one or more property references (ordered) | scalar properties; primary-key members allowed; one argument is refused only where `@index` on it is |
+| `@vector(sim)` | property | `cosine` \| `euclidean` | a `Vector[N]` property, N at most 4096 |
 | `@fulltext` | property | none | a text property (`String`, `Pattern`, `Enum`); primary keys allowed |
 | `@@fulltext(p, …)` | type | one or more property references (ordered) | text properties; primary-key members allowed |
 | `@writeOnce` | property | none | any non-primary-key property |
@@ -245,7 +246,7 @@ type Document {
 
 - A property-level annotation follows the datatype and any `primary`/`required` modifier: `foo String @index` is valid, `foo String @index primary` is a syntax error.
 - Parentheses, when present, hold at least one argument — `@index`, never `@index()`.
-- Annotations do not survive a property re-declaration (identical or narrowing) unless re-stated on the surviving declaration; the load then warns with `W_ANNOTATION_SHADOWED`.
+- Annotations do not survive a property re-declaration (identical or narrowing) unless re-stated on the surviving declaration; the load warns of the drop with `W_ANNOTATION_SHADOWED` when the annotation drew no diagnostic of its own, the merge accepted the re-declaration, and no direct supertype already dropped the annotation.
 
 ---
 

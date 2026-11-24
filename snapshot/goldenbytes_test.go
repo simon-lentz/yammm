@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -38,10 +40,8 @@ func loadFixture(t *testing.T) fixtureFile {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err, "read fixture")
 
-	// Use json.Decoder with UseNumber so integer-shaped float values in
-	// the fixture (e.g., 0.75) survive normalization exactly as they
-	// appear in the JSON bytes — matching the wire-format path's
-	// normalizeMap behavior downstream.
+	// Use json.Decoder with UseNumber so each number in the fixture reaches
+	// normalizeFixtureProps as its text, which it reads as the .ys reader does.
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var ff fixtureFile
@@ -82,20 +82,20 @@ func TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes(t *testing.T) {
 			personA := buildPersonWithEdgeProps(t, s, "pA", edge.TargetKey, propsForTarget)
 			//nolint:contextcheck // buildSnapshot uses context.Background() internally; shared helper across the snapshot test suite
 			snapResolved := buildSnapshot(t, s, targetCompany, personA)
-			require.Len(t, snapResolved.Edges(), 1, "expected resolved edge")
-			require.Empty(t, snapResolved.Unresolved(), "snapshot A: no unresolved edge expected")
+			require.Len(t, slices.Collect(snapResolved.Edges()), 1, "expected resolved edge")
+			require.Empty(t, slices.Collect(snapResolved.Unresolved()), "snapshot A: no unresolved edge expected")
 
 			// Snapshot B: edge stays unresolved (target absent).
 			personB := buildPersonWithEdgeProps(t, s, "pB", edge.TargetKey, propsForTarget)
 			//nolint:contextcheck // buildSnapshot uses context.Background() internally; shared helper across the snapshot test suite
 			snapUnresolved := buildSnapshot(t, s, personB)
-			require.Empty(t, snapUnresolved.Edges(), "snapshot B: no resolved edge expected")
-			require.Len(t, snapUnresolved.Unresolved(), 1, "expected unresolved edge")
+			require.Empty(t, slices.Collect(snapUnresolved.Edges()), "snapshot B: no resolved edge expected")
+			require.Len(t, slices.Collect(snapUnresolved.Unresolved()), 1, "expected unresolved edge")
 
-			dataR, mres := snapshot.Marshal(ctx, snapResolved)
-			require.NoError(t, mres.Err())
-			dataU, ures := snapshot.Marshal(ctx, snapUnresolved)
-			require.NoError(t, ures.Err())
+			dataR, err := snapshot.Marshal(ctx, snapResolved)
+			require.NoError(t, err)
+			dataU, readErr := snapshot.Marshal(ctx, snapUnresolved)
+			require.NoError(t, readErr)
 
 			// Extract the serialized properties payload from each path.
 			resolvedProps := extractResolvedEdgeProperties(t, dataR, "EMPLOYER")
@@ -109,24 +109,23 @@ func TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes(t *testing.T) {
 
 // buildPersonWithEdgeProps is a thin wrapper over mustValidInstanceWithEdgeProps
 // that keeps the golden-bytes test body readable.
-func buildPersonWithEdgeProps(t *testing.T, s *schema.Schema, personID, targetKey string, props map[string]any) *instance.ValidInstance {
+func buildPersonWithEdgeProps(t *testing.T, s schema.Schema, personID, targetKey string, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	return mustValidInstanceWithEdgeProps(t, s, "Person",
 		[]any{personID}, map[string]any{"id": personID, "name": personID},
 		"EMPLOYER", []any{targetKey}, props)
 }
 
-// normalizeFixtureProps converts json.Number values in the decoded
-// fixture map into Go's native int64 / float64 forms, mirroring the
-// behavior of immutable.NormalizeValue on the wire-format read path.
-// Keeps the fixture's 0.75 value round-trip-stable.
+// normalizeFixtureProps reads the json.Number values in the decoded fixture map
+// by the value rule, as the wire-format read path reads them. Keeps the
+// fixture's 0.75 value round-trip-stable.
 func normalizeFixtureProps(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
 	}
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		out[k] = immutable.NormalizeValue(v)
+		out[k] = value.Read(v)
 	}
 	return out
 }

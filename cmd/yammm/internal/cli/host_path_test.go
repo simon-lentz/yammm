@@ -12,7 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/hostpath"
+
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -217,7 +218,7 @@ func TestHostPathSite_RestoresEveryKindOfChange(t *testing.T) {
 		func() error { return os.Rename(filepath.Join(d, "e.json.tmp"), filepath.Join(d, "e.json")) },
 		func() error { return os.WriteFile(filepath.Join(d, "n.json"), []byte("new\n"), 0o600) },
 		func() error { return os.MkdirAll(filepath.Join(d, "m", "x"), 0o750) },
-		func() error { return os.WriteFile(filepath.Join(d, "m", "x", "Order.csv"), []byte("new\n"), 0o600) },
+		func() error { return os.WriteFile(filepath.Join(d, "m", "x", "Order.json"), []byte("new\n"), 0o600) },
 		func() error { return os.Remove(filepath.Join(d, "f")) },
 		func() error { return os.Remove(filepath.Join(d, "r.json")) },
 		func() error { return os.WriteFile(filepath.Join(d, "r.json"), []byte("new\n"), 0o600) },
@@ -275,7 +276,6 @@ func TestHostPathSite_EveryStepRestoresItsSite(t *testing.T) {
 	sep := string(filepath.Separator)
 	var f hostPathFailures
 	checkWriteLandsWhereTheLoaderReads(t, &f, WriteFile, site, site.prefix+sep+"m"+sep+"n.json", "/m/n.json")
-	checkSetLandsWhereTheLoaderReads(t, &f, site, sep+"m"+sep+"x", "m/x")
 	if len(f.list) != 0 {
 		t.Fatalf("the checks failed: %q", f.list)
 	}
@@ -326,7 +326,7 @@ func hostPathSpellings(prefix string, depth int) []string {
 // made relative to it.
 func diskRoot(t *testing.T, root string) string {
 	t.Helper()
-	r, err := location.ResolveHostPath(root)
+	r, err := hostpath.Resolve(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,14 +357,14 @@ func (f *hostPathFailures) report(t *testing.T) {
 }
 
 // checkWriteLandsWhereTheLoaderReads writes to typed on site with write and
-// holds the outcome to location.ResolveHostPath, the loader's own resolver: the
+// holds the outcome to hostpath.Resolve, the loader's own resolver: the
 // write succeeds exactly when the file the resolver names sits in a directory
 // that exists, and then that file, and nothing else in the tree, changes. The
 // site is restored before it returns.
 func checkWriteLandsWhereTheLoaderReads(t *testing.T, f *hostPathFailures, write func(string, []byte) error, site *hostPathSite, typed, shown string) {
 	t.Helper()
 	f.cases++
-	want, rerr := location.ResolveHostPath(typed)
+	want, rerr := hostpath.Resolve(typed)
 	parentIsDir := false
 	if rerr == nil {
 		info, err := os.Stat(filepath.Dir(want))
@@ -499,12 +499,12 @@ func runtimeCannotLink(t *testing.T) bool {
 	return os.Symlink(".", probe) != nil
 }
 
-// checkStagesBesideTheFileALinkReaches writes through a link whose target
+// TestWriteFile_StagesBesideTheFileALinkReaches writes through a link whose target
 // climbs out of a linked directory and requires the file the kernel reaches to
 // be written and staged beside, not in the directory the target's text names,
 // which is sealed here so a write staged there fails.
-func checkStagesBesideTheFileALinkReaches(t *testing.T, write func(path string) error) {
-	t.Helper()
+func TestWriteFile_StagesBesideTheFileALinkReaches(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip(noDirPermissionsOnWindows)
 	}
@@ -528,18 +528,13 @@ func checkStagesBesideTheFileALinkReaches(t *testing.T, write func(path string) 
 	if err := sealDir(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := write(filepath.Join(dir, "u.json")); err != nil {
+	if err := WriteFile(filepath.Join(dir, "u.json"), []byte(targetPayload)); err != nil {
 		t.Fatalf("write through u.json: %v", err)
 	}
 	if got := expectPayload(reached); got != "" {
 		t.Error(got)
 	}
 	assertNoDebris(t, filepath.Join(dir, "real", "deep"), reached, "x")
-}
-
-func TestWriteFile_StagesBesideTheFileALinkReaches(t *testing.T) {
-	t.Parallel()
-	checkStagesBesideTheFileALinkReaches(t, func(path string) error { return WriteFile(path, []byte(targetPayload)) })
 }
 
 // A link whose target climbs out of a linked directory into /dev/ reaches
@@ -568,77 +563,6 @@ func TestWriteFile_ALinkIntoDevThroughALinkedDotDotIsWrittenThrough(t *testing.T
 	}
 	if got, _ := os.ReadFile(f.Name()); string(got) != earlierOutput+targetPayload {
 		t.Errorf("the descriptor's file holds %q, want %q", got, earlierOutput+targetPayload)
-	}
-}
-
-// descriptorPath takes a descriptor path however the kernel reaches its
-// directory: through two "..", the second after a link, each taken on disk;
-// through a ".." climbing out of a working directory entered through a link;
-// through a link to /dev, which the text never spells; and on Linux through
-// every descriptor table procfs holds. Any other path under /dev, and a
-// directory named fd anywhere else, is decided by its file.
-func TestDescriptorPath_SeesAPathTheKernelTakesIntoDev(t *testing.T) {
-	if resolved, err := filepath.EvalSymlinks("/usr"); err != nil || resolved != "/usr" {
-		t.Skip("/usr is not a directory directly under /")
-	}
-	if info, err := os.Stat("/dev"); err != nil || !info.IsDir() {
-		t.Skip("this host has no /dev")
-	}
-	root := t.TempDir()
-	sep := string(filepath.Separator)
-	if err := os.Mkdir(filepath.Join(root, "a"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(root, "fd"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	for name, target := range map[string]string{"u": "/usr", "devl": "/dev", "lnk": "/usr"} {
-		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
-			t.Skipf("symlinks unavailable: %v", err)
-		}
-	}
-	descriptors := []string{
-		root + sep + "a" + sep + ".." + sep + "u" + sep + ".." + sep + "dev" + sep + "stdout",
-		root + sep + "a" + sep + ".." + sep + "u" + sep + ".." + sep + "dev" + sep + "fd" + sep + "0",
-		root + sep + "devl" + sep + "stderr",
-		// On Linux /dev/fd links out of /dev, so the link to /dev reaches /proc/self/fd.
-		root + sep + "devl" + sep + "fd" + sep + "0",
-		"/dev/fd/12",
-	}
-	if paths := procDescriptorPaths(t, 0); paths != nil {
-		descriptors = append(descriptors, paths...)
-		// A link named other than fd, to a descriptor table /dev/fd is not.
-		if err := os.Symlink("/proc/thread-self/fd", filepath.Join(root, "tfd")); err != nil {
-			t.Fatal(err)
-		}
-		descriptors = append(descriptors, root+sep+"tfd"+sep+"0")
-	}
-	for _, p := range descriptors {
-		if !descriptorPath(p) {
-			t.Errorf("descriptorPath(%q) = false, where the kernel reaches a descriptor path", p)
-		}
-	}
-	for _, p := range []string{
-		root + sep + "a" + sep + "stdout",
-		"/dev/null",
-		"/dev/stdin",
-		"/dev/shm/x",
-		"/dev/stdout.json",
-		"/dev/fd",
-		"/dev/fd/1a",
-		"/dev/fd/-1",
-		root + sep + "devl" + sep + "null",
-		root + sep + "devl" + sep + "shm" + sep + "stdout",
-		root + sep + "fd" + sep + "3",
-		"/proc/self/fdinfo/0",
-	} {
-		if descriptorPath(p) {
-			t.Errorf("descriptorPath(%q) = true for a path its file decides", p)
-		}
-	}
-	t.Chdir(filepath.Join(root, "lnk"))
-	if rel := "." + sep + ".." + sep + "dev" + sep + "stdout"; !descriptorPath(rel) {
-		t.Errorf("descriptorPath(%q) from %s = false, where the kernel climbs from /usr into /dev", rel, filepath.Join(root, "lnk"))
 	}
 }
 

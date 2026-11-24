@@ -4,50 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"regexp"
-	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/internal/trace"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // Evaluator evaluates compiled expressions.
 //
 // Evaluator is stateless and safe for concurrent use. All evaluation state
 // is contained in the Scope passed to each evaluation.
-type Evaluator struct {
-	cfg *evalConfig
-}
+type Evaluator struct{}
 
 // NewEvaluator creates a new expression evaluator.
-func NewEvaluator(opts ...Option) *Evaluator {
-	return &Evaluator{
-		cfg: applyOptions(opts),
-	}
+func NewEvaluator() *Evaluator {
+	return &Evaluator{}
 }
 
-// Evaluate evaluates an expression with the given scope. The context reaches
-// every trace record the evaluation writes, so a request id it carries is on
-// each of them; cancellation is the caller's to check between evaluations.
+// Evaluate evaluates an expression with the given scope. Cancellation is the
+// caller's to check between evaluations.
 // Returns the result value, or an error if evaluation fails.
-func (e *Evaluator) Evaluate(ctx context.Context, expression expr.Expression, scope Scope) (result any, err error) {
-	// The op ends with the evaluation's own error, which is not known until
-	// the return, hence the closure. A panic never assigns the named return,
-	// so it is recovered here to end the op with it and re-raised for the
-	// recover that owns it.
-	op := trace.Begin(ctx, e.cfg.logger, "yammm.eval.expr")
-	defer func() {
-		if r := recover(); r != nil {
-			op.End(fmt.Errorf("panic: %v", r))
-			panic(r)
-		}
-		op.End(err)
-	}()
-
+func (e *Evaluator) Evaluate(ctx context.Context, expression expr.Expression, scope Scope) (any, error) {
 	return e.evaluate(ctx, expression, scope)
 }
 
@@ -77,9 +56,6 @@ func (e *Evaluator) evaluate(ctx context.Context, expression expr.Expression, sc
 	switch ex := expression.(type) {
 	case *expr.Literal:
 		return ex.Val, nil
-	case expr.DatatypeLiteral:
-		// Return a type checker for the datatype
-		return e.datatypeChecker(string(ex))
 	case expr.SExpr:
 		return e.evalSExpr(ctx, ex, scope)
 	default:
@@ -92,18 +68,13 @@ func (e *Evaluator) evaluate(ctx context.Context, expression expr.Expression, sc
 var operatorOps = map[string]bool{
 	"+": true, "-": true, "*": true, "/": true, "%": true, "-x": true,
 	"==": true, "!=": true, "<": true, "<=": true, ">": true, ">=": true,
-	"=~": true, "!~": true, "in": true, "!": true, "^": true,
+	"=~": true, "!~": true, "in": true, "!": true,
 }
 
 // evalSExpr evaluates an S-expression.
 func (e *Evaluator) evalSExpr(ctx context.Context, sexpr expr.SExpr, scope Scope) (any, error) {
 	op := sexpr.Op()
 	children := sexpr.Children()
-
-	trace.Debug(
-		ctx, e.cfg.logger, "evaluating s-expression",
-		slog.String("op", op),
-	)
 
 	// Special forms that don't evaluate all children upfront
 	switch op {
@@ -126,7 +97,7 @@ func (e *Evaluator) evalSExpr(ctx context.Context, sexpr expr.SExpr, scope Scope
 	}
 
 	// Check if it's a builtin
-	if def, ok := lookupBuiltin(strings.ToLower(op)); ok {
+	if def, ok := lookupBuiltin(op); ok {
 		return e.evalBuiltin(ctx, def, children, scope)
 	}
 
@@ -177,18 +148,18 @@ func (e *Evaluator) evalSExpr(ctx context.Context, sexpr expr.SExpr, scope Scope
 		return e.greaterOrEqual(args)
 
 	// Pattern matching
-	case "=~":
-		return e.match(args)
-	case "!~":
-		return e.notMatch(args)
+	case "=~", "!~":
+		matched, err := e.match(op, args)
+		if err != nil {
+			return nil, err
+		}
+		return matched == (op == "=~"), nil
 	case "in":
 		return e.inOp(args)
 
 	// Logical
 	case "!":
 		return e.not(args)
-	case "^":
-		return e.xor(args)
 
 	default:
 		return nil, fmt.Errorf("unknown function: %s", op)
@@ -252,6 +223,10 @@ func (e *Evaluator) evalTernary(ctx context.Context, children []expr.Expression,
 	return e.evaluate(ctx, children[2], scope)
 }
 
+// evalVar reads a variable: a binding of exactly that name, then a member by
+// its declared name. A name neither binds reads nil, as a bare name does: load
+// refuses a named variable that is neither a parameter nor a member, so what
+// reaches here unbound is an unset member or an unset positional variable.
 func (e *Evaluator) evalVar(children []expr.Expression, scope Scope) (any, error) {
 	if len(children) != 1 {
 		return nil, errors.New("variable lookup requires 1 operand")
@@ -262,29 +237,15 @@ func (e *Evaluator) evalVar(children []expr.Expression, scope Scope) (any, error
 		return nil, errors.New("variable name must be a string literal")
 	}
 
-	// Numeric variables ($0, $1, ...) return nil if not found
-	if isNumericVar(name) {
-		val, found := scope.Lookup(name)
-		if !found {
-			return nil, nil //nolint:nilnil // unset numeric vars are nil
-		}
-		return val.Unwrap(), nil
-	}
-
-	// Named variables must be defined
 	val, found := scope.Lookup(name)
 	if !found {
-		return nil, fmt.Errorf("undefined variable: $%s", name)
+		return nil, nil //nolint:nilnil // an unset member or positional variable is nil
 	}
-	return val.Unwrap(), nil
+	return val.Any(), nil
 }
 
-// evalProperty reads a bare name within the current scope by [Scope.LookupFold]:
-// a property in any ASCII casing, a relation by its name or its field name.
-//
-// Safety: Schema validation prevents types from having multiple properties
-// that fold to the same lowercase name (e.g., "Name" and "name" cannot coexist),
-// so LookupFold always returns a deterministic result.
+// evalProperty reads a bare name within the current scope by [Scope.Lookup],
+// as a $ variable reads.
 //
 // Missing optional properties evaluate to nil, enabling patterns like:
 //
@@ -300,11 +261,11 @@ func (e *Evaluator) evalProperty(children []expr.Expression, scope Scope) (any, 
 		return nil, errors.New("property name must be a string literal")
 	}
 
-	val, found := scope.LookupFold(name)
+	val, found := scope.Lookup(name)
 	if !found {
 		return nil, nil //nolint:nilnil // missing property → nil enables lest/then patterns
 	}
-	return val.Unwrap(), nil
+	return val.Any(), nil
 }
 
 // evalMember reads one named member of the receiver. The member position holds
@@ -329,29 +290,26 @@ func (e *Evaluator) evalMember(ctx context.Context, children []expr.Expression, 
 }
 
 // accessMember reads name from obj. A map a member is read from is an
-// immutable.Map[string] — a stored value unwraps to one and every scope wraps
-// its map — and it reads by [readMember], the rule a bare name reads by. Nil
-// reads nil, and any other value is an error.
+// immutable.Properties — a stored value unwraps to one and every scope wraps
+// its map — and it reads the member by its declared name, as a bare name does.
+// Nil reads nil, and any other value is an error.
 func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 	if obj == nil {
 		return nil, nil //nolint:nilnil // member access on nil returns nil
 	}
-	m, ok := obj.(immutable.Map[string])
+	m, ok := obj.(immutable.Properties)
 	if !ok {
 		return nil, fmt.Errorf("cannot access member on %T", obj)
 	}
-	if val, exists := readMember(immutable.PropertiesOf(m), name); exists {
-		return val.Unwrap(), nil
+	if val, exists := m.Get(name); exists {
+		return val.Any(), nil
 	}
 	return nil, nil //nolint:nilnil // missing key returns nil
 }
 
 func (e *Evaluator) evalSlice(ctx context.Context, children []expr.Expression, scope Scope) (any, error) {
-	if len(children) < 2 {
-		return nil, errors.New("slice access requires an index")
-	}
-	if len(children) > 2 {
-		return nil, errors.New("slice access accepts exactly one index")
+	if len(children) != 2 {
+		return nil, errors.New("index access requires exactly 2 operands")
 	}
 
 	// Evaluate the receiver
@@ -389,18 +347,14 @@ func (e *Evaluator) accessIndex(obj, idx any) (any, error) {
 	}
 
 	// A List-typed property arrives as immutable.Slice, not []any — that is
-	// what Value.Unwrap returns for a collection.
+	// what Value.Any returns for a collection.
 	if slice, ok := obj.(immutable.Slice); ok {
 		// Bounds-check in int64 like the arms above: narrowing first would
 		// wrap a large index into range on a 32-bit build.
 		if i < 0 || i >= int64(slice.Len()) {
 			return nil, nil //nolint:nilnil // out of bounds returns nil
 		}
-		v, ok := slice.GetOK(int(i))
-		if !ok {
-			return nil, nil //nolint:nilnil // out of bounds returns nil
-		}
-		return v.Unwrap(), nil
+		return slice.At(int(i)).Any(), nil
 	}
 
 	// Handle string - index by rune, not byte (per SPEC)
@@ -767,40 +721,22 @@ func (e *Evaluator) greaterOrEqual(args []any) (any, error) {
 
 // --- Pattern matching ---
 
-func (e *Evaluator) match(args []any) (any, error) {
+// match reports whether args, the operands of op, are a string and a pattern
+// that matches it. op is =~ or !~, and an error names it.
+func (e *Evaluator) match(op string, args []any) (bool, error) {
 	if len(args) != 2 {
-		return nil, errors.New("=~ requires 2 operands")
+		return false, fmt.Errorf("%s requires 2 operands", op)
 	}
 
-	left, right := args[0], args[1]
-
-	switch matcher := right.(type) {
-	case *regexp.Regexp:
-		s, ok := left.(string)
-		if !ok {
-			return nil, fmt.Errorf("=~ left operand must be string, got %T", left)
-		}
-		return matcher.MatchString(s), nil
-
-	case TypeChecker:
-		ok, _ := matcher(left)
-		return ok, nil
-
-	default:
-		return nil, fmt.Errorf("=~ right operand must be regexp or type checker, got %T", right)
-	}
-}
-
-func (e *Evaluator) notMatch(args []any) (any, error) {
-	result, err := e.match(args)
-	if err != nil {
-		return nil, err
-	}
-	b, ok := result.(bool)
+	pattern, ok := args[1].(*regexp.Regexp)
 	if !ok {
-		return nil, errors.New("!~ internal error: match did not return bool")
+		return false, fmt.Errorf("%s right operand must be a pattern, got %T", op, args[1])
 	}
-	return !b, nil
+	s, ok := args[0].(string)
+	if !ok {
+		return false, fmt.Errorf("%s left operand must be string, got %T", op, args[0])
+	}
+	return pattern.MatchString(s), nil
 }
 
 func (e *Evaluator) inOp(args []any) (any, error) {
@@ -832,51 +768,4 @@ func (e *Evaluator) not(args []any) (any, error) {
 		return nil, fmt.Errorf("! expects boolean, got %T", args[0])
 	}
 	return !b, nil
-}
-
-func (e *Evaluator) xor(args []any) (any, error) {
-	if len(args) != 2 {
-		return nil, fmt.Errorf("^ requires 2 operands, got %d", len(args))
-	}
-	left, ok := args[0].(bool)
-	if !ok {
-		return nil, fmt.Errorf("^ expects boolean operands, got %T", args[0])
-	}
-	right, ok := args[1].(bool)
-	if !ok {
-		return nil, fmt.Errorf("^ expects boolean operands, got %T", args[1])
-	}
-	return left != right, nil
-}
-
-// isNumericVar checks if a variable name is numeric ($0, $1, etc.)
-func isNumericVar(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, r := range name {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// datatypeCheckers maps each datatype check expr.IsDatatypeCheck admits to
-// its kind's checker. A name absent here is an error, never another kind's
-// check by default.
-var datatypeCheckers = map[string]func() TypeChecker{
-	"string": IsString, "integer": IsInteger, "float": IsFloat, "boolean": IsBoolean,
-	"uuid": IsUUID, "timestamp": IsTimestamp, "date": IsDate,
-}
-
-// datatypeChecker returns the TypeChecker for a datatype name, by the set
-// [expr.IsDatatypeCheck] defines for both layers; the static checker refuses
-// any other name at load.
-func (e *Evaluator) datatypeChecker(name string) (TypeChecker, error) {
-	mk, ok := datatypeCheckers[strings.ToLower(name)]
-	if !ok || !expr.IsDatatypeCheck(name) {
-		return nil, fmt.Errorf("unknown datatype: %s", name)
-	}
-	return mk(), nil
 }

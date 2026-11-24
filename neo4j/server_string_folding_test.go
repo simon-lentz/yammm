@@ -1,0 +1,89 @@
+package neo4j
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/simon-lentz/yammm/schema/cypher"
+)
+
+// Every comparison against a column the SERVER fills has to fold case. The
+// columns are canonically upper-case today, so none of this is reachable
+// against a current server — which is the point: an unfolded comparison fails
+// silently and only under a server that changes, so the fold is pinned here
+// rather than left to be discovered the next time one does.
+
+// lowerCased is the mutation these tests apply: a server returning the same
+// value in another case. Applied to whole records rather than one field, so a
+// site that folds one column and not its neighbour is still caught.
+func lowerCased(rc RemoteConstraint) RemoteConstraint {
+	rc.Type = strings.ToLower(rc.Type)
+	rc.EntityType = strings.ToLower(rc.EntityType)
+	rc.PropertyType = strings.ToLower(rc.PropertyType)
+	return rc
+}
+
+func TestConstraintDiff_FoldsServerColumnCase(t *testing.T) {
+	t.Parallel()
+	a := cypher.Config{}
+
+	desired := []cypher.Constraint{
+		{Kind: cypher.ConstraintUnique, Label: "test__Entity", Properties: []string{"id"}},
+		{
+			Kind: cypher.ConstraintType, Label: "test__Entity", Properties: []string{"tags"},
+			TypeExpr: "LIST<STRING NOT NULL>",
+		},
+	}
+	actual := []RemoteConstraint{
+		lowerCased(RemoteConstraint{
+			Name: "u", Type: "UNIQUENESS", EntityType: "NODE",
+			LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"},
+		}),
+		lowerCased(RemoteConstraint{
+			Name: "t", Type: "NODE_PROPERTY_TYPE", EntityType: "NODE",
+			LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"tags"},
+			PropertyType: "LIST<STRING NOT NULL>",
+		}),
+	}
+
+	result := diff(a, desired, nil, actual, nil, testOwned()).Constraints
+
+	if len(result.Match) != 2 {
+		t.Errorf("Match = %d; want 2 — a case difference in a server column is not drift", len(result.Match))
+	}
+	for _, d := range result.Drift {
+		t.Errorf("drift on a lower-cased but otherwise identical constraint: %s", d.Reason)
+	}
+	if result.Excluded != 0 {
+		t.Errorf("Excluded = %d; want 0 — lower-cased entityType/type must not make a constraint undeclarable", result.Excluded)
+	}
+	if n := len(result.Create) + len(result.Drop); n != 0 {
+		t.Errorf("Create+Drop = %d; want 0", n)
+	}
+}
+
+// The TYPE-constraint comparison is the one that reads propertyType, and it
+// compares against a string schema/cypher emits rather than one it looks up, so a
+// fold there is easy to leave out. A genuine mismatch must still be drift.
+func TestConstraintDiff_TypeExprFoldDoesNotHideRealDrift(t *testing.T) {
+	t.Parallel()
+	a := cypher.Config{}
+
+	desired := []cypher.Constraint{{
+		Kind: cypher.ConstraintType, Label: "test__Entity", Properties: []string{"n"}, TypeExpr: "INTEGER",
+	}}
+	actual := []RemoteConstraint{{
+		Name: "t", Type: "NODE_PROPERTY_TYPE", EntityType: "NODE",
+		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"n"},
+		PropertyType: "string",
+	}}
+
+	result := diff(a, desired, nil, actual, nil, testOwned()).Constraints
+
+	if len(result.Drift) != 1 {
+		t.Fatalf("Drift = %d; want 1 — INTEGER vs STRING is a real type mismatch whatever the case", len(result.Drift))
+	}
+	if len(result.Match) != 0 {
+		t.Errorf("Match = %d; want 0", len(result.Match))
+	}
+}

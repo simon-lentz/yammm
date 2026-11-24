@@ -35,9 +35,9 @@ part type Cell {
 }
 `),
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), m, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if !res.OK() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadSourcesWithEntry(t.Context(), m, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	cases := []struct {
 		name string

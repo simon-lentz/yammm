@@ -7,6 +7,9 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -36,19 +39,19 @@ part type Piece {
 
 // declaredNamesDocument is a clean .ys holding a value at every position that
 // stores a name, each value a marker an undeclared name can be spliced beside.
-func declaredNamesDocument(t *testing.T) (*schema.Schema, string) {
+func declaredNamesDocument(t *testing.T) (schema.Schema, string) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), declaredNamesSchema, "names.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), declaredNamesSchema, "names.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	holderT, _ := s.Type("Holder")
 	targetT, _ := s.Type("Target")
 	pieceT, _ := s.Type("Piece")
 	hk := immutable.WrapKey([]any{"h1"})
-	snap, r := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{holderT.ID(), targetT.ID()},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID: targetT.ID(), PrimaryKey: immutable.WrapKey([]any{"t1"}),
 				Properties: immutable.WrapProperties(map[string]any{"key": "t1"}),
@@ -56,35 +59,30 @@ func declaredNamesDocument(t *testing.T) (*schema.Schema, string) {
 			{
 				TypeID: holderT.ID(), PrimaryKey: hk,
 				Properties: immutable.WrapProperties(map[string]any{"id": "h1", "note": "ROOT"}),
-				Composed: map[string][]graph.InstanceParts{"PIECES": {{
+				Composed: map[string][]snapparts.Instance{"PIECES": {{
 					TypeID:     pieceT.ID(),
 					Properties: immutable.WrapProperties(map[string]any{"label": "CHILD"}),
 				}}},
 			},
 		},
-		Edges: []graph.EdgeParts{{
+		Edges: []snapparts.Edge{{
 			Relation: "OWNER", SourceType: holderT.ID(), SourceKey: hk,
 			TargetKey:  immutable.WrapKey([]any{"t1"}),
 			Properties: immutable.WrapProperties(map[string]any{"since": "EDGE"}),
 		}},
-		Duplicates: []graph.DuplicateParts{{
-			Instance: graph.InstanceParts{
-				TypeID: holderT.ID(), PrimaryKey: hk,
-				Properties: immutable.WrapProperties(map[string]any{"id": "h1", "note": "DUP"}),
-			},
+		Duplicates: []snapparts.Instance{{
+			TypeID: holderT.ID(), PrimaryKey: hk,
+			Properties: immutable.WrapProperties(map[string]any{"id": "h1", "note": "DUP"}),
 		}},
-		Unresolved: []graph.UnresolvedParts{{
+		Unresolved: []snapparts.Unresolved{{
 			SourceType: holderT.ID(), SourceKey: hk, Relation: "OWNER",
 			TargetKey: immutable.WrapKey([]any{"t9"}), Reason: "target_missing",
 			Properties: immutable.WrapProperties(map[string]any{"since": "UNRES"}),
 		}},
 	})
-	if err := r.Err(); err != nil {
-		t.Fatalf("RebuildSnapshot: %v", err)
-	}
-	data, mres := snapshot.Marshal(t.Context(), snap)
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres)
+	data, readErr := snapshot.Marshal(t.Context(), snap)
+	if readErr != nil {
+		t.Fatalf("Marshal: %s", readErr)
 	}
 	return s, string(data)
 }
@@ -110,8 +108,12 @@ func TestLoad_RefusesAnUndeclaredNameAtEveryPosition(t *testing.T) {
 				want++
 			}
 		}
-		loaded, lres := snapshot.Load(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
-		vres := snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
+		loaded, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+		})
+		vres := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+		})
 		for label, r := range map[string]diag.Result{"Load": lres, "Verify": vres} {
 			got := 0
 			for issue := range r.Issues() {
@@ -119,12 +121,12 @@ func TestLoad_RefusesAnUndeclaredNameAtEveryPosition(t *testing.T) {
 					got++
 				}
 			}
-			if got != want || (want == 0) != r.OK() {
+			if got != want || (want == 0) != (diagtest.Err(r) == nil) {
 				t.Fatalf("mask %b: %s: want %d refusals, got %d:\n%s", mask, label, want, got, r)
 			}
 		}
-		if (want == 0) != (loaded != nil) {
-			t.Fatalf("mask %b: want a snapshot only when no undeclared name, got %v", mask, loaded != nil)
+		if (want == 0) != (!loaded.IsZero()) {
+			t.Fatalf("mask %b: want a snapshot only when no undeclared name, got %v", mask, !loaded.IsZero())
 		}
 	}
 }

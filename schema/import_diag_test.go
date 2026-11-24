@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -20,22 +20,19 @@ func resolutionIssue(t *testing.T, res diag.Result, code diag.Code) (diag.Issue,
 		if issue.Code() != code {
 			continue
 		}
-		if !diag.IsImportResolutionCode(issue.Code().String()) {
-			t.Fatalf("%s is not in the import-resolution family", code)
-		}
 		details := map[string]string{}
 		for _, d := range issue.Details() {
 			details[d.Key] = d.Value
 		}
 		return issue, details
 	}
-	t.Fatalf("no %s issue in %v", code, res.Err())
+	t.Fatalf("no %s issue in %v", code, res)
 	return diag.Issue{}, nil
 }
 
 // assertProvenance checks that an issue in the resolution family carries both
 // detail keys and states the provenance in its message. Both are required:
-// the structured keys serve --format json and library callers, and the message
+// the structured keys serve --json and library callers, and the message
 // serves the text renderer and the plugin hook, neither of which prints
 // details.
 func assertProvenance(t *testing.T, issue diag.Issue, details map[string]string, wantRoot, wantOrigin, wantMessagePart string) {
@@ -56,39 +53,6 @@ func assertProvenance(t *testing.T, issue diag.Issue, details map[string]string,
 	}
 	if !strings.Contains(issue.Message(), wantMessagePart) {
 		t.Errorf("message %q does not state the provenance in words (want %q)", issue.Message(), wantMessagePart)
-	}
-}
-
-// assertResolutionShape checks that every issue of the import-resolution
-// family in res carries the module root and its origin as details, and names
-// the root in its message (or says none is in play), whichever site raised it.
-func assertResolutionShape(t *testing.T, res diag.Result) {
-	t.Helper()
-	seen := 0
-	for issue := range res.Issues() {
-		if !diag.IsImportResolutionCode(issue.Code().String()) {
-			continue
-		}
-		seen++
-		details := map[string]string{}
-		for _, d := range issue.Details() {
-			details[d.Key] = d.Value
-		}
-		root, hasRoot := details[diag.DetailKeyModuleRoot]
-		origin, hasOrigin := details[diag.DetailKeyModuleRootOrigin]
-		if !hasRoot || !hasOrigin || origin == "" {
-			t.Errorf("%s %q carries module root %v and origin %q; the family carries both", issue.Code(), issue.Message(), hasRoot, origin)
-		}
-		words := root
-		if origin == diag.ModuleRootNone {
-			words = "no module root in play"
-		}
-		if !strings.Contains(issue.Message(), words) {
-			t.Errorf("%s %q does not state its root, %q", issue.Code(), issue.Message(), words)
-		}
-	}
-	if seen == 0 {
-		t.Errorf("no import-resolution issue in %v", res.Err())
 	}
 }
 
@@ -115,7 +79,9 @@ func TestImportResolveProvenance_Default(t *testing.T) {
 
 	_, entry := writeBrokenImportTree(t)
 
-	_, res := schema.Load(t.Context(), entry)
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), entry, schema.WithWarnings(warn))
+	})
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
 	assertProvenance(t, issue, details,
 		rootIdentity(t, filepath.Dir(entry)), diag.ModuleRootDefault, "defaulted to the entry schema's directory")
@@ -134,7 +100,9 @@ func TestImportResolveProvenance_Discovered(t *testing.T) {
 	root, entry := writeBrokenImportTree(t)
 	writeMarker(t, root, "")
 
-	_, res := schema.Load(t.Context(), entry)
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), entry, schema.WithWarnings(warn))
+	})
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
 	id := rootIdentity(t, root)
 	assertProvenance(t, issue, details, id, diag.ModuleRootDiscovered,
@@ -150,7 +118,9 @@ func TestImportResolveProvenance_Explicit(t *testing.T) {
 
 	root, entry := writeBrokenImportTree(t)
 
-	_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+	})
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
 	assertProvenance(t, issue, details, rootIdentity(t, root), diag.ModuleRootExplicit, "given explicitly")
 }
@@ -161,8 +131,10 @@ func TestImportResolveProvenance_Synthetic(t *testing.T) {
 	sources := map[string][]byte{
 		"assets/main.yammm": []byte("schema \"main\"\n\nimport \"assets/missing\" as m\n\ntype T {\n\tid String primary\n\t--> USES (one) m.P\n}\n"),
 	}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "assets/main.yammm", "",
-		schema.WithSyntheticRoot("embedded://app"), schema.WithSourcesOnly(true))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), sources, "assets/main.yammm",
+			schema.WithSyntheticRoot("embedded://app"), schema.WithSourcesOnly(true), schema.WithWarnings(warn))
+	})
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
 	assertProvenance(t, issue, details, "embedded://app", diag.ModuleRootSynthetic, "synthetic root")
 }
@@ -177,7 +149,9 @@ func TestImportResolveProvenance_None(t *testing.T) {
 	sources := map[string][]byte{
 		"/main.yammm": []byte("schema \"main\"\n\nimport \"lib/missing\" as m\n\ntype T {\n\tid String primary\n\t--> USES (one) m.P\n}\n"),
 	}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "/main.yammm", "")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), sources, "/main.yammm", schema.WithWarnings(warn))
+	})
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
 	assertProvenance(t, issue, details, "", diag.ModuleRootNone, "no module root in play")
 }
@@ -197,7 +171,9 @@ func TestPathEscapeProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+	})
 	issue, details := resolutionIssue(t, res, diag.E_PATH_ESCAPE)
 	assertProvenance(t, issue, details, rootIdentity(t, root), diag.ModuleRootExplicit, "given explicitly")
 
@@ -222,25 +198,9 @@ func TestImportCycleProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, res := schema.Load(t.Context(), a, schema.WithModuleRoot(root))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), a, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+	})
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_CYCLE)
 	assertProvenance(t, issue, details, rootIdentity(t, root), diag.ModuleRootExplicit, "given explicitly")
-}
-
-// TestBuilderImportResolve_SameShape pins that the Builder's front door builds
-// the code the same way the loader does. A family that carries one shape at
-// one site and another at its sibling is the defect one builder per code
-// exists to prevent. The Builder resolves through a registry and never through
-// a root, so its origin is "none".
-func TestBuilderImportResolve_SameShape(t *testing.T) {
-	t.Parallel()
-
-	b := schema.NewBuilder().
-		WithName("main").
-		WithSourceID(location.MustNewSourceID("builder://main"))
-	b.AddImport("other", "other")
-	_, res := b.Build()
-
-	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
-	assertProvenance(t, issue, details, "", diag.ModuleRootNone, "no module root in play")
 }

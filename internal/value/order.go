@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/big"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -21,36 +20,10 @@ import (
 // the recursive [Order] call rather than being deep-copied.
 func sliceAccessor(v any) (int, func(int) any) {
 	if s, ok := v.(immutable.Slice); ok {
-		return s.Len(), func(i int) any {
-			elem, ok := s.GetOK(i)
-			if !ok {
-				return nil
-			}
-			return elem.Unwrap()
-		}
+		return s.Len(), func(i int) any { return s.At(i).Any() }
 	}
 	rv := reflect.ValueOf(v)
-	for rv.Kind() == reflect.Pointer {
-		rv = rv.Elem()
-	}
 	return rv.Len(), func(i int) any { return rv.Index(i).Interface() }
-}
-
-// toStringComparable converts strings and regexps to comparable string values.
-func toStringComparable(v any) (string, error) {
-	switch s := v.(type) {
-	case string:
-		return s, nil
-	case *regexp.Regexp:
-		if s == nil {
-			return "", errors.New("value: nil regexp")
-		}
-		return s.String(), nil
-	}
-	if rv, ok := underlying(v); ok && rv.Kind() == reflect.String {
-		return rv.String(), nil
-	}
-	return "", fmt.Errorf("value: expected string or regexp values, got %T", v)
 }
 
 // TypeOrder orders types canonically and returns 1 if left has a type greater than right, 0 if
@@ -187,14 +160,9 @@ func Order(left, right any) (int, error) {
 		return 0, fmt.Errorf("value: expected numeric values (left %T, right %T)", left, right)
 
 	case StringStrata:
-		ls, err := toStringComparable(left)
-		if err != nil {
-			return 0, err
-		}
-		rs, err := toStringComparable(right)
-		if err != nil {
-			return 0, err
-		}
+		// TypeStrata reports StringStrata only for a value GetString reads.
+		ls, _ := GetString(left)
+		rs, _ := GetString(right)
 		return strings.Compare(ls, rs), nil
 
 	case SliceStrata:
@@ -225,22 +193,27 @@ func Order(left, right any) (int, error) {
 	return 0, fmt.Errorf("value: unknown strata for comparison between %T and %T", left, right)
 }
 
-// isWideInteger reports whether v is a json.Number spelled as a decimal integer
-// neither int64 nor uint64 holds. Its nearest float64 can be a different
-// integer, so [Order] compares it exactly rather than through that float. A
-// literal carrying a float indicator is a float however long its digit run:
-// strconv reports ErrRange for such a run before it reads the indicator.
+// isWideInteger reports whether v is a json.Number integer literal, read as
+// [Scalar] reads it, that neither int64 nor uint64 holds. Its nearest float64
+// can be a different integer, so [Order] compares it exactly rather than
+// through that float.
 func isWideInteger(v any) bool {
-	n, ok := v.(json.Number)
-	if !ok || !immutable.IsIntegerLiteral(n) {
-		return false
+	_, ok := wideInteger(v)
+	return ok
+}
+
+// wideInteger returns the literal [isWideInteger] reports.
+func wideInteger(v any) (json.Number, bool) {
+	n, ok := NumberLiteral(v)
+	if !ok || !IsIntegerLiteral(n) {
+		return "", false
 	}
 	_, err := strconv.ParseInt(string(n), 10, 64)
 	if !errors.Is(err, strconv.ErrRange) {
-		return false
+		return "", false
 	}
 	_, err = strconv.ParseUint(string(n), 10, 64)
-	return err != nil
+	return n, err != nil
 }
 
 // compareExact orders two numbers of which one is a wide integer, as rationals.
@@ -265,11 +238,10 @@ func compareExact(left, right any) (int, error) {
 // exactOf returns v as a rational, or nil with a rank for a non-finite float:
 // -1 for -Inf, 1 for +Inf, 2 for NaN; a finite number ranks 0.
 func exactOf(v any) (*big.Rat, int, error) {
-	if n, ok := v.(json.Number); ok && isWideInteger(n) {
-		r, ok := new(big.Rat).SetString(string(n))
-		if !ok {
-			return nil, 0, fmt.Errorf("value: %q is not a number", n)
-		}
+	if n, ok := wideInteger(v); ok {
+		// A JSON integer literal is decimal digits after an optional '-', which
+		// SetString reads.
+		r, _ := new(big.Rat).SetString(string(n))
 		return r, 0, nil
 	}
 	if i, ok := GetInt64(v); ok {
@@ -335,46 +307,24 @@ func GetInt64(val any) (int64, bool) {
 			return 0, false
 		}
 		return int64(x), true
-	case json.Number:
-		n, err := x.Int64()
-		return n, err == nil
 	}
-	rv, ok := underlying(val)
-	if !ok {
-		return 0, false
-	}
+	// Floats stay rejected here: the caller distinguishes an integer from a
+	// float by which getter answers.
+	rv := reflect.ValueOf(val)
 	switch rv.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return rv.Int(), true
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		n := rv.Uint()
-		if n > uint64(math.MaxInt64) {
-			return 0, false
+		if u := rv.Uint(); u <= math.MaxInt64 {
+			return int64(u), true
 		}
-		return int64(n), true
-	default:
-		// Floats stay rejected here: the caller distinguishes an integer
-		// from a float by which getter answers.
 		return 0, false
 	}
-}
-
-// underlying dereferences val to a non-pointer reflect.Value. It reports false
-// for nil and for a nil pointer, so a caller's fast-path type switch keeps
-// answering for every predeclared type and only a pointer or named type
-// reaches reflect.
-func underlying(val any) (reflect.Value, bool) {
-	if val == nil {
-		return reflect.Value{}, false
+	if n, ok := literal(rv); ok {
+		i, err := n.Int64()
+		return i, err == nil
 	}
-	rv := reflect.ValueOf(val)
-	for rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
-			return reflect.Value{}, false
-		}
-		rv = rv.Elem()
-	}
-	return rv, rv.IsValid()
+	return 0, false
 }
 
 // GetFloat64 extracts a float64 from any float type.
@@ -386,53 +336,48 @@ func GetFloat64(val any) (float64, bool) {
 		return float64(x), true
 	case float64:
 		return x, true
-	case json.Number:
-		f, err := x.Float64()
+	}
+	rv := reflect.ValueOf(val)
+	if k := rv.Kind(); k == reflect.Float32 || k == reflect.Float64 {
+		return rv.Float(), true
+	}
+	if n, ok := literal(rv); ok {
+		f, err := n.Float64()
 		return f, err == nil
 	}
-	rv, ok := underlying(val)
-	if !ok {
-		return 0, false
-	}
-	switch rv.Kind() {
-	case reflect.Float32, reflect.Float64:
-		return rv.Float(), true
-	default:
-		return 0, false
-	}
+	return 0, false
 }
 
-// GetBool extracts a bool, accepting a pointer or a named type over bool so it
-// agrees with the BoolStrata category TypeStrata assigns them.
+// GetBool extracts a bool, accepting a named type over bool so it agrees with
+// the BoolStrata category TypeStrata assigns one.
 func GetBool(val any) (bool, bool) {
 	if b, ok := val.(bool); ok {
 		return b, true
 	}
-	if rv, ok := underlying(val); ok && rv.Kind() == reflect.Bool {
-		return rv.Bool(), true
+	rv := reflect.ValueOf(val)
+	if rv.Kind() != reflect.Bool {
+		return false, false
 	}
-	return false, false
+	return rv.Bool(), true
 }
 
-// GetString extracts a string, accepting a pointer or a named type over string.
-// It rejects *regexp.Regexp, which toStringComparable accepts for ordering but
-// which is not a value any string-kinded constraint holds, and json.Number,
-// which is a named type over string but a number to every other getter here.
+// GetString extracts a string, accepting a named type over string. It rejects
+// a json.Number, which is a named type over string but a number to every other
+// getter here.
 func GetString(val any) (string, bool) {
 	if s, ok := val.(string); ok {
 		return s, true
 	}
-	if _, isNumber := val.(json.Number); isNumber {
+	rv := reflect.ValueOf(val)
+	if rv.Kind() != reflect.String || rv.Type() == numberType {
 		return "", false
 	}
-	if rv, ok := underlying(val); ok && rv.Kind() == reflect.String {
-		return rv.String(), true
-	}
-	return "", false
+	return rv.String(), true
 }
 
 // GetUint64 extracts a uint64 from any unsigned integer type, or from a
-// json.Number whose text is a non-negative integer within uint64.
+// json.Number whose text is a JSON number literal spelling a non-negative
+// integer within uint64, a named type read as its base value.
 // Returns (0, false) for every other value.
 //
 // Unlike GetInt64, this function does not reject any valid unsigned values.
@@ -451,20 +396,17 @@ func GetUint64(val any) (uint64, bool) {
 		return x, true
 	case uintptr:
 		return uint64(x), true
-	case json.Number:
-		n, err := strconv.ParseUint(string(x), 10, 64)
-		return n, err == nil
 	}
-	rv, ok := underlying(val)
-	if !ok {
-		return 0, false
-	}
+	rv := reflect.ValueOf(val)
 	switch rv.Kind() {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		return rv.Uint(), true
-	default:
-		return 0, false
 	}
+	if n, ok := literal(rv); ok {
+		u, err := strconv.ParseUint(string(n), 10, 64)
+		return u, err == nil
+	}
+	return 0, false
 }
 
 // Int64Compare compares two int64 values and returns -1, 0, or +1.

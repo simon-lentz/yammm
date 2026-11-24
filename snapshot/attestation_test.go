@@ -2,11 +2,14 @@ package snapshot_test
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -20,24 +23,24 @@ type Thing {
 
 // attWireFixture marshals one validator-built Thing and returns the schema
 // and document bytes; the document attests {true, true}.
-func attWireFixture(t *testing.T) (*schema.Schema, []byte) {
+func attWireFixture(t *testing.T) (schema.Schema, []byte) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), attWireSchema, "attwire.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	s, err := schema.LoadString(t.Context(), attWireSchema, "attwire.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
-	vi, vres := v.ValidateOne(t.Context(), "Thing", instance.RawInstance{Properties: map[string]any{"id": "t1"}})
-	if vres.HasErrors() {
-		t.Fatalf("ValidateOne: %s", vres.String())
+	vi, validateErr := v.ValidateOne(t.Context(), "Thing", instance.RawInstance{Properties: map[string]any{"id": "t1"}})
+	if validateErr != nil {
+		t.Fatalf("ValidateOne: %s", validateErr)
 	}
 	g := graph.New(s)
-	if r := g.Add(t.Context(), vi); !r.OK() {
-		t.Fatalf("Add: %s", r.String())
+	if err := g.Add(t.Context(), vi); err != nil {
+		t.Fatalf("Add: %s", err)
 	}
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres.String())
+	data, readErr := snapshot.Marshal(t.Context(), g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("Marshal: %s", readErr)
 	}
 	return s, data
 }
@@ -52,67 +55,64 @@ func TestAttestation_ValidatorBuiltRoundTripsTrue(t *testing.T) {
 		t.Fatalf("marshalled header does not carry the attestation: %s", data)
 	}
 
-	snap, res := snapshot.Load(t.Context(), data, s)
-	if res.HasErrors() {
-		t.Fatalf("Load: %s", res.String())
+	snap, err := snapshot.Unmarshal(t.Context(), data, s)
+	if err != nil {
+		t.Fatalf("Load: %s", err)
 	}
 	if att := snap.Attestation(); !att.Values || !att.Associations {
 		t.Fatalf("loaded snapshot attests %+v, want both true", att)
 	}
 
-	// The claim rides the header; the rebuilt instances stay unproven.
+	// The claim rides the header; the loaded instances stay unproven.
 	thing, _ := s.Type("Thing")
-	insts := snap.InstancesOf(thing.ID())
+	insts := slices.Collect(snap.InstancesOf(thing.ID()))
 	if len(insts) != 1 || insts[0].Validated() {
 		t.Fatal("a loaded instance reports Validated; the wire carries a claim, not a proof")
 	}
 }
 
-func TestAttestation_BypassBuiltRoundTripsFalse(t *testing.T) {
+func TestAttestation_AFalseClaimRoundTrips(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), attWireSchema, "attwire.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	s, err := schema.LoadString(t.Context(), attWireSchema, "attwire.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	thing, _ := s.Type("Thing")
 
-	g := graph.New(s)
-	vi := instancetest.VI(
-		"Thing",
-		instancetest.TypeID(thing.ID()),
-		instancetest.PK("t1"),
-		instancetest.Props(map[string]any{"id": "t1"}),
-	)
-	if r := g.Add(t.Context(), vi); !r.OK() {
-		t.Fatalf("Add: %s", r.String())
-	}
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres.String())
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
+		Instances: []snapparts.Instance{{
+			TypeID: thing.ID(), PrimaryKey: immutable.WrapKey([]any{"t1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "t1"}),
+		}},
+		Attestation: &snapparts.Attestation{Associations: true},
+	})
+	data, readErr := snapshot.Marshal(t.Context(), built)
+	if readErr != nil {
+		t.Fatalf("Marshal: %s", readErr)
 	}
 	if !bytes.Contains(data, []byte(`"attestation":{"values":false`)) {
-		t.Fatal("a bypass-built document did not write values=false")
+		t.Fatal("a false Values claim did not write values=false")
 	}
 
-	snap, lres := snapshot.Load(t.Context(), data, s)
-	if lres.HasErrors() {
-		t.Fatalf("Load: %s", lres.String())
+	snap, readErr2 := snapshot.Unmarshal(t.Context(), data, s)
+	if readErr2 != nil {
+		t.Fatalf("Load: %s", readErr2)
 	}
 	if snap.Attestation().Values {
-		t.Fatal("a bypass-built document loaded with Values true")
+		t.Fatal("a false Values claim loaded with Values true")
 	}
 }
 
-func TestAttestation_HeaderOnlySeesTheClaim(t *testing.T) {
+func TestAttestation_ReadHeaderSeesTheClaim(t *testing.T) {
 	t.Parallel()
 	_, data := attWireFixture(t)
 
-	header, res := snapshot.HeaderOnly(t.Context(), data)
-	if res.HasErrors() {
-		t.Fatalf("HeaderOnly: %s", res.String())
+	header, err := snapshot.ReadHeader(t.Context(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("ReadHeader: %s", err)
 	}
 	if header.Attestation == nil || !header.Attestation.Values || !header.Attestation.Associations {
-		t.Fatalf("HeaderOnly attestation = %+v, want both true", header.Attestation)
+		t.Fatalf("ReadHeader attestation = %+v, want both true", header.Attestation)
 	}
 }
 
@@ -120,9 +120,9 @@ func TestUpdateMetadata_PreservesTheAttestation(t *testing.T) {
 	t.Parallel()
 	_, data := attWireFixture(t)
 
-	out, res := snapshot.UpdateMetadata(t.Context(), data, map[string]string{"k": "v"})
-	if res.HasErrors() {
-		t.Fatalf("UpdateMetadata: %s", res.String())
+	out, err := snapshot.UpdateMetadata(t.Context(), data, map[string]string{"k": "v"})
+	if err != nil {
+		t.Fatalf("UpdateMetadata: %s", err)
 	}
 	if !bytes.Contains(out, []byte(attTrueSegment)) {
 		t.Fatal("UpdateMetadata dropped the attestation field")
@@ -133,24 +133,25 @@ func TestUpdateMetadata_DoesNotFabricateAnAttestation(t *testing.T) {
 	t.Parallel()
 	_, data := attWireFixture(t)
 
-	// A pre-v0.15.0 document: the same bytes with the attestation removed.
-	// UpdateMetadata never verifies integrity, so the edit is safe here.
+	// A document that states no claim: the same bytes with the attestation
+	// removed, signed again.
 	stripped := bytes.Replace(data, []byte(attTrueSegment), nil, 1)
 	if bytes.Equal(stripped, data) {
 		t.Fatal("fixture did not carry the attestation segment")
 	}
+	stripped = rehashDocument(t, stripped)
 
-	out, res := snapshot.UpdateMetadata(t.Context(), stripped, map[string]string{"k": "v"})
-	if res.HasErrors() {
-		t.Fatalf("UpdateMetadata: %s", res.String())
+	out, err := snapshot.UpdateMetadata(t.Context(), stripped, map[string]string{"k": "v"})
+	if err != nil {
+		t.Fatalf("UpdateMetadata: %s", err)
 	}
 	if bytes.Contains(out, []byte(`"attestation"`)) {
-		t.Fatal("UpdateMetadata fabricated an attestation on a pre-v0.15.0 document")
+		t.Fatal("UpdateMetadata fabricated an attestation on a document that states none")
 	}
 }
 
 // TestLoad_AbsentAttestationSurvivesTheRoundTrip pins that silence stays
-// silence. A pre-v0.15.0 document carries no attestation, and no claim is a
+// silence. A document can carry no attestation, and no claim is a
 // weaker statement than a claim that both dimensions are false — so a load
 // must report absence and the next Marshal must write none.
 //
@@ -163,17 +164,17 @@ func TestLoad_AbsentAttestationSurvivesTheRoundTrip(t *testing.T) {
 	s, data := attWireFixture(t)
 
 	stripped := bytes.Replace(data, []byte(attTrueSegment), nil, 1)
-	snap, res := snapshot.Load(t.Context(), stripped, s, snapshot.WithIntegrityCheck(false))
-	if res.HasErrors() {
-		t.Fatalf("Load: %s", res.String())
+	snap, err := snapshot.Unmarshal(t.Context(), stripped, s, snapshot.WithIntegrityCheck(false))
+	if err != nil {
+		t.Fatalf("Load: %s", err)
 	}
 	if att := snap.Attestation(); att != nil {
 		t.Fatalf("an absent attestation loaded as %+v, want no claim at all", att)
 	}
 
-	again, mres := snapshot.Marshal(t.Context(), snap)
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres.String())
+	again, readErr := snapshot.Marshal(t.Context(), snap)
+	if readErr != nil {
+		t.Fatalf("Marshal: %s", readErr)
 	}
 	if bytes.Contains(again, []byte(`"attestation"`)) {
 		t.Fatalf("Marshal fabricated an attestation on a document that carried none: %s", again)

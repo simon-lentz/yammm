@@ -2,8 +2,10 @@ package instance_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,36 +13,33 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
-// mustBuild builds a schema from a Builder, failing the test on error.
-func mustBuild(t *testing.T, b *schema.Builder) *schema.Schema {
+// mustLoad loads a schema from YAMMM DSL source, failing the test on error.
+func mustLoad(t *testing.T, source string) schema.Schema {
 	t.Helper()
-	s, result := b.Build()
-	require.False(t, result.HasErrors(), "schema build: %s", result)
-	return s
+	return mustLoadString(t, source, "test.yammm")
 }
 
 // mustLoadString loads a schema from YAMMM DSL source, failing the test on error.
-func mustLoadString(t *testing.T, source, name string) *schema.Schema {
+func mustLoadString(t *testing.T, source, name string) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), source, name)
-	require.False(t, result.HasErrors(), "schema load: %s", result)
+	s, err := schema.LoadString(t.Context(), source, name)
+	require.NoError(t, err, "schema load: %s", err)
 	return s
 }
 
 func TestValidator_ValidateOne_Success(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithOptionalProperty("age", schema.NewIntegerConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	name String required
+	age Integer
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -52,27 +51,28 @@ func TestValidator_ValidateOne_Success(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 	assert.Equal(t, "Person", valid.TypeName())
 	assert.Equal(t, `["1"]`, valid.PrimaryKey().String())
 
 	// Check property access
 	nameVal, ok := valid.Property("name")
 	require.True(t, ok)
-	name, ok := nameVal.String()
+	name, ok := nameVal.AsString()
 	require.True(t, ok)
 	assert.Equal(t, "Alice", name)
 }
 
 func TestValidator_ValidateOne_TypeNotFound(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Placeholder").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Placeholder {
+	id String primary
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -82,20 +82,22 @@ func TestValidator_ValidateOne_TypeNotFound(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "NonExistent", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "NonExistent", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "not found")
 }
 
 func TestValidator_ValidateOne_AbstractTypeRejected(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Entity").
-		AsAbstract().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+abstract type Entity {
+	id String primary
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -105,20 +107,22 @@ func TestValidator_ValidateOne_AbstractTypeRejected(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Entity", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Entity", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "abstract")
 }
 
 func TestValidator_ValidateOne_PartTypeRejected(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Part").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+part type Part {
+	id String primary
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -128,20 +132,23 @@ func TestValidator_ValidateOne_PartTypeRejected(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Part", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Part", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "part type")
 }
 
 func TestValidator_ValidateOne_MissingRequiredProperty(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()). // Required
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	name String required
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -152,20 +159,23 @@ func TestValidator_ValidateOne_MissingRequiredProperty(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "missing required")
 }
 
 func TestValidator_ValidateOne_OptionalPropertyMissing(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithOptionalProperty("nickname", schema.NewStringConstraint()). // Optional
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	nickname String
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -176,19 +186,20 @@ func TestValidator_ValidateOne_OptionalPropertyMissing(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 }
 
 func TestValidator_ValidateOne_TypeMismatch(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("age", schema.NewIntegerConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	age Integer required
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -199,19 +210,22 @@ func TestValidator_ValidateOne_TypeMismatch(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "age")
 }
 
 func TestValidator_ValidateOne_UnknownField(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+}
+`)
 
 	validator := instance.NewValidator(s) // Default: don't allow unknown fields
 
@@ -222,96 +236,23 @@ func TestValidator_ValidateOne_UnknownField(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "unknown")
 }
 
-func TestValidator_ValidateOne_AllowUnknownFields(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
-
-	validator := instance.NewValidator(s, instance.WithAllowUnknownFields(true))
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":      "1",
-			"unknown": "value", // Unknown field - should be ignored
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
-}
-
-func TestValidator_ValidateOne_CaseInsensitivePropertyMatch(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("firstName", schema.NewStringConstraint()).
-		Done())
-
-	validator := instance.NewValidator(s) // Default: case-insensitive
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"ID":        "1",     // Different case
-			"FIRSTNAME": "Alice", // Different case
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
-
-	// Property should be stored with canonical name
-	firstNameVal, ok := valid.Property("firstName")
-	require.True(t, ok)
-	firstName, ok := firstNameVal.String()
-	require.True(t, ok)
-	assert.Equal(t, "Alice", firstName)
-}
-
-func TestValidator_ValidateOne_StrictPropertyNames(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("firstName", schema.NewStringConstraint()).
-		Done())
-
-	validator := instance.NewValidator(s, instance.WithStrictPropertyNames(true))
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":        "1",
-			"FIRSTNAME": "Alice", // Wrong case - should fail
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
-	// Should have both "unknown field" and "missing required" errors
-}
-
 func TestValidator_Validate_BatchSuccess(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	name String required
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -321,19 +262,20 @@ func TestValidator_Validate_BatchSuccess(t *testing.T) {
 		{Properties: map[string]any{"id": "3", "name": "Charlie"}},
 	}
 
-	valid, result := validator.Validate(t.Context(), "Person", raws)
+	valid, err := validator.Validate(t.Context(), "Person", raws)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	assert.Len(t, valid, 3)
 }
 
 func TestValidator_Validate_PartialSuccess(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	name String required
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -343,22 +285,29 @@ func TestValidator_Validate_PartialSuccess(t *testing.T) {
 		{Properties: map[string]any{"id": "3", "name": "Charlie"}},
 	}
 
-	valid, result := validator.Validate(t.Context(), "Person", raws)
+	valid, err := validator.Validate(t.Context(), "Person", raws)
 
-	require.False(t, result.OK())
-	// Batch returns positional nils: 3 entries, with index 1 nil for the failure
+	// The partial: one entry per raw beside the error, the zero instance where
+	// the row was refused, and the error holds that row's refusal alone.
 	require.Len(t, valid, 3)
-	assert.NotNil(t, valid[0])
-	assert.Nil(t, valid[1])
-	assert.NotNil(t, valid[2])
+	assert.False(t, valid[0].IsZero())
+	assert.True(t, valid[1].IsZero())
+	assert.False(t, valid[2].IsZero())
+	re, ok := errors.AsType[*diag.ResultError](err)
+	require.True(t, ok, "err = %v, want a *diag.ResultError", err)
+	issues := slices.Collect(re.Result.Issues())
+	require.Len(t, issues, 1)
+	idx, stamped := detail(issues[0], diag.DetailKeyInstanceIndex)
+	assert.True(t, stamped && idx == "1", "the refusal names instance %q, want 1", idx)
 }
 
 func TestValidator_Validate_ContextCancellation(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -369,7 +318,9 @@ func TestValidator_Validate_ContextCancellation(t *testing.T) {
 		Properties: map[string]any{"id": "1"},
 	}
 
-	_, result := validator.ValidateOne(ctx, "Person", raw)
+	_, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(ctx, "Person", raw)
+	})
 
 	require.True(t, result.HasFatal())
 	// Verify context cancellation diagnostic code
@@ -379,12 +330,13 @@ func TestValidator_Validate_ContextCancellation(t *testing.T) {
 }
 
 func TestValidator_ValidateOne_ImmutableOutput(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	name String required
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -395,14 +347,14 @@ func TestValidator_ValidateOne_ImmutableOutput(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 
 	// Get the name before mutation
 	nameVal, ok := valid.Property("name")
 	require.True(t, ok)
-	nameBefore, _ := nameVal.String()
+	nameBefore, _ := nameVal.AsString()
 
 	// Mutate the original raw instance
 	raw.Properties["name"] = "Bob"
@@ -410,19 +362,20 @@ func TestValidator_ValidateOne_ImmutableOutput(t *testing.T) {
 	// The ValidInstance should not be affected
 	nameVal, ok = valid.Property("name")
 	require.True(t, ok)
-	nameAfter, _ := nameVal.String()
+	nameAfter, _ := nameVal.AsString()
 
 	assert.Equal(t, nameBefore, nameAfter, "ValidInstance should be immutable")
 	assert.Equal(t, "Alice", nameAfter)
 }
 
 func TestValidator_ValidateOne_IntegerBounds(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("age", schema.IntegerBetween(0, 150)).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	age Integer[0, 150] required
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -447,26 +400,27 @@ func TestValidator_ValidateOne_IntegerBounds(t *testing.T) {
 				},
 			}
 
-			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+			valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tt.wantErr {
-				assert.Nil(t, valid)
-				assert.False(t, result.OK())
+				assert.True(t, valid.IsZero())
+				assert.Error(t, err)
 			} else {
-				assert.NotNil(t, valid)
-				assert.True(t, result.OK())
+				assert.False(t, valid.IsZero())
+				assert.NoError(t, err)
 			}
 		})
 	}
 }
 
 func TestValidator_ValidateOne_StringBounds(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("code", schema.StringLenBetween(3, 10)).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	code String[3, 10] required
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -491,180 +445,29 @@ func TestValidator_ValidateOne_StringBounds(t *testing.T) {
 				},
 			}
 
-			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+			valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tt.wantErr {
-				assert.Nil(t, valid)
-				assert.False(t, result.OK())
+				assert.True(t, valid.IsZero())
+				assert.Error(t, err)
 			} else {
-				assert.NotNil(t, valid)
-				assert.True(t, result.OK())
+				assert.False(t, valid.IsZero())
+				assert.NoError(t, err)
 			}
 		})
 	}
 }
 
-func TestValidator_ValidateForComposition_Success(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("street", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": "1", "street": "Main St"}},
-		{Properties: map[string]any{"id": "2", "street": "Oak Ave"}},
-	}
-
-	valid, result := validator.ValidateForComposition(t.Context(), "Person", "ADDRESSES", raws)
-
-	require.True(t, result.OK())
-	assert.Len(t, valid, 2)
-}
-
-func TestValidator_ValidateForComposition_ParentTypeNotFound(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Placeholder").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": "1"}},
-	}
-
-	valid, result := validator.ValidateForComposition(t.Context(), "NonExistent", "CHILDREN", raws)
-
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
-	issues := slices.Collect(result.Issues())
-	require.GreaterOrEqual(t, len(issues), 1)
-	assert.Equal(t, instance.ErrTypeNotFound, issues[0].Code())
-	assert.Contains(t, result.String(), "not found")
-}
-
-func TestValidator_ValidateForComposition_RelationNotFound(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": "1"}},
-	}
-
-	valid, result := validator.ValidateForComposition(t.Context(), "Person", "NONEXISTENT", raws)
-
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
-	issues := slices.Collect(result.Issues())
-	require.GreaterOrEqual(t, len(issues), 1)
-	assert.Equal(t, instance.ErrCompositionNotFound, issues[0].Code())
-	assert.Contains(t, result.String(), "not found")
-}
-
-func TestValidator_ValidateForComposition_ContextCancellation(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // Cancel immediately
-
-	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": "1"}},
-	}
-
-	_, result := validator.ValidateForComposition(ctx, "Person", "ADDRESSES", raws)
-
-	require.True(t, result.HasFatal())
-	issues := slices.Collect(result.Issues())
-	require.Len(t, issues, 1)
-	assert.Equal(t, diag.E_CONTEXT_CANCELLED, issues[0].Code())
-}
-
-func TestValidator_ValidateForComposition_ParentTypeNotFound_EmptyInput(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Placeholder").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	valid, result := validator.ValidateForComposition(
-		t.Context(), "NonExistent", "CHILDREN", []instance.RawInstance{},
-	)
-
-	assert.Empty(t, valid)
-	require.False(t, result.OK())
-	issues := slices.Collect(result.Issues())
-	require.GreaterOrEqual(t, len(issues), 1)
-	assert.Equal(t, instance.ErrTypeNotFound, issues[0].Code())
-}
-
-func TestValidator_ValidateForComposition_TypeNotFound_PreservesProvenance(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Placeholder").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	prov := location.NewProvenance("test.json", path.Root().Key("items").Index(0), location.Span{})
-	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": "1"}, Provenance: prov},
-	}
-
-	_, result := validator.ValidateForComposition(
-		t.Context(), "NonExistent", "CHILDREN", raws,
-	)
-
-	require.False(t, result.OK())
-	issues := slices.Collect(result.Issues())
-	require.GreaterOrEqual(t, len(issues), 1)
-	assert.Equal(t, "test.json", issues[0].SourceName())
-}
-
 func TestValidator_ValidateOne_InvariantPass(t *testing.T) {
 	// Invariant: age >= 0
-	// Expression: (>= ($ age) 0)
-	invExpr := expr.SExpr{
-		expr.Op(">="),
-		expr.SExpr{expr.Op("$"), expr.NewLiteral("age")},
-		expr.NewLiteral(int64(0)),
-	}
+	s := mustLoad(t, `schema "test"
 
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("age", schema.NewIntegerConstraint()).
-		WithInvariant("age must be non-negative", invExpr, "").
-		Done())
+type Person {
+	id String primary
+	age Integer required
+	! "age must be non-negative" age >= 0
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -675,27 +478,21 @@ func TestValidator_ValidateOne_InvariantPass(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 }
 
 func TestValidator_ValidateOne_InvariantFail(t *testing.T) {
-	// Invariant: age >= 0
-	invExpr := expr.SExpr{
-		expr.Op(">="),
-		expr.SExpr{expr.Op("$"), expr.NewLiteral("age")},
-		expr.NewLiteral(int64(0)),
-	}
+	s := mustLoad(t, `schema "test"
 
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("age", schema.NewIntegerConstraint()).
-		WithInvariant("age must be non-negative", invExpr, "").
-		Done())
+type Person {
+	id String primary
+	age Integer required
+	! "age must be non-negative" age >= 0
+}
+`)
 
 	validator := instance.NewValidator(s)
 
@@ -706,17 +503,14 @@ func TestValidator_ValidateOne_InvariantFail(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "age must be non-negative")
 }
-
-// TestValidator_ValidateOne_InvariantWithoutMessage and
-// TestValidator_ValidateOne_InvariantNilExpression have been removed:
-// these tested unreachable states. The Builder rejects empty invariant names
-// and nil expressions, and the parser always provides both.
 
 // TestValidator_NilUnderscoreEquivalence verifies that _ and nil are
 // interchangeable nil literals in invariant expressions. Both syntactic forms
@@ -772,13 +566,13 @@ type Record {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
 					raw := instance.RawInstance{Properties: tc.input}
-					valid, result := v.ValidateOne(t.Context(), "Record", raw)
+					valid, err := v.ValidateOne(t.Context(), "Record", raw)
 					if tc.wantOK {
-						assert.True(t, result.OK(), "expected pass: %s", result)
-						assert.NotNil(t, valid)
+						require.NoError(t, err, "expected pass: %s", err)
+						assert.False(t, valid.IsZero())
 					} else {
-						assert.False(t, result.OK(), "expected fail")
-						assert.Nil(t, valid)
+						require.Error(t, err, "expected fail")
+						assert.True(t, valid.IsZero())
 					}
 				})
 			}
@@ -832,13 +626,15 @@ type Record {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			raw := instance.RawInstance{Properties: tc.input}
-			valid, result := v.ValidateOne(t.Context(), "Record", raw)
+			valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "Record", raw)
+			})
 			if tc.wantOK {
-				assert.True(t, result.OK(), "expected pass: %s", result)
-				assert.NotNil(t, valid)
+				require.NoError(t, diagtest.Err(result), "expected pass: %s", result)
+				assert.False(t, valid.IsZero())
 			} else {
-				assert.False(t, result.OK(), "expected fail")
-				assert.Nil(t, valid)
+				require.Error(t, diagtest.Err(result), "expected fail")
+				assert.True(t, valid.IsZero())
 				hasInvariantFail := false
 				for issue := range result.Issues() {
 					if issue.Code() == diag.E_INVARIANT_FAIL {
@@ -852,153 +648,37 @@ type Record {
 	}
 }
 
-func TestValidator_PropertyPath_UsesInputName(t *testing.T) {
-	// A diagnostic's path names the token in the input document, so a folded
-	// match anchors on the key the caller wrote; the schema spelling is a detail.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("firstName", schema.NewIntegerConstraint()). // Integer type to cause mismatch
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	// Use different case in input - case-insensitive matching will find the property
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":        "1",
-			"firstname": "not_an_int", // Wrong type (string instead of int), lowercase input name
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
-
-	var foundPath string
-	for issue := range result.Issues() {
-		if issue.Path() != "" {
-			foundPath = issue.Path()
-			break
-		}
-	}
-
-	assert.Equal(t, "$.firstname", foundPath, "path names the input key")
-}
-
-func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
-	// When input field name differs from schema property name,
-	// the diagnostic should include a "field" detail with the original input name.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("firstName", schema.NewIntegerConstraint()). // Integer to cause type error
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	// Use different case in input
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":        "1",
-			"firstname": "not_an_int", // Wrong type, lowercase input name
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
-
-	// Check that the issue has a "field" detail with the input field name
-	var foundFieldDetail bool
-	for issue := range result.Issues() {
-		for _, detail := range issue.Details() {
-			if detail.Key == "field" && detail.Value == "firstname" {
-				foundFieldDetail = true
-				break
-			}
-		}
-	}
-
-	assert.True(t, foundFieldDetail, "should include 'field' detail with original input name when it differs from schema name")
-}
-
 func TestValidator_Validate_NilInput_ReturnsNil(t *testing.T) {
 	// Validate(ctx, typeName, nil) should return (nil, OK result)
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+}
+`)
 
 	validator := instance.NewValidator(s)
 
-	valid, result := validator.Validate(t.Context(), "Person", nil)
+	valid, err := validator.Validate(t.Context(), "Person", nil)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	assert.Nil(t, valid, "nil input should return nil valid slice")
 }
 
 func TestValidator_Validate_EmptyInput_ReturnsEmptySlice(t *testing.T) {
-	// Validate(ctx, typeName, []RawInstance{}) should return ([]*ValidInstance{}, OK result)
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done())
+	// Validate(ctx, typeName, []RawInstance{}) should return ([]ValidInstance{}, OK result)
+	s := mustLoad(t, `schema "test"
 
-	validator := instance.NewValidator(s)
-
-	valid, result := validator.Validate(t.Context(), "Person", []instance.RawInstance{})
-
-	require.True(t, result.OK())
-	require.NotNil(t, valid, "empty input should return non-nil empty valid slice")
-	assert.Empty(t, valid, "empty input should return empty valid slice")
+type Person {
+	id String primary
 }
-
-func TestValidator_ValidateForComposition_NilInput_ReturnsNil(t *testing.T) {
-	// ValidateForComposition with nil input should return (nil, OK result)
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
+`)
 
 	validator := instance.NewValidator(s)
 
-	valid, result := validator.ValidateForComposition(t.Context(), "Person", "ADDRESSES", nil)
+	valid, err := validator.Validate(t.Context(), "Person", []instance.RawInstance{})
 
-	require.True(t, result.OK())
-	assert.Nil(t, valid, "nil input should return nil valid slice")
-}
-
-func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testing.T) {
-	// ValidateForComposition with empty input should return ([]*ValidInstance{}, OK result)
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		Done())
-
-	validator := instance.NewValidator(s)
-
-	valid, result := validator.ValidateForComposition(t.Context(), "Person", "ADDRESSES", []instance.RawInstance{})
-
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	require.NotNil(t, valid, "empty input should return non-nil empty valid slice")
 	assert.Empty(t, valid, "empty input should return empty valid slice")
 }
@@ -1008,19 +688,13 @@ func TestValidator_NilReceiver(t *testing.T) {
 
 	t.Run("Validate", func(t *testing.T) {
 		require.Panics(t, func() {
-			v.Validate(t.Context(), "Test", nil)
+			_, _ = v.Validate(t.Context(), "Test", nil)
 		})
 	})
 
 	t.Run("ValidateOne", func(t *testing.T) {
 		require.Panics(t, func() {
-			v.ValidateOne(t.Context(), "Test", instance.RawInstance{})
-		})
-	})
-
-	t.Run("ValidateForComposition", func(t *testing.T) {
-		require.Panics(t, func() {
-			v.ValidateForComposition(t.Context(), "Parent", "CHILDREN", nil)
+			_, _ = v.ValidateOne(t.Context(), "Test", instance.RawInstance{})
 		})
 	})
 
@@ -1031,13 +705,10 @@ func TestValidator_NilReceiver(t *testing.T) {
 	})
 }
 
-func TestNewValidator_NilSchemaPanics(t *testing.T) {
-	defer func() {
-		r := recover()
-		require.NotNil(t, r, "expected panic for nil schema")
-		assert.Contains(t, r, "nil schema", "panic message should mention nil schema")
-	}()
-	instance.NewValidator(nil)
+func TestNewValidator_ZeroSchemaPanics(t *testing.T) {
+	require.PanicsWithValue(t, "instance.NewValidator: zero Schema", func() {
+		instance.NewValidator(schema.Schema{})
+	})
 }
 
 // Ownership Isolation Tests
@@ -1056,43 +727,43 @@ func TestNewValidator_NilSchemaPanics(t *testing.T) {
 func TestOwnership_Isolation(t *testing.T) {
 	type scenario struct {
 		name     string
-		schema   func(t *testing.T) *schema.Schema
+		schema   func(t *testing.T) schema.Schema
 		typeName string
 		// raw returns the input plus a mutate func that tampers with every
 		// alias the test retained into the raw data.
 		raw    func() (instance.RawInstance, func())
-		verify func(t *testing.T, valid *instance.ValidInstance)
+		verify func(t *testing.T, valid instance.ValidInstance)
 	}
 
-	compositionSchema := func(part, parent, relation string, extraProps ...string) func(t *testing.T) *schema.Schema {
-		return func(t *testing.T) *schema.Schema {
+	compositionSchema := func(part, parent, relation string, extraProps ...string) func(t *testing.T) schema.Schema {
+		return func(t *testing.T) schema.Schema {
 			t.Helper()
-			b := schema.NewBuilder().WithName("test").
-				AddType(part).
-				AsPart().
-				WithPrimaryKey("id", schema.NewStringConstraint())
+			var props strings.Builder
 			for _, prop := range extraProps {
-				b = b.WithProperty(prop, schema.NewStringConstraint())
+				fmt.Fprintf(&props, "\t%s String required\n", prop)
 			}
-			return mustBuild(t, b.Done().
-				AddType(parent).
-				WithPrimaryKey("id", schema.NewStringConstraint()).
-				WithComposition(relation, schema.LocalTypeRef(part, location.Span{}), true, true).
-				Done())
+			return mustLoad(t, fmt.Sprintf(`schema "test"
+
+part type %s {
+	id String primary
+%s}
+
+type %s {
+	id String primary
+	*-> %s (many) %s
+}
+`, part, props.String(), parent, relation, part))
 		}
 	}
 
-	childProp := func(t *testing.T, valid *instance.ValidInstance, relation string, idx int, prop, want string) {
+	childProp := func(t *testing.T, valid instance.ValidInstance, relation string, idx int, prop, want string) {
 		t.Helper()
-		composed, ok := composedOf(valid, relation)
-		require.True(t, ok)
-		composedSlice, ok := composed.Slice()
-		require.True(t, ok)
-		require.Greater(t, composedSlice.Len(), idx)
-		child := composedSlice.Get(idx).Unwrap().(*instance.ValidInstance)
+		children := composedOf(valid, relation)
+		require.Greater(t, len(children), idx)
+		child := children[idx]
 		val, ok := child.Property(prop)
 		require.True(t, ok)
-		got, ok := val.String()
+		got, ok := val.AsString()
 		require.True(t, ok)
 		assert.Equal(t, want, got, "isolation failed: %s[%d].%s was mutated", relation, idx, prop)
 	}
@@ -1110,7 +781,7 @@ func TestOwnership_Isolation(t *testing.T) {
 					addressData["city"] = "Mutated City"
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				childProp(t, valid, "ADDRESSES", 0, "street", "Original Street")
 				childProp(t, valid, "ADDRESSES", 0, "city", "Original City")
@@ -1130,13 +801,9 @@ func TestOwnership_Isolation(t *testing.T) {
 					rawData["notes"] = []any{map[string]any{"id": "999", "text": "New Note"}}
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
-				composed, ok := composedOf(valid, "NOTES")
-				require.True(t, ok)
-				composedSlice, ok := composed.Slice()
-				require.True(t, ok)
-				require.Equal(t, 2, composedSlice.Len(), "original slice length should be preserved")
+				require.Len(t, composedOf(valid, "NOTES"), 2, "original slice length should be preserved")
 				childProp(t, valid, "NOTES", 0, "text", "Original Note 1")
 				childProp(t, valid, "NOTES", 1, "text", "Original Note 2")
 			},
@@ -1155,7 +822,7 @@ func TestOwnership_Isolation(t *testing.T) {
 					rawData["items"] = nil
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				childProp(t, valid, "ITEMS", 0, "name", "Original Item")
 			},
@@ -1172,18 +839,16 @@ func TestOwnership_Isolation(t *testing.T) {
 					detailData["id"] = "888"
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				childProp(t, valid, "DETAILS", 0, "value", "Original Value")
-				composed, _ := composedOf(valid, "DETAILS")
-				composedSlice, _ := composed.Slice()
-				child := composedSlice.Get(0).Unwrap().(*instance.ValidInstance)
+				child := composedOf(valid, "DETAILS")[0]
 				assert.Equal(t, `["1"]`, child.PrimaryKey().String(), "isolation failed: PK was mutated")
 			},
 		},
 		{
 			name: "edge properties",
-			schema: func(t *testing.T) *schema.Schema {
+			schema: func(t *testing.T) schema.Schema {
 				t.Helper()
 				return mustLoadString(t, `schema "test"
 type Company {
@@ -1207,19 +872,19 @@ type Person {
 					edgeData["_target_id"] = "999"
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				edge, ok := valid.Edge("EMPLOYER")
 				require.True(t, ok)
-				targets := edge.Targets()
+				targets := slices.Collect(edge.Targets())
 				require.Len(t, targets, 1)
 				roleVal, ok := targets[0].Property("role")
 				require.True(t, ok)
-				role, _ := roleVal.String()
+				role, _ := roleVal.AsString()
 				assert.Equal(t, "Original Role", role, "isolation failed: role was mutated")
 				dateVal, ok := targets[0].Property("startDate")
 				require.True(t, ok)
-				date, _ := dateVal.String()
+				date, _ := dateVal.AsString()
 				assert.Equal(t, "2024-01-01", date, "isolation failed: startDate was mutated")
 				assert.Equal(t, `["42"]`, targets[0].TargetKey().String(), "isolation failed: target key was mutated")
 			},
@@ -1231,9 +896,9 @@ type Person {
 			validator := instance.NewValidator(tt.schema(t))
 			raw, mutate := tt.raw()
 
-			valid, result := validator.ValidateOne(t.Context(), tt.typeName, raw)
-			require.True(t, result.OK())
-			require.NotNil(t, valid)
+			valid, err := validator.ValidateOne(t.Context(), tt.typeName, raw)
+			require.NoError(t, err)
+			require.False(t, valid.IsZero())
 
 			mutate()
 			tt.verify(t, valid)

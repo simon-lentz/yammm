@@ -1,0 +1,392 @@
+{
+  "name": "\"temporal\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "datatypes": [
+    {
+      "name": "Day",
+      "constraint": {
+        "kind": "Date",
+        "span": {
+          "s": 32,
+          "e": 36
+        }
+      },
+      "span": {
+        "s": 19,
+        "e": 36
+      }
+    },
+    {
+      "name": "Stamp",
+      "constraint": {
+        "kind": "Timestamp",
+        "span": {
+          "s": 50,
+          "e": 59
+        }
+      },
+      "span": {
+        "s": 37,
+        "e": 59
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Reading",
+      "name_span": {
+        "s": 71,
+        "e": 78
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 85,
+              "e": 94
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 82,
+            "e": 103
+          }
+        },
+        {
+          "name": "on",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 108,
+              "e": 112
+            }
+          },
+          "span": {
+            "s": 105,
+            "e": 112
+          }
+        }
+      ],
+      "span": {
+        "s": 61,
+        "e": 114
+      }
+    },
+    {
+      "name": "Casing",
+      "name_span": {
+        "s": 126,
+        "e": 132
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "serial",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 143,
+              "e": 149
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 136,
+            "e": 157
+          }
+        }
+      ],
+      "span": {
+        "s": 116,
+        "e": 159
+      }
+    },
+    {
+      "name": "Sensor",
+      "name_span": {
+        "s": 166,
+        "e": 172
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 191,
+              "e": 197
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 176,
+            "e": 205
+          }
+        },
+        {
+          "name": "installed",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 222,
+              "e": 226
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 207,
+            "e": 235
+          }
+        },
+        {
+          "name": "decommissioned",
+          "constraint": {
+            "kind": "Date",
+            "span": {
+              "s": 252,
+              "e": 256
+            }
+          },
+          "span": {
+            "s": 237,
+            "e": 256
+          }
+        },
+        {
+          "name": "created_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 273,
+              "e": 282
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 258,
+            "e": 291
+          }
+        },
+        {
+          "name": "seen_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 308,
+              "e": 317
+            }
+          },
+          "span": {
+            "s": 293,
+            "e": 317
+          }
+        },
+        {
+          "name": "day",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Day"
+            ],
+            "span": {
+              "s": 334,
+              "e": 337
+            }
+          },
+          "span": {
+            "s": 319,
+            "e": 337
+          }
+        },
+        {
+          "name": "stamp",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Stamp"
+            ],
+            "span": {
+              "s": 354,
+              "e": 359
+            }
+          },
+          "span": {
+            "s": 339,
+            "e": 359
+          }
+        },
+        {
+          "name": "days",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Date",
+              "span": {
+                "s": 381,
+                "e": 385
+              }
+            },
+            "span": {
+              "s": 376,
+              "e": 386
+            }
+          },
+          "span": {
+            "s": 361,
+            "e": 386
+          }
+        },
+        {
+          "name": "stamps",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Timestamp",
+              "span": {
+                "s": 408,
+                "e": 417
+              }
+            },
+            "span": {
+              "s": 403,
+              "e": 418
+            }
+          },
+          "span": {
+            "s": 388,
+            "e": 418
+          }
+        },
+        {
+          "name": "labels",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 440,
+                "e": 446
+              }
+            },
+            "span": {
+              "s": 435,
+              "e": 447
+            }
+          },
+          "span": {
+            "s": 420,
+            "e": 447
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "HAS_READING",
+          "name_span": {
+            "s": 453,
+            "e": 464
+          },
+          "target": {
+            "name": "Reading",
+            "span": {
+              "s": 472,
+              "e": 479
+            }
+          },
+          "optional": true,
+          "many": true,
+          "span": {
+            "s": 449,
+            "e": 479
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "IN_CASING",
+          "name_span": {
+            "s": 485,
+            "e": 494
+          },
+          "target": {
+            "name": "Casing",
+            "span": {
+              "s": 501,
+              "e": 507
+            }
+          },
+          "span": {
+            "s": 481,
+            "e": 507
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "FEEDS",
+          "name_span": {
+            "s": 513,
+            "e": 518
+          },
+          "target": {
+            "name": "Sensor",
+            "span": {
+              "s": 525,
+              "e": 531
+            }
+          },
+          "props": [
+            {
+              "name": "since",
+              "constraint": {
+                "kind": "Timestamp",
+                "span": {
+                  "s": 542,
+                  "e": 551
+                }
+              },
+              "span": {
+                "s": 536,
+                "e": 551
+              }
+            }
+          ],
+          "span": {
+            "s": 509,
+            "e": 554
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "NEIGHBOURS",
+          "name_span": {
+            "s": 560,
+            "e": 570
+          },
+          "target": {
+            "name": "Sensor",
+            "span": {
+              "s": 578,
+              "e": 584
+            }
+          },
+          "optional": true,
+          "many": true,
+          "span": {
+            "s": 556,
+            "e": 584
+          }
+        }
+      ],
+      "span": {
+        "s": 161,
+        "e": 586
+      }
+    }
+  ]
+}

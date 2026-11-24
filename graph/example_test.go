@@ -3,35 +3,35 @@ package graph_test
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // exampleTypeID resolves a local type for the examples, which have no
 // *testing.T to fail on.
-func exampleTypeID(s *schema.Schema, name string) schema.TypeID {
+func exampleTypeID(s schema.Schema, name string) schema.TypeID {
 	t, _ := s.Type(name)
 	return t.ID()
 }
 
 func ExampleGraph_Add() {
 	// Build a schema with a relationship
-	s, _ := schema.NewBuilder().
-		WithName("example").
-		WithSourceID(location.MustNewSourceID("test://example.yammm")).
-		AddType("Department").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Employee").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("DEPARTMENT", schema.LocalTypeRef("Department", location.Span{}), false, false).
-		Done().
-		Build()
+	s, _ := schema.LoadString(context.Background(), `schema "example"
+
+type Department {
+	id String primary
+	name String required
+}
+
+type Employee {
+	id String primary
+	name String required
+	--> DEPARTMENT (one) Department
+}
+`, "example.yammm")
 
 	// Create graph and validator
 	g := graph.New(s)
@@ -46,7 +46,9 @@ func ExampleGraph_Add() {
 		},
 	}
 	deptValid, _ := validator.ValidateOne(ctx, "Department", deptRaw)
-	g.Add(ctx, deptValid)
+	if err := g.Add(ctx, deptValid); err != nil {
+		fmt.Println("add:", err)
+	}
 
 	// Add an employee with reference to department
 	empRaw := instance.RawInstance{
@@ -57,16 +59,18 @@ func ExampleGraph_Add() {
 		},
 	}
 	empValid, _ := validator.ValidateOne(ctx, "Employee", empRaw)
-	g.Add(ctx, empValid)
+	if err := g.Add(ctx, empValid); err != nil {
+		fmt.Println("add:", err)
+	}
 
 	// Check graph integrity
-	result := g.Check(ctx)
-	fmt.Println("Graph OK:", result.OK())
+	err := g.Check(ctx)
+	fmt.Println("Graph OK:", err == nil)
 
 	// Get snapshot
 	snap := g.Snapshot()
-	fmt.Println("Departments:", len(snap.InstancesOf(exampleTypeID(s, "Department"))))
-	fmt.Println("Employees:", len(snap.InstancesOf(exampleTypeID(s, "Employee"))))
+	fmt.Println("Departments:", len(slices.Collect(snap.InstancesOf(exampleTypeID(s, "Department")))))
+	fmt.Println("Employees:", len(slices.Collect(snap.InstancesOf(exampleTypeID(s, "Employee")))))
 
 	// Output:
 	// Graph OK: true
@@ -76,17 +80,17 @@ func ExampleGraph_Add() {
 
 func ExampleGraph_Check() {
 	// Build schema
-	s, _ := schema.NewBuilder().
-		WithName("example").
-		WithSourceID(location.MustNewSourceID("test://example.yammm")).
-		AddType("Parent").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Child").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithRelation("PARENT", schema.LocalTypeRef("Parent", location.Span{}), false, false).
-		Done().
-		Build()
+	s, _ := schema.LoadString(context.Background(), `schema "example"
+
+type Parent {
+	id String primary
+}
+
+type Child {
+	id String primary
+	--> PARENT (one) Parent
+}
+`, "example.yammm")
 
 	g := graph.New(s)
 	validator := instance.NewValidator(s)
@@ -100,12 +104,14 @@ func ExampleGraph_Check() {
 		},
 	}
 	childValid, _ := validator.ValidateOne(ctx, "Child", childRaw)
-	g.Add(ctx, childValid)
+	if err := g.Add(ctx, childValid); err != nil {
+		fmt.Println("add:", err)
+	}
 
 	// Check will find unresolved reference
-	result := g.Check(ctx)
-	fmt.Println("Graph OK:", result.OK())
-	fmt.Println("Has errors:", result.HasErrors())
+	err := g.Check(ctx)
+	fmt.Println("Graph OK:", err == nil)
+	fmt.Println("Has errors:", err != nil)
 
 	// Output:
 	// Graph OK: false

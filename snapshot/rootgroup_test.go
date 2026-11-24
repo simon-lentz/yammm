@@ -2,12 +2,16 @@ package snapshot_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -28,16 +32,16 @@ type Holder {
 }
 `
 
-func vLoad(t *testing.T) *schema.Schema {
+func vLoad(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), vSchema, "v.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), vSchema, "v.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
 
-func vID(t *testing.T, s *schema.Schema, n string) schema.TypeID {
+func vID(t *testing.T, s schema.Schema, n string) schema.TypeID {
 	t.Helper()
 	ty, ok := s.Type(n)
 	if !ok {
@@ -48,43 +52,16 @@ func vID(t *testing.T, s *schema.Schema, n string) schema.TypeID {
 
 // holderWithCard is Holder h1 holding the part Card 4242: the one legal place
 // a Card instance stands.
-func holderWithCard(holder, card schema.TypeID) graph.InstanceParts {
-	return graph.InstanceParts{
+func holderWithCard(holder, card schema.TypeID) snapparts.Instance {
+	return snapparts.Instance{
 		TypeID:     holder,
 		PrimaryKey: immutable.WrapKey([]any{"h1"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
-		Composed: map[string][]graph.InstanceParts{"CARDS": {{
+		Composed: map[string][]snapparts.Instance{"CARDS": {{
 			TypeID:     card,
 			PrimaryKey: immutable.WrapKey([]any{"4242"}),
 			Properties: immutable.WrapProperties(map[string]any{"last4": "4242"}),
 		}}},
-	}
-}
-
-// TestRootGroup_RebuildRefusesIneligibleTypes is the WRITER half of the rule:
-// a part type and an abstract type cannot key a root instance group, nor be
-// denoted with none, so the library cannot produce a document stating one.
-func TestRootGroup_RebuildRefusesIneligibleTypes(t *testing.T) {
-	s := vLoad(t)
-	for _, name := range []string{"Card", "Base"} {
-		id := vID(t, s, name)
-		_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types: []schema.TypeID{id},
-			Instances: []graph.InstanceParts{
-				{
-					TypeID:     id,
-					PrimaryKey: immutable.WrapKey([]any{"x"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "x", "last4": "x"}),
-				},
-			},
-		})
-		if !res.HasErrors() {
-			t.Errorf("%s: RebuildSnapshot accepted an ineligible root", name)
-		}
-		_, res = graph.RebuildSnapshot(s, graph.SnapshotParts{Types: []schema.TypeID{id}})
-		if !res.HasErrors() || !strings.Contains(res.String(), "types entry 0 denotes") {
-			t.Errorf("%s: RebuildSnapshot accepted the type denoted with no instance: %s", name, res)
-		}
 	}
 }
 
@@ -96,26 +73,17 @@ func TestRootGroup_AnEmptyPartGroupIsRefused(t *testing.T) {
 	ctx := context.Background()
 	s := vLoad(t)
 	holder, card := vID(t, s, "Holder"), vID(t, s, "Card")
-	if _, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{holder, card},
-		Instances: []graph.InstanceParts{holderWithCard(holder, card)},
-	}); !res.HasErrors() {
-		t.Error("RebuildSnapshot accepted a part type as a types entry")
-	}
 
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types:     []schema.TypeID{holder},
-		Instances: []graph.InstanceParts{holderWithCard(holder, card)},
+		Instances: []snapparts.Instance{holderWithCard(holder, card)},
 	})
-	if res.HasErrors() {
-		t.Fatalf("rebuild: %s", res)
+	data, err := snapshot.Marshal(ctx, built)
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
-	data, mres := snapshot.Marshal(ctx, built)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
-	}
-	if _, lres := snapshot.Load(ctx, data, s); lres.HasErrors() {
-		t.Fatalf("a composed part under a real root must load: %s", lres)
+	if _, err := snapshot.Unmarshal(ctx, data, s); err != nil {
+		t.Fatalf("a composed part under a real root must load: %s", err)
 	}
 	// Card sorts before Holder, so row 0 is the part type, and the writer
 	// emits no group for it.
@@ -124,7 +92,9 @@ func TestRootGroup_AnEmptyPartGroupIsRefused(t *testing.T) {
 	if doc == string(data) {
 		t.Fatalf("fixture shape changed; %s not found in %s", holderGroup, data)
 	}
-	_, lres := snapshot.Load(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
+	_, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	if !lres.HasCode(diag.E_SNAPSHOT_INVALID_ROOT) || !strings.Contains(lres.String(), "instances entry 0 denotes") {
 		t.Errorf("Load accepted an empty part-type group: %s", lres)
 	}
@@ -132,23 +102,20 @@ func TestRootGroup_AnEmptyPartGroupIsRefused(t *testing.T) {
 
 // TestRootGroup_LoadRefusesIneligibleTypes is the READER half, and it is
 // defence in depth: this library cannot write such a document, but a foreign
-// writer can, and admitting one hands the caller a snapshot no adapter can
-// consume — adapter/neo4j fails mid-write extracting a key the type does not
-// declare.
+// writer can, and admitting one hands the caller a snapshot no writer can
+// consume — the neo4j package fails mid-write extracting a key the type does
+// not declare.
 func TestRootGroup_LoadRefusesIneligibleTypes(t *testing.T) {
 	ctx := context.Background()
 	s := vLoad(t)
 	holder, card := vID(t, s, "Holder"), vID(t, s, "Card")
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types:     []schema.TypeID{holder},
-		Instances: []graph.InstanceParts{holderWithCard(holder, card)},
+		Instances: []snapparts.Instance{holderWithCard(holder, card)},
 	})
-	if res.HasErrors() {
-		t.Fatalf("rebuild: %s", res)
-	}
-	data, mres := snapshot.Marshal(ctx, built)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	data, err := snapshot.Marshal(ctx, built)
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 	// Card sorts before Holder, so row 0 is the part type. Re-point the
 	// populated group at row 0 — the shape a foreign writer can emit.
@@ -157,8 +124,22 @@ func TestRootGroup_LoadRefusesIneligibleTypes(t *testing.T) {
 	if doc == string(data) {
 		t.Fatalf("fixture shape changed; %s not found in %s", holderGroup, data)
 	}
-	_, lres := snapshot.Load(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
-	if !lres.HasCode(diag.E_SNAPSHOT_INVALID_ROOT) {
-		t.Errorf("Load accepted a part type as a root group: %s", lres)
+	_, readErr := snapshot.Unmarshal(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
+	if !errors.Is(readErr, diag.E_SNAPSHOT_INVALID_ROOT) {
+		t.Errorf("Load accepted a part type as a root group: %s", readErr)
+	}
+
+	for _, id := range []schema.TypeID{card, vID(t, s, "Base")} {
+		for shape, parts := range map[string]snapparts.Parts{
+			"denoted": {Types: []schema.TypeID{id}},
+			"populated": {Instances: []snapparts.Instance{{
+				TypeID: id, PrimaryKey: immutable.WrapKey([]any{"x"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "x"}),
+			}}},
+		} {
+			if _, err := snapshot.Unmarshal(ctx, snappartstest.Document(t, s, parts), s); !errors.Is(err, diag.E_SNAPSHOT_INVALID_ROOT) {
+				t.Errorf("%s, %s: Load drew %s, want %s", id, shape, err, diag.E_SNAPSHOT_INVALID_ROOT)
+			}
+		}
 	}
 }

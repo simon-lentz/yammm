@@ -1,0 +1,123 @@
+{
+  "name": "\"multi_test\"",
+  "span": {
+    "s": 0,
+    "e": 19
+  },
+  "types": [
+    {
+      "name": "Widget",
+      "name_span": {
+        "s": 26,
+        "e": 32
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 51,
+              "e": 57
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 39,
+            "e": 65
+          }
+        },
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 82,
+              "e": 88
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 70,
+            "e": 97
+          }
+        },
+        {
+          "name": "description",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 114,
+              "e": 120
+            }
+          },
+          "span": {
+            "s": 102,
+            "e": 120
+          }
+        }
+      ],
+      "span": {
+        "s": 21,
+        "e": 122
+      }
+    },
+    {
+      "name": "Gadget",
+      "name_span": {
+        "s": 129,
+        "e": 135
+      },
+      "props": [
+        {
+          "name": "uid",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 156,
+              "e": 162
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 142,
+            "e": 170
+          }
+        },
+        {
+          "name": "sku",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 189,
+              "e": 195
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 175,
+            "e": 203
+          }
+        },
+        {
+          "name": "optional_note",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 222,
+              "e": 228
+            }
+          },
+          "span": {
+            "s": 208,
+            "e": 228
+          }
+        }
+      ],
+      "span": {
+        "s": 124,
+        "e": 230
+      }
+    }
+  ]
+}

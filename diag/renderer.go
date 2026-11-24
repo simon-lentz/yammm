@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/text/width"
 
+	"github.com/simon-lentz/yammm/internal/termtext"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -62,10 +63,10 @@ func WithExcerpts(on bool) Option {
 }
 
 // WithModuleRoot sets the root that text locations are written relative to.
-// root is a host path; the renderer turns it into an identity once, by the
-// rule [location.NewCanonicalPath] follows, and writes a file-backed source
-// under it relative to it ([location.SourceID.RelativeTo]). JSON output keeps
-// each source's identity.
+// root is a host path; the renderer turns it into an identity once, as
+// [location.SourceIDFromPath] does, and writes a file-backed source under it
+// relative to it ([location.SourceID.Rel]). A source outside the root keeps its
+// identity, and JSON output keeps each source's identity.
 func WithModuleRoot(root string) Option {
 	return func(c *rendererConfig) {
 		c.moduleRoot = root
@@ -95,7 +96,7 @@ func WithDistinguishFatal(distinguish bool) Option {
 // Create with [NewRenderer] and configure with [Option] functions.
 type Renderer struct {
 	cfg  rendererConfig
-	root location.CanonicalPath // the module root as an identity; zero when unset or unresolvable
+	root location.SourceID // the module root as an identity; zero when unset or unresolvable
 }
 
 // NewRenderer creates a renderer with the given options.
@@ -106,7 +107,7 @@ func NewRenderer(opts ...Option) *Renderer {
 	}
 	r := &Renderer{cfg: cfg}
 	if cfg.moduleRoot != "" {
-		if root, err := location.NewCanonicalPath(cfg.moduleRoot); err == nil {
+		if root, err := location.SourceIDFromPath(cfg.moduleRoot); err == nil {
 			r.root = root
 		}
 	}
@@ -127,26 +128,27 @@ func (r *Renderer) FormatResult(res Result) string {
 	return sb.String()
 }
 
+// formatIssueToBuilder writes every text of the issue through [termtext.String],
+// so a newline in a message cannot forge a second diagnostic and no byte of a
+// source name, path or schema text acts on the terminal.
 func (r *Renderer) formatIssueToBuilder(sb *strings.Builder, issue Issue) {
 	// Location prefix; an issue with no location has none, as in JSON.
 	if loc := r.location(issue); loc != "" {
-		sb.WriteString(loc)
+		sb.WriteString(termtext.String(loc))
 		sb.WriteString(": ")
 	}
 
 	// Severity and code
 	r.writeSeverity(sb, issue.Severity())
 	sb.WriteString("[")
-	sb.WriteString(issue.Code().String())
+	sb.WriteString(termtext.String(issue.Code().String()))
 	sb.WriteString("]: ")
 
-	// Message
-	sb.WriteString(issue.Message())
+	sb.WriteString(termtext.String(issue.Message()))
 
-	// Hint
 	if hint := issue.Hint(); hint != "" {
 		sb.WriteString("\n  hint: ")
-		sb.WriteString(hint)
+		sb.WriteString(termtext.String(hint))
 	}
 
 	// Source excerpt
@@ -157,10 +159,10 @@ func (r *Renderer) formatIssueToBuilder(sb *strings.Builder, issue Issue) {
 	// Related info
 	for _, rel := range issue.Related() {
 		sb.WriteString("\n  note: ")
-		sb.WriteString(rel.Message)
+		sb.WriteString(termtext.String(rel.Message))
 		if !rel.Span.IsZero() {
 			sb.WriteString("\n    --> ")
-			sb.WriteString(r.formatSpanLocation(rel.Span))
+			sb.WriteString(termtext.String(r.formatSpanLocation(rel.Span)))
 		}
 	}
 }
@@ -186,10 +188,10 @@ func (r *Renderer) location(issue Issue) string {
 
 func (r *Renderer) formatSpanLocation(span location.Span) string {
 	source := span.Source.String()
-	if rel, ok := span.Source.RelativeTo(r.root); ok {
+	if rel, ok := span.Source.Rel(r.root); ok && !strings.HasPrefix(rel, "../") {
 		source = rel
 	}
-	if span.Start.IsKnown() {
+	if span.Start.IsValid() {
 		return fmt.Sprintf("%s:%d:%d", source, span.Start.Line, span.Start.Column)
 	}
 	return source
@@ -235,7 +237,7 @@ func (r *Renderer) writeSeverity(sb *strings.Builder, sev Severity) {
 // runs onto later lines is marked to the end of its first line.
 func (r *Renderer) writeExcerpt(sb *strings.Builder, issue Issue) {
 	span := issue.Span()
-	if !span.Start.IsKnown() {
+	if !span.Start.IsValid() {
 		return
 	}
 	content, ok := r.cfg.provider.Content(span)
@@ -248,7 +250,7 @@ func (r *Renderer) writeExcerpt(sb *strings.Builder, issue Issue) {
 	}
 	line := []rune(text)
 	for i, c := range line {
-		line[i] = shownRune(c)
+		line[i] = termtext.Rune(c)
 	}
 
 	// Rune indexes. start may equal len(line): the column one past the last
@@ -337,31 +339,6 @@ func runeCols(c rune) int {
 // which a terminal draws inside the preceding syllable's cell.
 func isConjoiningJamo(c rune) bool {
 	return c >= 0x1160 && c <= 0x11ff || c >= 0xd7b0 && c <= 0xd7ff
-}
-
-// shownRune returns what an excerpt prints for c: a C0 control other than a tab
-// as its Control Pictures glyph, DEL as U+2421, and a C1 control or a
-// bidirectional override or isolate as U+FFFD, so no source byte can act on the
-// terminal the excerpt is written to.
-func shownRune(c rune) rune {
-	switch {
-	case c == '\t':
-		return c
-	case c < 0x20:
-		return 0x2400 + c
-	case c == 0x7f:
-		return 0x2421
-	case c >= 0x80 && c < 0xa0, isBidiControl(c):
-		return unicode.ReplacementChar
-	default:
-		return c
-	}
-}
-
-// isBidiControl reports whether c is a bidirectional mark, embedding, override or
-// isolate, which reorders how a terminal draws the text after it.
-func isBidiControl(c rune) bool {
-	return c == 0x61c || c == 0x200e || c == 0x200f || c >= 0x202a && c <= 0x202e || c >= 0x2066 && c <= 0x2069
 }
 
 // extractLine returns the nth line (1-based) of content without its line

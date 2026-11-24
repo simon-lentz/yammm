@@ -51,9 +51,6 @@ func TestTypeStrata(t *testing.T) {
 	// Strings
 	assertEqual(t, value.StringStrata, value.TypeStrata("hello"))
 
-	// Regexp
-	assertEqual(t, value.StringStrata, value.TypeStrata(regexp.MustCompile("x")))
-
 	// Slices
 	assertEqual(t, value.SliceStrata, value.TypeStrata([]string{"a"}))
 	assertEqual(t, value.SliceStrata, value.TypeStrata([]int{1, 2}))
@@ -77,7 +74,7 @@ type (
 	namedString  string
 )
 
-// A named type takes the strata of its underlying kind. adapter/gogen emits
+// A named type takes the strata of its underlying kind. schema/gogen emits
 // `type <Name> <base>` for every DataType and inline enum, so rejecting them
 // meant the generator produced values this package could not order.
 //
@@ -109,31 +106,7 @@ func TestTypeStrata_NamedTypesTakeTheirUnderlyingKind(t *testing.T) {
 	}
 }
 
-// A pointer takes the strata of what it points at, and a nil pointer is nil.
-func TestTypeStrata_PointersFollowTheirTarget(t *testing.T) {
-	i, f, s, b := int64(1), 1.5, "x", true
-	var nilPtr *int64
-
-	for _, tt := range []struct {
-		name  string
-		input any
-		want  int
-	}{
-		{"*int64", &i, value.NumericStrata},
-		{"*float64", &f, value.NumericStrata},
-		{"*string", &s, value.StringStrata},
-		{"*bool", &b, value.BoolStrata},
-		{"nil *int64", nilPtr, value.NilStrata},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := value.TypeStrata(tt.input); got != tt.want {
-				t.Errorf("TypeStrata(%T) = %d, want %d", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-// An immutable.Slice is what Value.Unwrap returns for a List- or Vector-typed
+// An immutable.Slice is what Value.Any returns for a List- or Vector-typed
 // property, and it is a struct, so no reflect kind names it. Without the
 // explicit case every invariant comparing a list was an evaluation error.
 //
@@ -142,9 +115,9 @@ func TestTypeStrata_PointersFollowTheirTarget(t *testing.T) {
 // error this whole change removes.
 func TestTypeStrata_ImmutableSliceIsASlice(t *testing.T) {
 	wrapped := immutable.Wrap([]any{"a", "b"})
-	slice, ok := wrapped.Slice()
+	slice, ok := wrapped.AsSlice()
 	if !ok {
-		t.Fatalf("Wrap([]any) did not produce a Slice, got %T", wrapped.Unwrap())
+		t.Fatalf("Wrap([]any) did not produce a Slice, got %T", wrapped.Any())
 	}
 	if got := value.TypeStrata(slice); got != value.SliceStrata {
 		t.Errorf("TypeStrata(immutable.Slice) = %d, want SliceStrata (%d)", got, value.SliceStrata)
@@ -197,11 +170,8 @@ func TestOrder_JSONNumberIsNumeric(t *testing.T) {
 	}
 }
 
-// Order compares a named type by its base value rather than erroring.
-//
-// Mutation: reverting GetInt64/GetFloat64/toStringComparable/toBool to a bare
-// type switch turns this red while TypeStrata still reports a valid strata,
-// which is the half-fixed state that would make Order's slice arm panic.
+// Order compares a named type by its base value on either side, and Equal
+// follows it.
 func TestOrder_NamedTypesCompareAsTheirBase(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -212,6 +182,10 @@ func TestOrder_NamedTypesCompareAsTheirBase(t *testing.T) {
 		{"namedFloat greater than float64", namedFloat64(1.2), float64(1.0), 1},
 		{"namedInt greater than int", namedInt(42), int(10), 1},
 		{"namedString less than string", namedString("hello"), "world", -1},
+		{"namedString greater than string", namedString("x"), "a", 1},
+		{"string less than namedString", "a", namedString("x"), -1},
+		{"namedString equal to namedString", namedString("x"), namedString("x"), 0},
+		{"namedString equal to string", namedString("x"), "x", 0},
 		{"namedBool greater than bool", namedBool(true), false, 1},
 		{"namedInt64 equal to int64", namedInt64(7), int64(7), 0},
 	}
@@ -225,6 +199,9 @@ func TestOrder_NamedTypesCompareAsTheirBase(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("Order(%v, %v) = %d, want %d", tt.left, tt.right, got, tt.want)
 			}
+			if equal := value.Equal(tt.left, tt.right); equal != (tt.want == 0) {
+				t.Errorf("Equal(%v, %v) = %t", tt.left, tt.right, equal)
+			}
 		})
 	}
 }
@@ -237,7 +214,7 @@ func TestOrder_NamedTypesCompareAsTheirBase(t *testing.T) {
 // case must land together.
 func TestOrder_ImmutableSliceComparesElementwise(t *testing.T) {
 	sliceOf := func(elems ...any) any {
-		s, ok := immutable.Wrap(elems).Slice()
+		s, ok := immutable.Wrap(elems).AsSlice()
 		if !ok {
 			t.Fatalf("Wrap did not produce a Slice")
 		}
@@ -613,7 +590,6 @@ func TestOrder_Invariants(t *testing.T) {
 		nan,
 		"a",
 		[]any{"a"},
-		[]*regexp.Regexp{regexp.MustCompile("x")},
 	}
 	for _, v := range equalVals {
 		lr, err := value.Order(v, v)
@@ -1109,81 +1085,28 @@ func TestCompareUint64Float64(t *testing.T) {
 	}
 }
 
-// TestOrder_StringComparableEdgeCases tests edge cases in toStringComparable
-// through the Order function (toStringComparable is unexported).
-func TestOrder_StringComparableEdgeCases(t *testing.T) {
-	// Test nil regexp - should return error
-	t.Run("nil regexp vs string returns error", func(t *testing.T) {
-		var nilRegexp *regexp.Regexp = nil
-		_, err := value.Order(nilRegexp, "test")
-		if err == nil {
-			t.Error("expected error for nil regexp comparison")
+// A compiled pattern is a pointer like any other, nil or not: it has no
+// stratum, it orders against nothing and it equals nothing, itself included.
+func TestOrder_PatternIsNotAValue(t *testing.T) {
+	var none *regexp.Regexp
+	for name, pattern := range map[string]*regexp.Regexp{"nil": none, "compiled": regexp.MustCompile("abc")} {
+		for otherName, other := range map[string]any{"a string": "abc", "itself": pattern, "nil": nil, "a nil slice": []any(nil)} {
+			t.Run(name+" pattern and "+otherName, func(t *testing.T) {
+				if got, err := value.Order(pattern, other); err == nil {
+					t.Errorf("Order(pattern, %s) = %d, want a refusal", otherName, got)
+				}
+				if got, err := value.Order(other, pattern); err == nil {
+					t.Errorf("Order(%s, pattern) = %d, want a refusal", otherName, got)
+				}
+				if value.Equal(pattern, other) || value.Equal(other, pattern) {
+					t.Errorf("Equal(pattern, %s) = true", otherName)
+				}
+			})
 		}
-	})
-
-	t.Run("string vs nil regexp returns error", func(t *testing.T) {
-		var nilRegexp *regexp.Regexp = nil
-		_, err := value.Order("test", nilRegexp)
-		if err == nil {
-			t.Error("expected error for nil regexp comparison")
+		if s := value.TypeStrata(pattern); s != value.InvalidStrata {
+			t.Errorf("TypeStrata(%s pattern) = %d, want InvalidStrata", name, s)
 		}
-	})
-
-	t.Run("nil regexp vs nil regexp returns error", func(t *testing.T) {
-		var nilRegexp1 *regexp.Regexp = nil
-		var nilRegexp2 *regexp.Regexp = nil
-		_, err := value.Order(nilRegexp1, nilRegexp2)
-		if err == nil {
-			t.Error("expected error for nil regexp comparison")
-		}
-	})
-
-	// Test valid regexp comparisons
-	t.Run("regexp vs regexp equal", func(t *testing.T) {
-		r1 := regexp.MustCompile("abc")
-		r2 := regexp.MustCompile("abc")
-		cmp, err := value.Order(r1, r2)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cmp != 0 {
-			t.Errorf("expected 0 (equal), got %d", cmp)
-		}
-	})
-
-	t.Run("regexp vs regexp less", func(t *testing.T) {
-		r1 := regexp.MustCompile("abc")
-		r2 := regexp.MustCompile("def")
-		cmp, err := value.Order(r1, r2)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cmp != -1 {
-			t.Errorf("expected -1 (less), got %d", cmp)
-		}
-	})
-
-	t.Run("regexp vs string", func(t *testing.T) {
-		r := regexp.MustCompile("abc")
-		cmp, err := value.Order(r, "abc")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cmp != 0 {
-			t.Errorf("expected 0 (equal), got %d", cmp)
-		}
-	})
-
-	t.Run("string vs regexp", func(t *testing.T) {
-		r := regexp.MustCompile("def")
-		cmp, err := value.Order("abc", r)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cmp != -1 {
-			t.Errorf("expected -1 (less), got %d", cmp)
-		}
-	})
+	}
 }
 
 // TestGetInt64_UintptrOverflow tests uintptr overflow handling in GetInt64.
@@ -1750,5 +1673,26 @@ func TestOrder_IntegerOutsideInt64ComparesExactly(t *testing.T) {
 	}
 	if value.Equal(below, int64(math.MinInt64)) {
 		t.Error("Equal reports an integer below MinInt64 equal to MinInt64")
+	}
+}
+
+// A text whose digit run overflows before a byte that is no digit is no JSON
+// number literal, so it orders as no number does, though strconv reports
+// ErrRange for it before it reads that byte. A JSON integer literal is an
+// optional '-' and digits, so a leading '+' makes no number either.
+func TestOrder_AnOverflowingRunBeforeTextIsNoInteger(t *testing.T) {
+	t.Parallel()
+	for _, lit := range []string{"99999999999999999999x", "99999999999999999999 ", "-99999999999999999999e", "+99999999999999999999"} {
+		if kind, _ := value.Classify(json.Number(lit)); kind != value.UnspecifiedKind {
+			t.Errorf("value.Classify(%q) = %v, want value.UnspecifiedKind", lit, kind)
+		}
+		if _, err := value.Order(json.Number(lit), int64(1)); err == nil {
+			t.Errorf("Order(%q, 1) ordered a literal that is no number", lit)
+		}
+	}
+	for _, lit := range []string{"99999999999999999999", "-99999999999999999999"} {
+		if kind, _ := value.Classify(json.Number(lit)); kind != value.IntKind {
+			t.Errorf("value.Classify(%q) = %v, want value.IntKind", lit, kind)
+		}
 	}
 }

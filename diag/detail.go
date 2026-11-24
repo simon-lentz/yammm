@@ -31,16 +31,23 @@ const (
 	// DetailKeyRelationName is the relation name involved.
 	DetailKeyRelationName = "relation"
 
+	// DetailKeyInvariantName is the name of the invariant an instance failed
+	// or the evaluator could not run. [E_INVARIANT_FAIL] and [E_EVAL_ERROR]
+	// carry it.
+	DetailKeyInvariantName = "invariant"
+
 	// DetailKeyPrimaryKey is the primary key value.
 	DetailKeyPrimaryKey = "pk"
 
 	// DetailKeyReason is the failure reason discriminant. Used with
-	// E_UNRESOLVED_REQUIRED ("absent", "empty", "target_missing"),
-	// E_UNRESOLVED_REQUIRED_COMPOSITION ("absent", "empty"), and E_UNKNOWN_FIELD
-	// and E_UNKNOWN_EDGE_FIELD ("case_fold_shadowed").
+	// E_UNRESOLVED_REQUIRED ("absent", "empty", "target_missing") and
+	// E_UNRESOLVED_REQUIRED_COMPOSITION ("absent", "empty").
 	DetailKeyReason = "reason"
 
-	// DetailKeyField is the data-level field name (for unknown/unexpected fields).
+	// DetailKeyField is a field name of the instance data: the key as the data
+	// spells it for an unknown field, and the `_target_` field the association
+	// declares for a foreign-key field's refusal. A value that is not valid
+	// UTF-8 is quoted, as [IssueBuilder.WithDetails] holds every detail value.
 	DetailKeyField = "field"
 
 	// DetailKeyJSONField is a relation's JSON field name in a path: the
@@ -51,7 +58,8 @@ const (
 	// constraint reason, parse error).
 	DetailKeyDetail = "detail"
 
-	// DetailKeyFormat is the adapter format identifier (e.g., "json", "csv", "yaml").
+	// DetailKeyFormat names the format an issue is about: "json" for a data
+	// file the CLI reads, "neo4j" for the Cypher the Neo4j packages write.
 	DetailKeyFormat = "format"
 
 	// DetailKeyTargetType is the target type name (for cross-reference errors).
@@ -71,27 +79,11 @@ const (
 	// Used with E_COMMAND_FAILED.
 	DetailKeyExitCode = "exit_code"
 
-	// DetailKeyTriggeringCodes is the comma-joined list of Error and Fatal
-	// codes that caused a fallback. Used with W_UPDATE_METADATA_FALLBACK.
-	DetailKeyTriggeringCodes = "triggering_codes"
-
-	// DetailKeyAlias is the import alias (for alias validation errors).
+	// DetailKeyAlias is the alias an import declares. Used with
+	// E_IMPORT_RESOLVE, E_PATH_ESCAPE, E_IMPORT_CYCLE and E_UPSTREAM_FAIL raised
+	// at an import declaration, and with E_INTERNAL for an alias the load left
+	// unbound.
 	DetailKeyAlias = "alias"
-
-	// DetailKeyName is the invalid identifier name (for naming errors).
-	DetailKeyName = "name"
-
-	// DetailKeyContext is contextual information (e.g., "Builder", "Registry").
-	DetailKeyContext = "context"
-
-	// DetailKeyID is the identifier value (e.g., synthetic SourceID).
-	DetailKeyID = "id"
-
-	// DetailKeyTypeSchema is the identity of the schema a type is defined in,
-	// its SchemaPath, written as the identity and never relativized. Used with
-	// E_GRAPH_TYPE_NOT_FOUND, E_GRAPH_PARENT_NOT_FOUND, E_SNAPSHOT_UNNAMEABLE_TYPE
-	// and E_INTERNAL.
-	DetailKeyTypeSchema = "type_schema"
 
 	// DetailKeyFirstAlias is the first import alias in duplicate detection.
 	DetailKeyFirstAlias = "first_alias"
@@ -110,23 +102,27 @@ const (
 
 	// DetailKeyInstanceIndex is the zero-based index of an instance in a batch
 	// validation call. Used to correlate diagnostics with specific instances
-	// in [instance.Validator.Validate] and [instance.Validator.ValidateForComposition].
+	// in [instance.Validator.Validate].
 	DetailKeyInstanceIndex = "instance_index"
 
 	// DetailKeyStackTrace is a stack trace captured from a recovered panic.
 	// Used with E_INTERNAL diagnostics to provide debugging context.
 	DetailKeyStackTrace = "stack_trace"
 
-	// DetailKeyExpectedHash is the expected hash value.
-	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA and E_SNAPSHOT_INTEGRITY_MISMATCH.
+	// DetailKeyExpectedHash is the hash a check expects: the schema's structural
+	// hash at E_SNAPSHOT_INCOMPATIBLE_SCHEMA, and the hash the header states at
+	// E_SNAPSHOT_INTEGRITY_MISMATCH (empty where it holds none).
 	DetailKeyExpectedHash = "expected_hash"
 
-	// DetailKeyActualHash is the actual computed hash value.
-	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA and E_SNAPSHOT_INTEGRITY_MISMATCH.
+	// DetailKeyActualHash is the hash a check found: the schema hash the header
+	// states at E_SNAPSHOT_INCOMPATIBLE_SCHEMA, and the hash computed over the
+	// document at E_SNAPSHOT_INTEGRITY_MISMATCH. A header with no integrity_hash
+	// member has no computed hash, so its issue carries no actual_hash.
 	DetailKeyActualHash = "actual_hash"
 
 	// DetailKeySchemaName is a schema's declared name: the snapshot header's for
-	// E_SNAPSHOT_INCOMPATIBLE_SCHEMA, the colliding one for E_DUPLICATE_SCHEMA.
+	// E_SNAPSHOT_INCOMPATIBLE_SCHEMA, the colliding one for E_DUPLICATE_SCHEMA, and
+	// the one whose labels E_NEO4J_INVALID_IDENTIFIER refuses.
 	DetailKeySchemaName = "schema_name"
 
 	// DetailKeyVersion is the format version number.
@@ -136,10 +132,6 @@ const (
 	// DetailKeyFeature is the unrecognized feature flag name.
 	// Used with E_SNAPSHOT_UNSUPPORTED_FEATURE.
 	DetailKeyFeature = "feature"
-
-	// DetailKeyOriginalPath is the original provenance path string before fallback.
-	// Used with W_SNAPSHOT_PATH_FALLBACK.
-	DetailKeyOriginalPath = "original_path"
 
 	// DetailKeyDepth is the actual nesting depth that exceeded the limit.
 	// Used with E_SNAPSHOT_DEPTH_EXCEEDED and E_COMPOSITION_DEPTH_EXCEEDED.
@@ -153,7 +145,8 @@ const (
 	// imports against, written as an identity — NFC and "/"-separated, the form
 	// every span source beside it takes — or a synthetic root as given, and empty
 	// when the load had none. Carried by every issue in the import-resolution
-	// family (see [IsImportResolutionCode]) and by E_LOAD_MODULE_ROOT_MALFORMED.
+	// family (E_IMPORT_RESOLVE, E_IMPORT_CYCLE, E_PATH_ESCAPE) and by
+	// E_LOAD_MODULE_ROOT_MALFORMED.
 	DetailKeyModuleRoot = "module_root"
 
 	// DetailKeyModuleRootOrigin names where the module root came from, over
@@ -170,7 +163,7 @@ const (
 // The five are exhaustive: a load either was given a root, found one, stands
 // on a synthetic one, fell back to the entry schema's directory, or has no
 // root in play at all. The last is not the same as the fourth — a string
-// source and a Builder-built schema have no directory to default to.
+// source has no directory to default to.
 const (
 	// ModuleRootExplicit means the caller supplied the root.
 	ModuleRootExplicit = "explicit"
@@ -190,10 +183,8 @@ const (
 	ModuleRootNone = "none"
 )
 
-// ExpectedGot creates a pair of details for type mismatch diagnostics.
-//
-// This is the standard pattern for reporting "expected X, got Y" errors.
-func ExpectedGot(expected, got string) []Detail {
+// expectedGot returns the "expected X, got Y" pair of details.
+func expectedGot(expected, got string) []Detail {
 	return []Detail{
 		{Key: DetailKeyExpected, Value: expected},
 		{Key: DetailKeyGot, Value: got},
@@ -233,13 +224,12 @@ func TypeField(typeName, fieldName string) []Detail {
 // PathRelation creates detail entries for diagnostics involving relation path
 // segments.
 //
-// Provides both the schema relation name (for path) and the normalized JSON
+// Provides both the schema relation name and the normalized JSON
 // field name (for direct lookup in instance data). The jsonFieldName is
 // the relation name in lower case.
 //
-// Use with relation-path diagnostics (e.g., E_DUPLICATE_COMPOSED_PK,
-// E_UNRESOLVED_REQUIRED_COMPOSITION) to enable users to locate the field
-// in their JSON input.
+// Use with a relation-path diagnostic, as the validator's E_EDGE_SHAPE_MISMATCH
+// does, so a user can locate the field in the JSON input.
 func PathRelation(relationName, jsonFieldName string) []Detail {
 	return []Detail{
 		{Key: DetailKeyRelationName, Value: relationName},

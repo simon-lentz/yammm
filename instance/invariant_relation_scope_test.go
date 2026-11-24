@@ -1,17 +1,19 @@
 package instance_test
 
 import (
+	"errors"
 	"maps"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// relationInvariantSrc carries one association and one composition, both
-// optional, so an instance can omit either and still be valid.
+// relationInvariantSrc carries a single and a many association and a many
+// composition, all optional, so an instance can omit any and still be valid.
 const relationInvariantSrc = `schema "x"
 
 type Company { id String primary }
@@ -24,6 +26,7 @@ part type Item {
 type Order {
     id String primary
     --> WORKS_AT (_:one) Company
+    --> SUPPLIERS (_:many) Company
     *-> ITEMS (_:many) Item
     ! "probe" %EXPR%
 }
@@ -32,15 +35,17 @@ type Order {
 func relationInvariant(t *testing.T, expr string, props map[string]any) (bool, string) {
 	t.Helper()
 	src := strings.Replace(relationInvariantSrc, "%EXPR%", expr, 1)
-	s, res := schema.LoadString(t.Context(), src, "x.yammm")
-	if res.HasErrors() {
-		t.Fatalf("an invariant naming a relation did not load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "x.yammm")
+	if err != nil {
+		t.Fatalf("an invariant naming a relation did not load: %s", err)
 	}
 	all := map[string]any{"id": "o1"}
 	maps.Copy(all, props)
-	_, r := instance.NewValidator(s).ValidateOne(t.Context(), "Order",
-		instance.RawInstance{Properties: all})
-	return r.OK(), r.String()
+	_, r := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "Order",
+			instance.RawInstance{Properties: all})
+	})
+	return diagtest.Err(r) == nil, r.String()
 }
 
 func populatedOrder() map[string]any {
@@ -54,8 +59,8 @@ func populatedOrder() map[string]any {
 }
 
 // An invariant may name a relation, and it reads the relation's real value.
-// The schema completer's membersOf index has always admitted relation field
-// names, so such an invariant loaded clean — but invariants were evaluated before edges and
+// The schema completer admits a relation read by its declared name, so such an
+// invariant loaded clean — but invariants were evaluated before edges and
 // compositions were computed, against a scope holding node properties only. A
 // relation therefore read nil, and an invariant over one REJECTED EVERY
 // CONFORMING INSTANCE.
@@ -72,11 +77,11 @@ func TestInvariantRelationScope_ReadsRealValues(t *testing.T) {
 		inv  string
 		want bool
 	}{
-		{"association presence", `works_at != nil`, true},
+		{"association presence", `WORKS_AT != nil`, true},
 		{"association key by DSL name", `WORKS_AT == "c1"`, true},
-		{"association key by field name", `works_at == "c1"`, true},
+		{"association key by a variable", `$WORKS_AT == "c1"`, true},
 		{"composition length", `ITEMS -> Len == 2`, true},
-		{"composition length by field name", `items -> Len == 2`, true},
+		{"composition length by a variable", `$ITEMS -> Len == 2`, true},
 		{"composition is not nil", `ITEMS != nil`, true},
 		{"a false claim still fails", `ITEMS -> Len == 99`, false},
 	} {
@@ -114,16 +119,15 @@ func TestInvariantRelationScope_CompositionLambdasReadChildProperties(t *testing
 	}
 }
 
-// An absent relation is nil, so the null-guard idiom SPEC documents works for a
-// relation exactly as it does for a property.
-func TestInvariantRelationScope_AbsentRelationIsNil(t *testing.T) {
+// An absent single-valued relation is nil, so the null-guard idiom SPEC
+// documents works for it exactly as it does for a property.
+func TestInvariantRelationScope_AbsentSingleRelationIsNil(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		inv  string
 	}{
-		{"absent association", `works_at == nil`},
-		{"absent composition", `items == nil`},
-		{"absent composition has no length", `ITEMS -> Len == 0`},
+		{"absent association", `WORKS_AT == nil`},
+		{"absent association by a variable", `$WORKS_AT == nil`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if ok, detail := relationInvariant(t, tc.inv, map[string]any{}); !ok {
@@ -133,14 +137,55 @@ func TestInvariantRelationScope_AbsentRelationIsNil(t *testing.T) {
 	}
 }
 
+// A many relation is a list whether the data left it out or wrote it empty, as
+// a graph holds no record of either, so a root rebuilt from the graph reads as
+// the record that wrote it.
+func TestInvariantRelationScope_AManyRelationIsAList(t *testing.T) {
+	for _, data := range []struct {
+		name  string
+		props map[string]any
+	}{
+		{"left out", map[string]any{}},
+		{"written empty", map[string]any{"suppliers": []any{}, "items": []any{}}},
+	} {
+		for _, inv := range []string{
+			`SUPPLIERS != nil`, `SUPPLIERS -> Len == 0`, `$SUPPLIERS != nil`,
+			`ITEMS != nil`, `ITEMS -> Len == 0`, `$ITEMS != nil`,
+			`(SUPPLIERS -> IsNil) == false`, `(ITEMS -> IsNil) == false`,
+		} {
+			t.Run(data.name+"/"+inv, func(t *testing.T) {
+				if ok, detail := relationInvariant(t, inv, data.props); !ok {
+					t.Errorf("%s: %s", inv, detail)
+				}
+			})
+		}
+	}
+}
+
+// A many association reads its target keys as Sort orders them, never in the
+// order a listing wrote them: a graph holds the targets as a set.
+func TestInvariantRelationScope_AManyAssociationReadsKeysAsSortOrdersThem(t *testing.T) {
+	for _, ids := range [][]string{{"c2", "c1"}, {"Acme Corp", "Acme"}} {
+		var listing []any
+		for _, id := range ids {
+			listing = append(listing, map[string]any{"_target_id": id})
+		}
+		props := map[string]any{"suppliers": listing}
+		inv := `SUPPLIERS == (SUPPLIERS -> Sort) && SUPPLIERS[0] == "` + ids[1] + `"`
+		if ok, detail := relationInvariant(t, inv, props); !ok {
+			t.Errorf("listing %v: %s", ids, detail)
+		}
+	}
+}
+
 // An association's target is a REFERENCE: the instance holds the foreign key,
 // never the target's row, so reaching for a target property can never read a
 // value. The static checker refuses it at load; the evaluator's own refusal
 // is pinned by the contract table's refuse rows.
 func TestInvariantRelationScope_AssociationTargetPropertiesAreNotAvailable(t *testing.T) {
 	src := strings.Replace(relationInvariantSrc, "%EXPR%", `WORKS_AT -> Then |$c| { $c.id != "" }`, 1)
-	_, res := schema.LoadString(t.Context(), src, "x.yammm")
-	if !res.HasCode(diag.E_INVALID_INVARIANT) || !strings.Contains(res.Err().Error(), "association") {
-		t.Errorf("want E_INVALID_INVARIANT naming the association; got %v", res.Err())
+	_, err := schema.LoadString(t.Context(), src, "x.yammm")
+	if !errors.Is(err, diag.E_INVALID_INVARIANT) || !strings.Contains(err.Error(), "association") {
+		t.Errorf("want E_INVALID_INVARIANT naming the association; got %v", err)
 	}
 }

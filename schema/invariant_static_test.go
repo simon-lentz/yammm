@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -95,7 +96,9 @@ type Order {
 func loadInvariant(t *testing.T, inv string) diag.Result {
 	t.Helper()
 	src := staticBase + "    ! \"m\" " + inv + "\n}\n"
-	_, res := schema.LoadString(t.Context(), src, "s.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+	})
 	return res
 }
 
@@ -122,10 +125,20 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`(STAG -> Default(NTAG)).label != ""`,
 		`STAG.tag -> Upper != ""`,
 		`NTAG.tag -> Abs > 0`,
-		// Min and Max with an argument are typed by the total order, so the
-		// stage that takes the ranked type loads
+		// Then runs no body on nil, so its parameter is never the nil literal
+		`(nil -> Then |$x| { $x -> Upper }) == nil`,
+		`(nil -> Then { $0 % 2 }) == nil`,
+		// the empty list literal has no element, so nothing read from it is
+		// of a known kind
+		`[] -> All |$x| { !$x && $x % 2 == 0 }`,
+		`[][0] -> Upper != ""`,
+		`[][0][0] == nil`,
+		`([] -> First)[0] == nil`,
+		// Min with an argument is the lower of the two, and Max is of either
+		// kind, since an absent higher side leaves the lower
 		`(name -> Min(1)) -> Abs > 0`,
 		`(name -> Max(1)) -> Upper != ""`,
+		`(name -> Max(1)) -> Abs > 0`,
 		// compositions: children are instances
 		`LINES -> All |$l| { $l.qty > 0 }`,
 		`LINES -> All { $0.qty > 0 }`,
@@ -158,9 +171,11 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`CUSTOMERS -> Len > 0`,
 		`CUSTOMERS -> All |$c| { $c != nil }`,
 		`PLACED_BY == "c1"`,
-		// relation names resolve in either case
-		`lines -> Len > 0`,
-		`placed_by != nil`,
+		// a $ variable reads a relation by its declared name
+		`$LINES -> Len > 0`,
+		`$PLACED_BY != nil`,
+		// a parameter is named as any variable is
+		`LINES -> All |$L| { $L.qty > 0 }`,
 		// a bare lambda variable name resolves like the evaluator's scope does
 		`LINES -> All |$l| { l != nil }`,
 		// a body that is the nil literal is a body, not an absent one
@@ -198,10 +213,6 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`(name -> Default("n")) -> Upper == "N"`,
 		`MAIN_LINE.qty -> Default(0) > -1`,
 		`(PLACED_BY -> Default("c1")) == "c1"`,
-		// a datatype check names a kind a value can have
-		`name =~ String`,
-		`MAIN_LINE.qty =~ Integer`,
-		`name !~ Timestamp`,
 		// an association reads as its target's primary key: a String key is a
 		// string, a composite key a list of strings
 		`PLACED_BY + "!" == "c1!"`,
@@ -218,8 +229,8 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// in with the nil literal on its right is false, not an error
 		`!(1 in nil)`,
 		// Compare ranks any two values the total order ranks: a list above a string
-		`LINES -> Compare("a") > 0`,
 		`REGION -> Compare("a") > 0`,
+		`matrix -> Compare("a") > 0`,
 		// the nil-guard family types by one rule, the join of every value it can
 		// yield: Coalesce and Lest as Default does, Then as its body
 		`(note -> Coalesce("x")) -> Upper == "X"`,
@@ -260,8 +271,8 @@ func TestStaticInvariant_Table(t *testing.T) {
 	for _, inv := range accept {
 		t.Run("accepts "+inv, func(t *testing.T) {
 			t.Parallel()
-			if res := loadInvariant(t, inv); res.Err() != nil {
-				t.Errorf("legal invariant refused: %v", res.Err())
+			if res := loadInvariant(t, inv); diagtest.Err(res) != nil {
+				t.Errorf("legal invariant refused: %v", res)
 			}
 		})
 	}
@@ -294,8 +305,8 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`name.length > 0`, diag.E_INVALID_INVARIANT, "no members"},
 		{`LINES.qty > 0`, diag.E_INVALID_INVARIANT, "list"},
 		{`LINES -> All |$l| { $l.Len > 0 }`, diag.E_UNKNOWN_PROPERTY, "Len"},
-		// an undefined named variable is a guaranteed evaluation error, and a
-		// variable name never folds
+		// a named variable that names nothing declared is refused, and a
+		// variable name matches exactly
 		{`$undefined > 0`, diag.E_INVALID_INVARIANT, "undefined variable"},
 		{`tags -> All |$myVar| { $myvar -> Len > 0 }`, diag.E_INVALID_INVARIANT, "undefined variable"},
 		// an unknown function and a call shape the builtin refuses
@@ -332,10 +343,11 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`name -> Filter |$c| { true } -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
 		{`PLACED_BY -> Sort -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
 		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a string"},
-		{`LINES -> Sort -> First.qty > 0`, diag.E_INVALID_INVARIANT, "list of scalars"},
+		{`LINES -> Sort -> First.qty > 0`, diag.E_INVALID_INVARIANT, "Sort takes a list of values the total order ranks"},
 		// the bracket takes one index, and a number cannot be indexed
-		{`tags[] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
-		{`tags[0, 1] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
+		{`tags[] -> IsNil`, diag.E_SYNTAX, "expected an index before ']'"},
+		{`tags[0, 1] -> IsNil`, diag.E_SYNTAX, "expected ']' after one index"},
+		{`tags[0,] -> IsNil`, diag.E_SYNTAX, "expected ']' after one index"},
 		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "a number cannot be indexed"},
 		// a receiver the builtin refuses on every input: a number into a string
 		// builtin, a string into a numeric one, a number into Len, Min or Max
@@ -353,8 +365,8 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`(name != "" ? { name : name }) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		// a boolean result cannot be indexed
 		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "a boolean cannot be indexed"},
-		// a pattern is the third scalar the arm names, and each draws its own
-		{`/re/[0] != nil`, diag.E_INVALID_INVARIANT, "a pattern cannot be indexed"},
+		// a pattern literal is no value, so it is no receiver of an index
+		{`/re/[0] != nil`, diag.E_INVALID_INVARIANT, "a pattern literal stands only on the right of =~ or !~ and as the argument of Match"},
 		// Default's fallback of another kind reaches the next stage unpredicted
 		{`(tags -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default"},
 		{`(name -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default"},
@@ -362,11 +374,14 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// Min and Max with an argument rank a scalar against it, never a list
 		{`tags -> Max("z") != ""`, diag.E_INVALID_INVARIANT, "argument"},
 		{`tags -> Min("z") != ""`, diag.E_INVALID_INVARIANT, "argument"},
-		// a shape or a constraint keyword is not a datatype check
-		{`name =~ Vector`, diag.E_INVALID_INVARIANT, "Vector"},
-		{`name =~ List`, diag.E_INVALID_INVARIANT, "List"},
-		{`name =~ Enum`, diag.E_INVALID_INVARIANT, "Enum"},
-		{`name !~ Pattern`, diag.E_INVALID_INVARIANT, "Pattern"},
+		// a datatype keyword is no operand, on the right of =~ as anywhere
+		{`name =~ String`, diag.E_SYNTAX, `unexpected keyword "String" in an expression`},
+		{`MAIN_LINE.qty =~ Integer`, diag.E_SYNTAX, `unexpected keyword "Integer" in an expression`},
+		{`name !~ Timestamp`, diag.E_SYNTAX, `unexpected keyword "Timestamp" in an expression`},
+		{`name =~ Vector`, diag.E_SYNTAX, `unexpected keyword "Vector" in an expression`},
+		{`name =~ List`, diag.E_SYNTAX, `unexpected keyword "List" in an expression`},
+		{`name =~ Enum`, diag.E_SYNTAX, `unexpected keyword "Enum" in an expression`},
+		{`name !~ Pattern`, diag.E_SYNTAX, `unexpected keyword "Pattern" in an expression`},
 		// a composite key is a list at evaluation time, not a string
 		{`REGION -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
 		{`REGION + "!" != ""`, diag.E_INVALID_INVARIANT, "+ takes"},
@@ -382,11 +397,11 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`nil + 1 > 0`, diag.E_INVALID_INVARIANT, "+ takes"},
 		{`(name + nil) != ""`, diag.E_INVALID_INVARIANT, "+ takes"},
 		// and under the other arithmetic operators, and unary minus
-		{`(-nil) > 0`, diag.E_INVALID_INVARIANT, "unary - takes a number"},
-		{`nil - 1 > 0`, diag.E_INVALID_INVARIANT, "- takes two numbers"},
-		{`nil * 1 > 0`, diag.E_INVALID_INVARIANT, "* takes two numbers"},
-		{`nil / 1 > 0`, diag.E_INVALID_INVARIANT, "/ takes two numbers"},
-		{`nil % 1 > 0`, diag.E_INVALID_INVARIANT, "% takes two numbers"},
+		{`(-nil) > 0`, diag.E_INVALID_INVARIANT, "unary - takes a number as its operand"},
+		{`nil - 1 > 0`, diag.E_INVALID_INVARIANT, "- takes a number as its left operand"},
+		{`nil * 1 > 0`, diag.E_INVALID_INVARIANT, "* takes a number as its left operand"},
+		{`nil / 1 > 0`, diag.E_INVALID_INVARIANT, "/ takes a number as its left operand"},
+		{`nil % 1 > 0`, diag.E_INVALID_INVARIANT, "% takes an integer as its left operand"},
 		// every refuse arm of Default and the receiver kinds has its row
 		{`PLACED_BY -> Default(0) -> Abs > 0`, diag.E_INVALID_INVARIANT, "Default"},
 		// the nil-guard family refuses alternatives of disjoint kinds, and a
@@ -400,10 +415,16 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// a member the union's alternatives declare at disjoint kinds
 		{`(STAG -> Default(NTAG)).tag -> Upper != ""`, diag.E_INVALID_INVARIANT, "disjoint kinds"},
 		{`(NTAG -> Default(STAG)).tag != nil`, diag.E_INVALID_INVARIANT, "disjoint kinds"},
-		// Min and Max rank receiver against argument, so the mixed pair is one
-		// type exactly and the stage that refuses THAT type refuses it
+		// With runs its body on nil, so its parameter can be the nil literal
+		{`(nil -> With |$x| { $x -> Upper }) == nil`, diag.E_INVALID_INVARIANT, "Upper takes a string"},
+		{`(name -> Then |$x| { $x % 2 }) == nil`, diag.E_INVALID_INVARIANT, "% takes an integer"},
+		// the empty list literal joins any list as that list
+		{`([] + tags)[0] -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(tags + [])[0] -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(tags -> Default([]))[0] -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		// Min of a string and a number is the number, so a string stage
+		// refuses it
 		{`(name -> Min(1)) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
-		{`(name -> Max(1)) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		{`(note -> Lest { 1 }) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Lest"},
 		{`(extras -> Lest { "x" }) -> First == "x"`, diag.E_INVALID_INVARIANT, "Lest"},
 		{`(MAIN_LINE -> Then |$l| { $l.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
@@ -430,7 +451,9 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`(tags -> Join(",")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		{`(name -> IsNil) -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map"},
 		{`MAIN_LINE -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "total order"},
-		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "list of scalars"},
+		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "Min takes a list of values the total order ranks"},
+		// a list of instances is ranked by no position, whatever stands beside it
+		{`LINES -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "Compare takes a value the total order ranks, and its receiver is not one"},
 		{`MAIN_LINE -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
 		{`MAIN_LINE -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		{`LINES -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers"},
@@ -441,7 +464,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 		t.Run("refuses "+tc.inv, func(t *testing.T) {
 			t.Parallel()
 			res := loadInvariant(t, tc.inv)
-			if res.Err() == nil {
+			if diagtest.Err(res) == nil {
 				t.Fatalf("illegal invariant loaded clean")
 			}
 			var found bool
@@ -451,7 +474,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Errorf("want %s mentioning %q; got %v", tc.code, tc.want, res.Err())
+				t.Errorf("want %s mentioning %q; got %v", tc.code, tc.want, res)
 			}
 		})
 	}
@@ -477,7 +500,9 @@ type B extends Base {
     y Integer
 }
 `
-	_, res := schema.LoadString(t.Context(), src, "s.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+	})
 	n := 0
 	for is := range res.Issues() {
 		if is.Code() == diag.E_UNKNOWN_PROPERTY {
@@ -485,7 +510,7 @@ type B extends Base {
 		}
 	}
 	if n != 1 {
-		t.Errorf("one declaration-site mistake drew %d E_UNKNOWN_PROPERTY diagnostics, want 1: %v", n, res.Err())
+		t.Errorf("one declaration-site mistake drew %d E_UNKNOWN_PROPERTY diagnostics, want 1: %v", n, res)
 	}
 }
 
@@ -530,14 +555,16 @@ type Order extends b.HasLines {
 				t.Fatal(err)
 			}
 		}
-		_, res := schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+		})
 		return res
 	}
 
-	if res := load(t, app("name")); res.Err() != nil {
-		t.Errorf("the declaring schema's property was refused: %v", res.Err())
+	if res := load(t, app("name")); diagtest.Err(res) != nil {
+		t.Errorf("the declaring schema's property was refused: %v", res)
 	}
-	if res := load(t, app("label")); res.Err() == nil {
+	if res := load(t, app("label")); diagtest.Err(res) == nil {
 		t.Error("the reader's shadowing property was accepted")
 	}
 }
@@ -555,7 +582,7 @@ func TestStaticInvariant_OneMistakeOneDiagnostic(t *testing.T) {
 		}
 	}
 	if n != 1 {
-		t.Errorf("%d E_INVALID_INVARIANT diagnostics, want 1: %v", n, res.Err())
+		t.Errorf("%d E_INVALID_INVARIANT diagnostics, want 1: %v", n, res)
 	}
 }
 
@@ -588,12 +615,14 @@ part type Mid extends Ancestor {
 }
 `),
 	}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.Err() == nil {
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."), schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) == nil {
 		t.Fatal("a typo'd member read through an imported type loaded clean")
 	}
 	if _, ok := issueWithCode(res, diag.E_UNKNOWN_PROPERTY); !ok {
-		t.Errorf("want E_UNKNOWN_PROPERTY; got %v", res.Err())
+		t.Errorf("want E_UNKNOWN_PROPERTY; got %v", res)
 	}
 }
 
@@ -624,9 +653,9 @@ part type Mid extends Ancestor {
 }
 `),
 	}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.Err() != nil {
-		t.Errorf("a member inherited inside the imported schema was refused: %v", res.Err())
+	_, err := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Errorf("a member inherited inside the imported schema was refused: %v", err)
 	}
 }
 
@@ -639,29 +668,31 @@ func issueWithCode(res diag.Result, code diag.Code) (diag.Issue, bool) {
 	return diag.Issue{}, false
 }
 
-// TestStaticInvariant_RelationIsReadInItsTwoSpellings pins docs/SPEC.md's
-// rule: an invariant reads a relation by its UPPER_SNAKE name or its field
-// name, whether bare or as a member, and any other casing is refused at load
-// with E_INVALID_NAME; a property is read in any casing.
-func TestStaticInvariant_RelationIsReadInItsTwoSpellings(t *testing.T) {
+// TestStaticInvariant_RelationIsReadByItsDeclaredName pins docs/SPEC.md's
+// rule: an invariant reads a relation by its declared UPPER_SNAKE name, whether
+// bare, as a member or after $, and a read in any other casing, the field name
+// among them, is refused at load with E_INVALID_NAME.
+func TestStaticInvariant_RelationIsReadByItsDeclaredName(t *testing.T) {
 	t.Parallel()
 
 	for _, inv := range []string{
-		`PLACED_BY != nil`, `placed_by != nil`,
-		`MAIN_LINE.ITEM != nil`, `MAIN_LINE.item != nil`,
+		`PLACED_BY != nil`, `$PLACED_BY != nil`,
+		`MAIN_LINE.ITEM != nil`, `$MAIN_LINE.ITEM != nil`,
 		`LINES -> All |$l| { $l.ITEM != nil }`,
-		`Name != ""`, `MAIN_LINE.QTY > 0`,
+		`name != ""`, `MAIN_LINE.qty > 0`,
 	} {
 		t.Run("accepts "+inv, func(t *testing.T) {
 			t.Parallel()
-			if res := loadInvariant(t, inv); res.Err() != nil {
-				t.Errorf("legal invariant refused: %v", res.Err())
+			if res := loadInvariant(t, inv); diagtest.Err(res) != nil {
+				t.Errorf("legal invariant refused: %v", res)
 			}
 		})
 	}
 	// Each refusal is one diagnostic: a read after the miscased relation is not
 	// typed on, and a second read of it in one invariant is the same mistake.
 	for _, c := range []struct{ inv, relation, holder, read string }{
+		{`placed_by != nil`, "PLACED_BY", "Order", "placed_by"},
+		{`MAIN_LINE.item != nil`, "ITEM", "Line", "item"},
 		{`Placed_By != nil`, "PLACED_BY", "Order", "Placed_By"},
 		{`pLACED_BY != nil`, "PLACED_BY", "Order", "pLACED_BY"},
 		{`Main_Line != nil`, "MAIN_LINE", "Order", "Main_Line"},
@@ -670,13 +701,15 @@ func TestStaticInvariant_RelationIsReadInItsTwoSpellings(t *testing.T) {
 		{`MAIN_LINE.Item.nope != nil`, "ITEM", "Line", "Item"},
 		{`Main_Line.nope != nil`, "MAIN_LINE", "Order", "Main_Line"},
 		{`Placed_By != nil && Placed_By != nil`, "PLACED_BY", "Order", "Placed_By"},
+		{`$placed_by != nil`, "PLACED_BY", "Order", "placed_by"},
+		{`$Main_Line.ITEM != nil`, "MAIN_LINE", "Order", "Main_Line"},
 	} {
 		t.Run("refuses "+c.inv, func(t *testing.T) {
 			t.Parallel()
 			res := loadInvariant(t, c.inv)
 			issues := slices.Collect(res.Issues())
 			if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_NAME || issues[0].Severity() != diag.Error {
-				t.Fatalf("result = %v, want one Error E_INVALID_NAME", res.Err())
+				t.Fatalf("result = %v, want one Error E_INVALID_NAME", res)
 			}
 			want := fmt.Sprintf("relation %s on type %q is read as %q in invariant \"m\" on type \"Order\"", c.relation, c.holder, c.read)
 			if msg := issues[0].Message(); !strings.HasPrefix(msg, want) {
@@ -686,10 +719,69 @@ func TestStaticInvariant_RelationIsReadInItsTwoSpellings(t *testing.T) {
 	}
 }
 
+// A property spelled exactly as the read is the member read, though it collides
+// with a relation: the collision is the one issue.
+func TestStaticInvariant_APropertyThatCollidesWithARelationIsReadByItsName(t *testing.T) {
+	t.Parallel()
+	src := `schema "c"
+
+type C {
+    id String primary
+}
+
+type T {
+    id String primary
+    wORKS_AT String
+    --> WORKS_AT (_) C
+
+    ! "bare" wORKS_AT != ""
+    ! "variable" $wORKS_AT != ""
+}
+`
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "c.yammm", schema.WithWarnings(warn))
+	})
+	issues := slices.Collect(res.Issues())
+	if len(issues) != 1 || issues[0].Code() != diag.E_PROPERTY_RELATION_COLLISION {
+		t.Errorf("want one E_PROPERTY_RELATION_COLLISION; got %v", res)
+	}
+}
+
+// A relation's name in another case is refused as a misspelt relation even when
+// a property holds the relation's field name.
+func TestStaticInvariant_AMiscasedRelationBesideACollidingPropertyIsARelationSpelling(t *testing.T) {
+	t.Parallel()
+	src := `schema "c"
+
+type C {
+    id String primary
+}
+
+type T {
+    id String primary
+    works_at String
+    --> WORKS_AT (_) C
+
+    ! "miscased" Works_At != nil
+}
+`
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "c.yammm", schema.WithWarnings(warn))
+	})
+	var got []string
+	for is := range res.Issues() {
+		got = append(got, is.Code().String())
+	}
+	slices.Sort(got)
+	if want := []string{"E_INVALID_NAME", "E_PROPERTY_RELATION_COLLISION"}; !slices.Equal(got, want) {
+		t.Errorf("codes = %v, want %v", got, want)
+	}
+}
+
 // TestStaticInvariant_RelationSpellingIsJudgedOnEveryTypeAValueMayBe pins that
 // a member read on a value that may be one of several types is judged against
-// each of them, whichever comes first: a miscased read that one type answers
-// as a property and another as a relation is refused for the relation.
+// each of them, whichever comes first: a read that one type answers as a
+// property and another as a miscased relation is refused for the relation.
 func TestStaticInvariant_RelationSpellingIsJudgedOnEveryTypeAValueMayBe(t *testing.T) {
 	t.Parallel()
 
@@ -715,12 +807,14 @@ type Owner {
     *-> P (one) WithProperty
     *-> R (one) WithRelation
 `
-	for _, inv := range []string{`(f ? { P : R }).Item != nil`, `(f ? { R : P }).Item != nil`} {
+	for _, inv := range []string{`(f ? { P : R }).item != nil`, `(f ? { R : P }).item != nil`} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
-			_, res := schema.LoadString(t.Context(), types+"    ! \"m\" "+inv+"\n}\n", "u.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), types+"    ! \"m\" "+inv+"\n}\n", "u.yammm", schema.WithWarnings(warn))
+			})
 			if _, ok := issueWithCode(res, diag.E_INVALID_NAME); !ok {
-				t.Errorf("result = %v, want E_INVALID_NAME for the relation ITEM read as Item", res.Err())
+				t.Errorf("result = %v, want E_INVALID_NAME for the relation ITEM read as item", res)
 			}
 		})
 	}

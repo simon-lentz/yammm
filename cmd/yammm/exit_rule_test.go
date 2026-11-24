@@ -15,13 +15,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/simon-lentz/yammm/adapter/csv"
-	adapterjson "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
 // commandFuncs parses the package's production files and calls visit with
-// each function declaration and the file set that positions it.
+// each function declaration and the file set that positions it. A file that
+// imports the cli package under another name is refused, so every check that
+// reads a cli selector sees each one.
 func commandFuncs(t *testing.T, visit func(fset *token.FileSet, fn *ast.FuncDecl)) {
 	t.Helper()
 	files, err := filepath.Glob("*.go")
@@ -40,6 +40,11 @@ func commandFuncs(t *testing.T, visit func(fset *token.FileSet, fn *ast.FuncDecl
 		f, err := parser.ParseFile(fset, name, src, 0)
 		if err != nil {
 			t.Fatal(err)
+		}
+		for _, imp := range f.Imports {
+			if imp.Path.Value == `"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"` && imp.Name != nil {
+				t.Errorf("%s imports the cli package as %s; import it as cli", fset.Position(imp.Pos()), imp.Name.Name)
+			}
 		}
 		for _, decl := range f.Decls {
 			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
@@ -63,27 +68,19 @@ func isSelector(n ast.Node, pkg, name string) bool {
 // an exit code through cli.ExitForResult and nowhere else: a hard-coded
 // ExitValidation after a failed result exits 1 on an I/O code the exit contract
 // answers with 3, and a hard-coded ExitRuntime exits 3 on a refusal of the
-// input. A literal code is refused as a name is. The sites below answer an
-// outcome that is not a result: fmt --check
-// finding an unformatted file, and neo4j diff finding drift or a comparison
-// that could not run.
+// input. cli.Exit takes no other code. The sites below answer an outcome that
+// is not a result: neo4j diff finding drift or a comparison that could not run.
 func TestExitCodes_NamedOnlyWhereNoResultDecides(t *testing.T) {
 	allowed := map[string]map[string]int{
-		"ExitValidation": {"fmtPath": 1, "neo4jDiffExit": 1},
+		"ExitValidation": {"neo4jDiffExit": 1},
 		"ExitRuntime":    {"neo4jDiffExit": 1},
 	}
 	got := map[string]map[string]int{"ExitValidation": {}, "ExitRuntime": {}}
 	commandFuncs(t, func(fset *token.FileSet, fn *ast.FuncDecl) {
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			if lit, ok := n.(*ast.CompositeLit); ok && isSelector(lit.Type, "cli", "ExitError") {
-				for _, elt := range lit.Elts {
-					if kv, ok := elt.(*ast.KeyValueExpr); ok {
-						if _, literal := kv.Value.(*ast.BasicLit); literal {
-							t.Errorf("%s: %s builds a cli.ExitError from a literal code; answer a diag.Result with cli.ExitForResult",
-								fset.Position(kv.Pos()), fn.Name.Name)
-						}
-					}
-				}
+			if call, ok := n.(*ast.CallExpr); ok && isSelector(call.Fun, "cli", "Exit") && !namedExitCode(call.Args) {
+				t.Errorf("%s: %s passes cli.Exit a code that is not cli.ExitForResult's, neo4jDiffExit's or a named one",
+					fset.Position(call.Pos()), fn.Name.Name)
 			}
 			for code := range allowed {
 				if !isSelector(n, "cli", code) {
@@ -107,8 +104,25 @@ func TestExitCodes_NamedOnlyWhereNoResultDecides(t *testing.T) {
 	}
 }
 
+// namedExitCode reports whether args is one code [cli.Exit] accepts as these
+// tests count codes: cli.ExitForResult's, neo4jDiffExit's, or ExitValidation or
+// ExitRuntime, which the allowance counts.
+func namedExitCode(args []ast.Expr) bool {
+	if len(args) != 1 {
+		return false
+	}
+	switch arg := args[0].(type) {
+	case *ast.CallExpr:
+		id, ok := arg.Fun.(*ast.Ident)
+		return isSelector(arg.Fun, "cli", "ExitForResult") || ok && id.Name == "neo4jDiffExit"
+	case *ast.SelectorExpr:
+		return isSelector(arg, "cli", "ExitValidation") || isSelector(arg, "cli", "ExitRuntime")
+	}
+	return false
+}
+
 // TestExitCodes_EveryReturnedErrorIsClassified pins that a command classifies
-// each failure where it returns it. An error that is not a cli.ExitError exits
+// each failure where it returns it. An error that carries no exit code exits
 // 3, a failure the command did not classify, so a usage refusal returned as a
 // bare fmt.Errorf or errors.New would exit 3 where the exit table says 2.
 func TestExitCodes_EveryReturnedErrorIsClassified(t *testing.T) {
@@ -169,6 +183,30 @@ func TestExitCodes_CobraRefusalsAreUsage(t *testing.T) {
 	}
 }
 
+// TestExitCodes_AnUnclassifiedCommandFailureIsRuntime pins that a failure a
+// command returns without a code exits 3 in text and under --json:
+// withDiagnostics classifies it before execute would read it as cobra's own
+// refusal.
+func TestExitCodes_AnUnclassifiedCommandFailureIsRuntime(t *testing.T) {
+	t.Parallel()
+	for _, flags := range [][]string{nil, {"--json"}} {
+		root := newRootCmd("test")
+		root.AddCommand(&cobra.Command{
+			Use: "fail",
+			RunE: withDiagnostics(func(*cobra.Command, []string, *cli.DiagnosticSink) error {
+				return errors.New("disk full")
+			}),
+		})
+		var stdout, stderr bytes.Buffer
+		root.SetOut(&stdout)
+		root.SetErr(&stderr)
+		root.SetArgs(append([]string{"fail"}, flags...))
+		if code := cli.ExitForError(execute(root)); code != cli.ExitRuntime {
+			t.Errorf("flags %v: exit %d, want %d", flags, code, cli.ExitRuntime)
+		}
+	}
+}
+
 // TestExitCodes_HelpAndCompletionRefuseWhatTheyCannotAnswer pins that help
 // given a topic no command answers, and completion given no shell or one it
 // does not know, exit 2, print nothing to stdout and name what they refused,
@@ -217,25 +255,29 @@ func TestExitCodes_HelpAndCompletionRefuseWhatTheyCannotAnswer(t *testing.T) {
 	}
 }
 
-// TestWriterFailure_ARefusalOfTheDataExitsValidation pins export's writer rule:
-// a value the format cannot represent is a refusal of the input (1), wrapped
-// or not, and any other writer failure is outside the input (3).
-func TestWriterFailure_ARefusalOfTheDataExitsValidation(t *testing.T) {
+// refusingWriter refuses every write.
+type refusingWriter struct{}
+
+func (refusingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+// A completion script that cannot be written is a failure outside the
+// invocation, as any command's output failure is: it exits 3, not 2.
+func TestExitCodes_ACompletionScriptThatCannotBeWrittenExitsRuntime(t *testing.T) {
 	t.Parallel()
-	for _, c := range []struct {
-		name string
-		err  error
-		want int
-	}{
-		{"csv's refusal", csv.ErrUnrepresentable, cli.ExitValidation},
-		{"json's refusal, wrapped", fmt.Errorf("marshal: %w", adapterjson.ErrUnrepresentable), cli.ExitValidation},
-		{"any other writer failure", errors.New("disk full"), cli.ExitRuntime},
-		{"csv's setting refusal", csv.ErrConfig, cli.ExitRuntime},
-	} {
-		t.Run(c.name, func(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		t.Run(shell, func(t *testing.T) {
 			t.Parallel()
-			if got := cli.ExitForError(writerFailure("marshal", c.err)); got != c.want {
-				t.Errorf("writerFailure(%v) exits %d, want %d", c.err, got, c.want)
+			var stderr bytes.Buffer
+			root := newRootCmd("test")
+			root.SetOut(refusingWriter{})
+			root.SetErr(&stderr)
+			root.SetArgs([]string{"completion", shell})
+			err := execute(root)
+			if code := cli.ExitForError(err); code != cli.ExitRuntime {
+				t.Errorf("exit %d, want %d: %v", code, cli.ExitRuntime, err)
+			}
+			if !strings.Contains(fmt.Sprint(err), "disk full") {
+				t.Errorf("the failure %q does not name the write's error", fmt.Sprint(err))
 			}
 		})
 	}

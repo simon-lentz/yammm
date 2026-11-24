@@ -12,8 +12,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // builtinEvaluator is the interface that builtins use to evaluate sub-expressions.
@@ -111,10 +111,10 @@ func register(name string, fn builtinFunc) {
 	if !ok {
 		panic("eval: builtin " + name + " is not in the expr catalogue")
 	}
-	builtinRegistry[strings.ToLower(name)] = builtinDef{spec: spec, fn: fn}
+	builtinRegistry[name] = builtinDef{spec: spec, fn: fn}
 }
 
-// lookupBuiltin returns the builtin definition if it exists.
+// lookupBuiltin returns the definition of the builtin of exactly this name.
 func lookupBuiltin(name string) (builtinDef, bool) {
 	def, ok := builtinRegistry[name]
 	return def, ok
@@ -396,8 +396,8 @@ func builtinLen(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []str
 		return int64(len(v)), nil
 	case immutable.Slice:
 		return int64(v.Len()), nil
-	case immutable.Map[string]:
-		// A Map is a struct, so the reflect.Map arm below never sees it.
+	case immutable.Properties:
+		// Properties is a struct, so the reflect.Map arm below never sees it.
 		return int64(v.Len()), nil
 	}
 
@@ -974,14 +974,13 @@ func builtinTypeOf(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []
 }
 
 // dslTypeName maps an evaluator value onto the DSL type vocabulary that TypeOf
-// reports: "nil", "boolean", "integer", "float", "string", "list", "map",
-// "pattern", or "unknown" for any shape outside it. A scalar is read the way
+// reports: "nil", "boolean", "integer", "float", "string", "list", "map", or
+// "unknown" for any shape outside it. A scalar is read the way
 // [value.Classify] reads it, so a json.Number is the number it spells and a
 // named carrier is its base kind; the vocabulary is finer than
-// [value.TypeStrata]'s, which groups every numeric together and patterns with
-// strings.
+// [value.TypeStrata]'s, which groups every numeric together.
 //
-// A Timestamp, Date or UUID reports as "string": [CoerceValue] renders all
+// A Timestamp, Date or UUID reports as "string": [value.Coerce] renders all
 // three to text, and invariants evaluate on coerced values, so no time.Time or
 // uuid.UUID reaches here.
 func dslTypeName(v any) string {
@@ -989,11 +988,9 @@ func dslTypeName(v any) string {
 		return "nil"
 	}
 	switch v.(type) {
-	case *regexp.Regexp:
-		return "pattern"
 	case immutable.Slice:
 		return "list"
-	case immutable.Map[string]:
+	case immutable.Properties:
 		return "map"
 	}
 	switch kind, _ := value.Classify(v); kind {
@@ -1019,17 +1016,7 @@ func dslTypeName(v any) string {
 }
 
 func builtinIsNil(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if lhs == nil {
-		return true, nil
-	}
-	// A typed nil: reflect.ValueOf never yields Kind Interface, so that
-	// kind is not listed.
-	rv := reflect.ValueOf(lhs)
-	if rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Map ||
-		rv.Kind() == reflect.Slice || rv.Kind() == reflect.Chan || rv.Kind() == reflect.Func {
-		return rv.IsNil(), nil
-	}
-	return false, nil
+	return value.Absent(lhs), nil
 }
 
 func builtinDefault(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
@@ -1053,9 +1040,10 @@ func builtinCoalesce(_ context.Context, _ builtinEvaluator, lhs any, args []any,
 	return nil, nil //nolint:nilnil // all values were nil
 }
 
-// asSlice converts a value to []any for iteration.
+// asSlice converts a value to []any for iteration. A value that holds none
+// ([value.Absent]), a nil slice included, iterates as no element.
 func asSlice(funcName string, val any) ([]any, error) {
-	if val == nil {
+	if value.Absent(val) {
 		return []any{}, nil
 	}
 	elems, ok := value.ListElems(val)

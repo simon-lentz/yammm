@@ -6,7 +6,7 @@ import (
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
 
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 )
 
 // The declaration grammar as participle structs. The loop in parse.go owns
@@ -55,8 +55,7 @@ type importNode struct {
 }
 
 // anyNameNode is a word in a position that admits either case and refuses
-// every reserved spelling: an import alias, a relation name, or the name of
-// a removed reverse clause (recognized only to report its removal).
+// every reserved spelling: an import alias or a relation name.
 type anyNameNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
@@ -109,34 +108,22 @@ type memberNode struct {
 // kind flag, because only an association takes a body. Merging them would
 // accept a composition with edge properties, which the language does not.
 type assocNode struct {
-	Pos     lexer.Position
-	EndPos  lexer.Position
-	Doc     *string      `parser:"@DOC_COMMENT?"`
-	Name    anyNameNode  `parser:"'-->' @@"`
-	Mult    *multNode    `parser:"@@?"`
-	Target  typeRefNode  `parser:"@@"`
-	Reverse *reverseNode `parser:"@@?"`
-	Body    *relBodyNode `parser:"@@?"`
+	Pos    lexer.Position
+	EndPos lexer.Position
+	Doc    *string      `parser:"@DOC_COMMENT?"`
+	Name   anyNameNode  `parser:"'-->' @@"`
+	Mult   *multNode    `parser:"@@?"`
+	Target typeRefNode  `parser:"@@"`
+	Body   *relBodyNode `parser:"@@?"`
 }
 
 type compNode struct {
-	Pos     lexer.Position
-	EndPos  lexer.Position
-	Doc     *string      `parser:"@DOC_COMMENT?"`
-	Name    anyNameNode  `parser:"'*->' @@"`
-	Mult    *multNode    `parser:"@@?"`
-	Target  typeRefNode  `parser:"@@"`
-	Reverse *reverseNode `parser:"@@?"`
-}
-
-// reverseNode recognizes the reverse clause the language removed in
-// v0.15.0, so the parser reports the removal at the clause's own span
-// instead of a bare syntax error.
-type reverseNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Name   anyNameNode `parser:"'/' @@"`
+	Doc    *string     `parser:"@DOC_COMMENT?"`
+	Name   anyNameNode `parser:"'*->' @@"`
 	Mult   *multNode   `parser:"@@?"`
+	Target typeRefNode `parser:"@@"`
 }
 
 // multNode admits exactly seven spellings. '_' and 'one' each take an optional
@@ -270,8 +257,8 @@ type numBoundsC struct {
 // fltBoundsC is Float's bound pair. It exists apart from numBoundsC because the
 // two admit different tokens: an Integer bound is INTEGER or '_', and a Float
 // bound also takes FLOAT. Sharing one token set let Integer[1.5, 3] parse and
-// then fail a constraint check, which moves the diagnostic out of the syntax
-// category callers are told to filter on.
+// then fail a constraint check, where every other malformed bound is a syntax
+// error.
 type fltBoundsC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
@@ -332,15 +319,13 @@ type enuC struct {
 	Values []strTok `parser:"'[' (@@ (',' @@)*)? ','? ']'"`
 }
 
+// patC takes exactly one pattern. A conjunction of patterns is written as an
+// invariant, which names it.
 type patC struct {
-	Pos    lexer.Position
-	EndPos lexer.Position
-	Kw     bool `parser:"@'Pattern'"`
-	// Any number of patterns parses; the maximum of two is a constraint check.
-	// See enuC for why the arity does not live in the grammar. No trailing
-	// comma: patternT has none, and admitting one accepts source the generated
-	// parser rejects.
-	Patterns []strTok `parser:"'[' @@ (',' @@)* ']'"`
+	Pos     lexer.Position
+	EndPos  lexer.Position
+	Kw      bool   `parser:"@'Pattern'"`
+	Pattern strTok `parser:"'[' @@ ']'"`
 }
 
 // strTok is one STRING token with its own extent, so per-value diagnostics
@@ -354,8 +339,7 @@ type strTok struct {
 type timC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool    `parser:"@'Timestamp'"`
-	Format *strTok `parser:"('[' @@ ']')?"`
+	Kw     bool `parser:"@'Timestamp'"`
 }
 
 type datC struct {
@@ -386,8 +370,9 @@ type intTok struct {
 type lstC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool            `parser:"@'List'"`
-	Elem   *constraintNode `parser:"'<' @@ '>'"`
+	Kw     bool            `parser:"@'List' '<'"`
+	Level  listLevel       `parser:"@@"`
+	Elem   *constraintNode `parser:"@@ '>'"`
 	Bounds *lenBoundsC     `parser:"@@?"`
 }
 
@@ -405,8 +390,12 @@ type exprCapture interface{ exprCapture() }
 
 type exprResult struct {
 	E          expr.Expression
+	Text       string
 	Diags      []exprDiag
 	Start, End int
+	// NoValue holds each literal in E that has no value: E holds a nil
+	// literal in its place, which the source did not write.
+	NoValue []NoValueLiteral
 }
 
 func (exprResult) exprCapture() {}
@@ -474,16 +463,25 @@ func buildParsers() {
 		var diags []exprDiag
 		p := newExprParser(lx, &diags, tok)
 		start := lx.Peek().Pos.Offset
-		e, err := p.parse(0)
+		first := lx.MakeCheckpoint()
+		e, _, err := p.parse(0)
 		if err != nil {
+			if p.deep != nil {
+				lx.LoadCheckpoint(first)
+				p.deep.reach, p.deep.ends = skipExpression(lx, tok)
+			}
 			return nil, err
 		}
-		return exprResult{E: e, Diags: diags, Start: start, End: p.lastEnd}, nil
+		return exprResult{E: e, Text: p.text.String(), Diags: diags, Start: start, End: p.lastEnd, NoValue: p.noValue}, nil
+	})
+	listOpt := participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (listLevel, error) {
+		return checkListLevel(lx, tok)
 	})
 	opts := []participle.Option{
 		participle.Lexer(def),
 		participle.Elide(elidedTokens...),
 		exprOpt,
+		listOpt,
 		participle.UseLookahead(2),
 	}
 	if built.schemaHead, err = participle.Build[schemaHeadNode](opts...); err != nil {

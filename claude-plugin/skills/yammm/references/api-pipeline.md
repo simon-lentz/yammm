@@ -1,35 +1,38 @@
 # Go API Pipeline Reference
 
-The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist/export**. Every public entry point returns `(value, diag.Result)` with stable error codes and precise source locations.
+The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist or write**. Every call that can fail returns `(T, error)`, or an `error` alone when it has no value. `schema.FindModuleRoot` and `location.ResolveSourcePath` return two values before their error, a call where the caller needs no reason returns `false` as its last value, and `snapshot.ScanDir` yields an error only when the scan stops, holding a file's own failure in `ScanEntry.Err`. A call that judges its input, such as a schema load, a validation, `Graph.Add`, `Graph.AddOrMerge` and `Graph.Check`, a snapshot read or `snapshot.Marshal`, a Cypher generation and `neo4j.Diff`, returns the failures it finds as a `*diag.ResultError`, with stable error codes and, where a diagnostic has a source position, its span. An option a call does not take is refused with a plain error, and some calls return a plain error for their own refusals, among them `gogen.Marshal`, `markdown.Marshal`, `instance.BuilderFor`, `graph.ParseKey`, and `neo4j.NodeQueries` and `neo4j.EdgeQueries`, which mark a value they cannot write with `neo4j.ErrUnrepresentable`. A plain error can wrap a `*diag.ResultError`, as `NodeQueries`' does when `cypher.Config.CheckLabels` refuses the schema's labels, so read every error with `errors.AsType`.
 
 ---
 
 ## Error Handling Pattern
 
-All load/validation functions return `(T, diag.Result)`:
+Every load and validation function returns its value beside an error, or an error alone where it has no value, as `snapshot.Verify` and `Graph.Check` do:
 
 ```go
-schema, result := schema.Load(ctx, "path/to/schema.yammm")
-if result.HasErrors() {
-    // result.Err() returns an error wrapping the diagnostic issues
-    // result.Issues() iterates all issues
-    // result.Errors() iterates Fatal + Error issues only
-    return result.Err()
+s, err := schema.Load(ctx, "path/to/schema.yammm",
+    schema.WithWarnings(func(w diag.Issue) { /* a Warning, Info or Hint */ }))
+if err != nil {
+    if errors.Is(err, diag.E_IMPORT_CYCLE) { /* test one code */ }
+    if re, ok := errors.AsType[*diag.ResultError](err); ok {
+        // re.Result.Issues() iterates the failures
+    }
+    return fmt.Errorf("load schema: %w", err)
 }
 ```
 
-Key `diag.Result` methods:
+- A failure is a `*diag.ResultError`: the Fatal and Error issues the call drew. `errors.AsType` finds it through `%w` tags and `errors.Join`, and `errors.Is(err, code)` matches each code it saw, a dropped one included.
+- A Warning, Info or Hint is never in the error. A call that can draw one takes a `WithWarnings(func(diag.Issue))` option: every schema load, `snapshot.Unmarshal` and `snapshot.Verify`, `cypher.Config.Constraints` and `neo4j.Diff`. Without it they are discarded.
+- A call refuses an option it does not take with an error, with no diagnostic code, that names the option and the call.
+
+Key `diag.Result` methods, on a failure's `re.Result`:
 
 | Method | Returns |
 | ------ | ------- |
-| `OK()` | `true` if no Fatal or Error issues |
 | `HasFatal()` | `true` if any Fatal issue |
-| `HasErrors()` | `true` if any Fatal or Error issue |
-| `HasWarnings()` | `true` if any Warning issue |
-| `Err()` | `nil` if OK, or `*diag.ResultError` |
-| `Issues()` | Iterator over all issues |
+| `SeverityCounts()` | Counts by severity, over every issue seen |
+| `Issues()` | Iterator over the retained issues |
 | `Errors()` | Iterator over Fatal + Error issues |
-| `HasCode(code)` | `true` if any issue carries the given diagnostic code |
+| `HasCode(code)` | `true` if any retained issue carries the given diagnostic code |
 | `TruncationNote()` | One-line dropped-issues note when the issue limit was hit (empty otherwise) |
 
 ---
@@ -43,16 +46,16 @@ Load a schema from a file, string, or in-memory sources.
 ```go
 import "github.com/simon-lentz/yammm/schema"
 
-s, result := schema.Load(ctx, "path/to/schema.yammm")
-if result.HasErrors() {
-    return result.Err()
+s, err := schema.Load(ctx, "path/to/schema.yammm")
+if err != nil {
+    return err
 }
 ```
 
 ### From String (No Imports)
 
 ```go
-s, result := schema.LoadString(ctx, `
+s, err := schema.LoadString(ctx, `
 schema "example"
 type Item {
     id UUID primary
@@ -68,69 +71,39 @@ sources := map[string][]byte{
     "main.yammm":   mainContent,
     "common.yammm": commonContent,
 }
-s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/module/root")
+s, err := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm",
+    schema.WithModuleRoot("/module/root"))
 ```
 
-Use `LoadSourcesWithEntry` when the entry point is not the lexicographically first key:
-
-```go
-s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/module/root")
-```
+The third argument names the entry source. An empty entry path selects the lexicographically smallest key. A relative key resolves under the `WithModuleRoot` root, or under the working directory without one; under `WithSyntheticRoot` it joins the synthetic root and names no host path.
 
 ### Load Options
 
 ```go
 schema.Load(ctx, path,
     schema.WithModuleRoot("/custom/root"),
-    schema.WithIssueLimit(100),
-    schema.WithLogger(logger),
     schema.WithImportsAllowed(false),
-    schema.WithRegistry(registry),
 )
 ```
 
-Two options apply to `LoadSourcesWithEntry` alone; `Load` and `LoadString` refuse `WithSyntheticRoot` and `WithSourcesOnly(true)`:
+`LoadString` refuses `WithModuleRoot` and `WithImportsAllowed`. Two options apply to `LoadSourcesWithEntry` alone, and `Load` and `LoadString` refuse them: `WithSyntheticRoot`, which `LoadSourcesWithEntry` refuses beside `WithModuleRoot`, and `WithSourcesOnly`:
 
 ```go
-schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "",
-    schema.WithSourcesOnly(true),               // hermetic: imports resolve only against the in-memory sources
+schema.LoadSourcesWithEntry(ctx, sources, "main.yammm",
     schema.WithSyntheticRoot("embedded://app"), // identities under a root no checkout or mount point moves
 )
 ```
-
-### Builder API (Programmatic Schema Construction)
-
-```go
-s, result := schema.NewBuilder().
-    WithName("example").
-    AddDataType("Email", emailConstraint).
-    AddType("User").
-        WithPrimaryKey("id", uuidConstraint).
-        WithProperty("name", stringConstraint).
-        WithOptionalProperty("email", emailConstraint).
-        WithRelation("WORKS_AT", companyRef, false, false).
-        WithComposition("ADDRESSES", addressRef, true, true).
-        WithInvariant("name_not_empty", nameExpr, "").
-        AsAbstract().  // or AsPart()
-        Extends(parentRef).
-        Done().
-    Build()
-```
-
-`Build()` validates declared names against the DSL's own productions (`E_INVALID_NAME`): type and datatype names start with an uppercase letter and property names with a lowercase letter, both continuing with letters, digits, or underscores; relation names are UPPER_SNAKE — an uppercase letter, then uppercase letters, digits, or underscores. No type, datatype or relation name is one of the eleven built-in type names (`List`, `String`, `UUID` and the rest), and no property name is `as`, `part`, `in`, `nil`, `true` or `false`. Schema names and invariant names are free-form strings, and like every string value the Builder takes they are valid UTF-8. A documentation string holding `*/`, a NUL, a byte order mark or bytes that are not UTF-8 is `E_SYNTAX`, since no doc comment can carry it.
 
 ### Schema Type (Read API)
 
 ```go
 s.Name()                          // schema name string
-s.Type("User")                    // (*Type, bool) lookup
-s.Types()                         // iter.Seq2[string, *Type]
-s.TypeNames()                     // []string (sorted)
-s.TypeCount()                     // int
-s.DataType("Email")               // (*DataType, bool) lookup
-s.DataTypes()                     // iter.Seq2[string, *DataType]
-s.Imports()                       // iter.Seq[*Import]
-s.ImportByAlias("common")         // (*Import, bool)
+s.Type("User")                    // (Type, bool) lookup
+s.Types()                         // iter.Seq[Type], in declaration order
+s.DataType("Email")               // (DataType, bool) lookup
+s.DataTypes()                     // iter.Seq[DataType], in declaration order
+s.Imports()                       // iter.Seq[Import]
+s.ImportByAlias("common")         // (Import, bool)
 ```
 
 ---
@@ -144,28 +117,26 @@ Validate raw data against a loaded schema. Produces immutable `ValidInstance` va
 ```go
 import "github.com/simon-lentz/yammm/instance"
 
-v := instance.NewValidator(s,
-    instance.WithStrictPropertyNames(true),
-    instance.WithAllowUnknownFields(false),
-)
+v := instance.NewValidator(s)
 ```
+
+Every input key names its member exactly: a property by its declared name, a relation by its field name, its declared name in lower case (`works_at` for `WORKS_AT`), an edge property by its name and a foreign-key field by its `_target_` name. A key in any other case is an unknown field (`E_UNKNOWN_FIELD`, or `E_UNKNOWN_EDGE_FIELD` in an edge object), and the member it was meant for stays absent. `instance.WithIssueLimit(n)` caps the issues one instance stores (100 by default, 0 for no limit).
 
 ### Validate Instances
 
 ```go
-// Validate a batch (common path for JSON/CSV adapter output)
+// Validate a batch of one type
 raws := []instance.RawInstance{
     {Properties: map[string]any{"id": "abc-123", "name": "Widget"}},
 }
-valids, result := v.Validate(ctx, "Product", raws)
+// One slot per input, a zero instance for each one err refuses, when the
+// batch runs; nil when it does not (an unknown type, a cancellation)
+valids, err := v.Validate(ctx, "Product", raws)
 
 // Validate a single instance
-valid, result := v.ValidateOne(ctx, "Product", instance.RawInstance{
+valid, err := v.ValidateOne(ctx, "Product", instance.RawInstance{
     Properties: map[string]any{"id": "abc-123", "name": "Widget"},
 })
-
-// Validate composed children (part types)
-children, result := v.ValidateForComposition(ctx, "Order", "ITEMS", rawItems)
 ```
 
 ### RawInstance (Input)
@@ -173,13 +144,13 @@ children, result := v.ValidateForComposition(ctx, "Order", "ITEMS", rawItems)
 ```go
 type RawInstance struct {
     Properties map[string]any
-    Provenance *location.Provenance   // optional source metadata
+    Provenance instance.Provenance   // optional source metadata
 }
 ```
 
 ### Build RawInstances with SchemaBuilder
 
-`instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, and cardinality mismatches surface from `Build()` with the offending call site's file:line. Errors on nil schema, unknown type, or abstract type. The builder covers properties and property-less association edges; instances carrying edge properties or composed children are constructed from raw data instead.
+`instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, cardinality mismatches, and edge-shape mismatches surface from `Build()` with the offending call site's file:line. Errors on a zero schema, an unknown type, or an abstract type. The builder covers properties and property-less association edges; instances carrying edge properties or composed children are constructed from raw data instead.
 
 ```go
 b, err := instance.BuilderFor(s, "Person")
@@ -194,13 +165,14 @@ raw, err := b.
 ### ValidInstance (Output -- Immutable)
 
 ```go
+valid.Type()                       // schema.Type: one handle of the validator's schema load
 valid.TypeName()                   // string
 valid.PrimaryKey()                 // immutable.Key
 valid.Property("name")             // (immutable.Value, bool)
 valid.Properties()                 // immutable.Properties
-valid.Edge("WORKS_AT")             // (*ValidEdgeData, bool)
-valid.Compositions()               // iter.Seq2[string, immutable.Value]
-valid.Provenance()                 // *location.Provenance
+valid.Edge("WORKS_AT")             // (ValidEdgeData, bool)
+valid.Composed("ITEMS")            // iter.Seq[ValidInstance]: the children under one composition, in input order
+valid.Provenance()                 // instance.Provenance
 ```
 
 ---
@@ -216,28 +188,26 @@ import "github.com/simon-lentz/yammm/graph"
 
 g := graph.New(s)
 
-// Add validated instances
-for _, inst := range validInstances {
-    result := g.Add(ctx, inst)
-    if result.HasErrors() {
-        // handle duplicate PK, type not found, etc.
+// Add validated instances: Validate's error was checked, so no entry is zero
+for _, valid := range validInstances {
+    if err := g.Add(ctx, valid); err != nil {
+        // handle a duplicate primary key, a keyless or part type, etc.
     }
 }
-
-// Add composed children to an existing parent
-result := g.AddComposed(ctx, "Order", "order-123", "ITEMS", childInstance)
 ```
 
-### Check Graph Completeness
+`Add` panics on an instance another schema load validated, so build the validator and the graph from one `schema.Schema`. One text loaded twice is two loads. A validator over a member of the import closure shares the entry schema's load, so `Add` adds an instance of any type of the closure that can hold a root: concrete, not a part, and keyed, one the entry schema reaches only through another import included.
+
+### Check the Graph
 
 ```go
-result := g.Check(ctx)
-if result.HasErrors() {
-    // E_UNRESOLVED_REQUIRED: required associations not satisfied
+if err := g.Check(ctx); err != nil {
+    // errors.Is(err, diag.E_UNRESOLVED_REQUIRED): required associations not satisfied
+    // errors.Is(err, diag.E_INVARIANT_FAIL): a root AddOrMerge grew breaks an invariant
 }
 ```
 
-`Check()` verifies that all required associations (`(one)`, `(one:many)`) have resolved targets. Call it after all instances are added.
+`Check()` verifies that all required associations (`(one)`, `(one:one)`, `(one:many)`) have resolved targets, and judges each root `AddOrMerge` grew against its type's invariants (`E_INVARIANT_FAIL`, with the root's `pk` detail): a validator judges each listing alone, so merged listings can break an invariant none breaks by itself. It judges only roots a merge in this graph grew, so a seeded root only once a merge grows it here. Call it after all instances are added.
 
 ### Create a Snapshot
 
@@ -245,7 +215,7 @@ if result.HasErrors() {
 snap := g.Snapshot()
 ```
 
-Returns an immutable `*graph.Snapshot` -- a point-in-time view of the graph.
+Returns a `graph.Snapshot` -- a point-in-time view of the graph that no method changes.
 
 ### Graph Instance (Read API)
 
@@ -254,7 +224,7 @@ inst.TypeName()                    // string
 inst.PrimaryKey()                  // immutable.Key
 inst.Property("name")              // (immutable.Value, bool)
 inst.Properties()                  // immutable.Properties
-inst.Composed("ITEMS")             // []*Instance
+inst.Composed("ITEMS")             // iter.Seq[Instance]
 inst.ComposedRelations()           // []string
 ```
 
@@ -262,8 +232,8 @@ inst.ComposedRelations()           // []string
 
 ```go
 edge.Relation()                    // string
-edge.Source()                      // *Instance
-edge.Target()                      // *Instance
+edge.Source()                      // Instance
+edge.Target()                      // Instance
 edge.Property("weight")            // (immutable.Value, bool)
 edge.Properties()                  // immutable.Properties
 ```
@@ -272,7 +242,7 @@ edge.Properties()                  // immutable.Properties
 
 ## Stage 4: Snapshot Persistence
 
-Serialize graph snapshots to the `.ys` binary format for storage, transfer, and verification.
+Serialize graph snapshots to the `.ys` format, a JSON document, for storage, transfer, and verification.
 
 ```go
 import "github.com/simon-lentz/yammm/snapshot"
@@ -281,17 +251,17 @@ import "github.com/simon-lentz/yammm/snapshot"
 ### Marshal (Serialize)
 
 ```go
-data, result := snapshot.Marshal(ctx, snap,
+data, err := snapshot.Marshal(ctx, snap,
     snapshot.WithIndent("  "),
     snapshot.WithCreatedAt(time.Now()),
     snapshot.WithMetadata(map[string]string{"source": "pipeline"}),
 )
 ```
 
-### Load (Deserialize)
+### Unmarshal (Deserialize)
 
 ```go
-snap, result := snapshot.Load(ctx, data, s,
+snap, err := snapshot.Unmarshal(ctx, data, s,
     snapshot.WithIntegrityCheck(false),
 )
 ```
@@ -299,51 +269,56 @@ snap, result := snapshot.Load(ctx, data, s,
 ### Verify (Lightweight Validation)
 
 ```go
-result := snapshot.Verify(ctx, data, s)
-if result.HasErrors() {
+if err := snapshot.Verify(ctx, data, s); err != nil {
     // schema mismatch, integrity failure, dangling references, etc.
 }
 ```
 
-### Info (Inspect Without Loading)
+### Stat (Inspect Without Loading)
 
 ```go
-info, result := snapshot.Info(ctx, data)
+info, err := snapshot.Stat(ctx, data)
 // info.SchemaName, info.TotalInstances, info.IntegrityStatus, etc.
+// info is non-nil beside err when the document decodes and only its body
+// breaks a structural check
 ```
 
-`SnapshotInfo` fields: `Version`, `Features`, `SchemaName`, `SchemaHash`, `IntegrityHash`, `CreatedAt`, `Metadata`, `Types`, `InstanceCounts`, `TotalInstances`, `TotalEdges`, `IntegrityStatus`.
+`Info` embeds `Header` (`Version`, `SchemaName`, `SchemaHash`, `SchemaHashAlgorithm`, `IntegrityHash`, `CreatedAt` — a `time.Time`, zero when the header states none — `Metadata`, `Types`, `Attestation`) and adds `InstanceCounts`, `TotalInstances`, `TotalEdges`, `DuplicateCount`, `UnresolvedCount` and `IntegrityStatus` (`snapshot.IntegrityOK` or `snapshot.IntegrityMismatch`). `snapshot.ReadHeader(ctx, r)` reads the `Header` alone from an `io.Reader`.
 
 ### Update Metadata In Place
 
 ```go
-header, res := snapshot.HeaderOnly(ctx, data)   // read existing metadata
+header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data)) // read existing metadata
 newMeta := maps.Clone(header.Metadata)          // replace-not-merge contract
+if newMeta == nil {                             // a document that states no metadata
+    newMeta = map[string]string{}
+}
 newMeta["pipeline_completed"] = "true"
-updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
+updated, err := snapshot.UpdateMetadata(ctx, data, newMeta)
 ```
 
-`UpdateMetadataOrReMarshal(ctx, data, newMeta, s, opts...)` is the default entry point: it rewrites the header's metadata map (a full replace — clone the old map and mutate) while reusing the body bytes verbatim (fast path), and transparently falls back to `Load + Marshal` on any recoverable failure, emitting `W_UPDATE_METADATA_FALLBACK` so the transition is observable. The strict-fast-path primitive `UpdateMetadata(ctx, data, newMeta, opts...)` stays exported for consumers where a round-trip is unacceptable. CLI form: `yammm snapshot update-metadata --set k=v`.
+`UpdateMetadata(ctx, data, newMeta, opts...)` replaces the header's metadata map (a full replace — clone the old map and mutate), writes a new header and keeps every other byte, for every document `Unmarshal` accepts under its default options. It verifies the integrity hash first and refuses a mismatch, or a header that holds no hash, with `E_SNAPSHOT_INTEGRITY_MISMATCH`, unless `WithIntegrityCheck(false)`, the one option it takes, skips that check; it decodes no instance. It keeps `created_at` as written; to change it, re-marshal with `WithCreatedAt`. For a header past `MaxHeaderSize`, read the metadata with `Stat`, since `ReadHeader` refuses it. CLI form: `yammm snapshot update-metadata --set k=v`.
 
 ---
 
 ## Thread Safety and Immutability
 
-- **Loaded schemas** (`*schema.Schema`) are immutable and safe for concurrent use
-- **Validated instances** (`*instance.ValidInstance`) are immutable
-- **Graph snapshots** (`*graph.Snapshot`) are immutable
-- **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddComposed` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns an immutable snapshot
-- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and refuses a snapshot that breaks the schema's structural facts). See the Batch Assembly section of `docs/API.md`
+- **Loaded schemas** (`schema.Schema`) are immutable and safe for concurrent use
+- **Validated instances** (`instance.ValidInstance`) are immutable
+- **Graph snapshots** (`graph.Snapshot`) have no method that changes them, and a record is a handle, so no caller holds its address
+- **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddOrMerge` calls — multiple goroutines may add instances in parallel; the graph handles forward references, duplicate detection and merges atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent adds, and returns a snapshot later Adds do not change
+- **The validate→add pipeline** shares one `Validator` and one `Graph` across its workers: each worker validates a record with `ValidateOne`, returns on its error, and adds it with `Add`, or with `AddOrMerge` for a source that lists one record under several parents. The caller waits for its workers, then checks the graph and takes its snapshot. Each call returns its own error, and a snapshot holds no diagnostics. To resume, seed the graph with `graph.NewFromSnapshot(snap)` (new adds resolve against, and may complete, the seeded state; it binds the graph to the snapshot's own schema, installs its records as they stand, and panics on a zero snapshot). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---
 
 ## Test Helpers
 
-Two packages provide shared vocabulary for consumer test suites:
+One package provides shared vocabulary for consumer test suites:
 
-- **`internal/instancetest`** — `VI(typeName, opts...)` builds a `*ValidInstance` fixture directly (no validation pass), defaulting every field a scenario does not name; options include `PK(parts...)`, `Props(m)`, `Edges(m)`, `Composed(m)`, `Provenance(p)`, `TypeID(id)`.
-- **`snapshot/snapshottest`** — `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances; `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence; `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling; `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison.
+- **`snapshot/snapshottest`** — `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances; `AssertRoundTrip(tb, snap, opts...)` pins Marshal→Unmarshal structural equivalence against the snapshot's own schema; `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling; `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison.
+
+Build its instances through `instance.Validator`. `internal/instancetest` is this module's own test support: Go refuses an import of an `internal/` package from another module.
 
 ---
 
@@ -351,40 +326,48 @@ Two packages provide shared vocabulary for consumer test suites:
 
 ```go
 // 1. Load schema
-s, result := schema.Load(ctx, "inventory.yammm")
-if result.HasErrors() {
-    return result.Err()
+s, err := schema.Load(ctx, "inventory.yammm")
+if err != nil {
+    return err
 }
 
-// 2. Parse data with the JSON adapter; the SourceID names the document in diagnostics
-adapter := jsonAdapter.New()
-parsed, result := adapter.ParseObject(ctx, location.MustNewSourceID("data://inventory.json"), jsonData)
-if result.HasErrors() {
-    return result.Err()
+// 2. Decode the data: one array of objects per type name. UseNumber keeps an
+// integer apart from a float, as the validator's Integer rule needs.
+var doc map[string][]map[string]any
+dec := json.NewDecoder(bytes.NewReader(jsonData))
+dec.UseNumber()
+if err := dec.Decode(&doc); err != nil {
+    return err
 }
 
 // 3. Validate instances
 v := instance.NewValidator(s)
 g := graph.New(s)
-for typeName, raws := range parsed {
-    valids, result := v.Validate(ctx, typeName, raws)
-    if result.HasErrors() {
-        return result.Err()
+for typeName, objects := range doc {
+    raws := make([]instance.RawInstance, len(objects))
+    for i, props := range objects {
+        raws[i] = instance.RawInstance{Properties: props}
     }
-    for _, inst := range valids {
-        g.Add(ctx, inst)
+    valids, err := v.Validate(ctx, typeName, raws)
+    if err != nil {
+        return fmt.Errorf("validate %s: %w", typeName, err)
+    }
+    for _, valid := range valids {
+        if err := g.Add(ctx, valid); err != nil {
+            return err
+        }
     }
 }
 
 // 4. Check graph completeness
-if result := g.Check(ctx); result.HasErrors() {
-    return result.Err()
+if err := g.Check(ctx); err != nil {
+    return err
 }
 
 // 5. Persist snapshot
-data, result := snapshot.Marshal(ctx, g.Snapshot())
-if result.HasErrors() {
-    return result.Err()
+data, err := snapshot.Marshal(ctx, g.Snapshot())
+if err != nil {
+    return err
 }
 os.WriteFile("inventory.ys", data, 0644)
 ```

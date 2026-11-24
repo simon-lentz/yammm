@@ -1,0 +1,37 @@
+{
+  "name": "\"emoji\"",
+  "span": {
+    "s": 0,
+    "e": 14
+  },
+  "types": [
+    {
+      "name": "User",
+      "name_span": {
+        "s": 37,
+        "e": 41
+      },
+      "doc": "emoji🎉",
+      "props": [
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 52,
+              "e": 58
+            }
+          },
+          "span": {
+            "s": 45,
+            "e": 58
+          }
+        }
+      ],
+      "span": {
+        "s": 16,
+        "e": 60
+      }
+    }
+  ]
+}

@@ -4,15 +4,15 @@
   "severity": "error",
   "span": {
     "end": {
-      "byte": 160,
       "column": 15,
-      "line": 10
+      "line": 10,
+      "offset": 160
     },
     "source": "test://schema.yammm",
     "start": {
-      "byte": 150,
       "column": 5,
-      "line": 10
+      "line": 10,
+      "offset": 150
     }
   }
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -75,15 +74,15 @@ func marshalCorpus(t *testing.T) []corpusEntry {
 	var corpus []corpusEntry
 	for _, snapPair := range []struct {
 		name string
-		snap *graph.Snapshot
+		snap graph.Snapshot
 	}{
 		{"empty", emptySnap},
 		{"populated", populatedSnap},
 		{"unresolved_with_props", unresolvedWithPropsSnap},
 	} {
 		for _, v := range optionVariants {
-			data, res := snapshot.Marshal(ctx, snapPair.snap, v.opts...)
-			require.NoError(t, res.Err(), "marshal %s %s", snapPair.name, v.label)
+			data, err := snapshot.Marshal(ctx, snapPair.snap, v.opts...)
+			require.NoError(t, err, "marshal %s %s", snapPair.name, v.label)
 			corpus = append(corpus, corpusEntry{
 				label: snapPair.name + "/" + v.label,
 				data:  data,
@@ -133,74 +132,4 @@ func TestWireFormat_TopLevelKeyOrder(t *testing.T) {
 			require.Equal(t, want3, seen[3], "fourth key")
 		})
 	}
-}
-
-// TestWireFormat_BodySuffixContract pins the body-byte-range stability
-// contract: for every Marshal output, the byte offset immediately after
-// the yammm_snapshot header value's closing '}' addresses a ',' byte,
-// the document ends with '}', and the suffix beginning at that offset
-// matches the expected ,"types"... or ,\n<indent>"types"... pattern.
-//
-// This mirrors the bodyOffset capture logic UpdateMetadata uses without
-// importing the unexported streamDecoder internals — the test parses the
-// document directly with a fresh json.Decoder and computes the same
-// InputOffset it relies on.
-func TestWireFormat_BodySuffixContract(t *testing.T) {
-	corpus := marshalCorpus(t)
-	for _, entry := range corpus {
-		t.Run(entry.label, func(t *testing.T) {
-			data := entry.data
-			require.GreaterOrEqual(t, len(data), 2, "data too short")
-			require.Equal(t, byte('{'), data[0], "must start with '{'")
-			require.Equal(t, byte('}'), data[len(data)-1], "must end with '}'")
-
-			dec := json.NewDecoder(bytes.NewReader(data))
-			// Opening '{'.
-			_, err := dec.Token()
-			require.NoError(t, err)
-			// First key.
-			keyTok, err := dec.Token()
-			require.NoError(t, err)
-			key, ok := keyTok.(string)
-			require.True(t, ok && key == "yammm_snapshot",
-				"first key must be yammm_snapshot, got %v", keyTok)
-			// Decode the header value as raw bytes (consumes through the
-			// closing '}' of the header object).
-			var headerRaw json.RawMessage
-			require.NoError(t, dec.Decode(&headerRaw))
-
-			bodyOffset := dec.InputOffset()
-			require.Positive(t, bodyOffset, "bodyOffset must be > 0")
-			require.Less(t, bodyOffset, int64(len(data)), "bodyOffset must be < len(data)")
-			require.Equal(t, byte(','), data[bodyOffset],
-				"byte at bodyOffset must be ',', got %q (data near offset: %q)",
-				data[bodyOffset], safeSlice(data, bodyOffset, 20))
-
-			suffix := data[bodyOffset:]
-			isIndented := bytes.Contains(data[:bodyOffset], []byte("\n"))
-			if isIndented {
-				// The suffix begins with ",\n<indent>\"types\": ".
-				require.True(t, bytes.HasPrefix(suffix, []byte(",\n")),
-					"indented suffix must start with ,\\n; got %q",
-					safeSlice(suffix, 0, 20))
-				require.Contains(t, string(suffix[:40]), `"types"`,
-					"indented suffix must reach the types key quickly")
-			} else {
-				require.True(t, bytes.HasPrefix(suffix, []byte(`,"types":`)),
-					"compact suffix must start with ,\"types\":; got %q",
-					safeSlice(suffix, 0, 20))
-			}
-		})
-	}
-}
-
-// safeSlice returns a bounds-checked string excerpt of data starting at
-// start for up to n bytes, with newlines escaped for readability in
-// error messages.
-func safeSlice(data []byte, start, n int64) string {
-	if start < 0 {
-		start = 0
-	}
-	end := min(start+n, int64(len(data)))
-	return strings.ReplaceAll(string(data[start:end]), "\n", "\\n")
 }

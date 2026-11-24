@@ -1,0 +1,215 @@
+{
+  "name": "\"temporallist\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "datatypes": [
+    {
+      "name": "Day",
+      "constraint": {
+        "kind": "Date",
+        "span": {
+          "s": 37,
+          "e": 41
+        }
+      },
+      "span": {
+        "s": 23,
+        "e": 41
+      }
+    },
+    {
+      "name": "Stamp",
+      "constraint": {
+        "kind": "Timestamp",
+        "span": {
+          "s": 56,
+          "e": 65
+        }
+      },
+      "span": {
+        "s": 42,
+        "e": 65
+      }
+    },
+    {
+      "name": "Days",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "Date",
+          "span": {
+            "s": 85,
+            "e": 89
+          }
+        },
+        "span": {
+          "s": 80,
+          "e": 90
+        }
+      },
+      "span": {
+        "s": 66,
+        "e": 90
+      }
+    },
+    {
+      "name": "Dates",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "Alias",
+          "args": [
+            "Day"
+          ],
+          "span": {
+            "s": 110,
+            "e": 113
+          }
+        },
+        "span": {
+          "s": 105,
+          "e": 114
+        }
+      },
+      "span": {
+        "s": 91,
+        "e": 114
+      }
+    },
+    {
+      "name": "Stamps",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "Alias",
+          "args": [
+            "Stamp"
+          ],
+          "span": {
+            "s": 134,
+            "e": 139
+          }
+        },
+        "span": {
+          "s": 129,
+          "e": 140
+        }
+      },
+      "span": {
+        "s": 115,
+        "e": 140
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Calendar",
+      "name_span": {
+        "s": 147,
+        "e": 155
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 166,
+              "e": 172
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 159,
+            "e": 180
+          }
+        },
+        {
+          "name": "days",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Days"
+            ],
+            "span": {
+              "s": 189,
+              "e": 193
+            }
+          },
+          "span": {
+            "s": 182,
+            "e": 193
+          }
+        },
+        {
+          "name": "grid",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "List",
+              "elem": {
+                "kind": "Alias",
+                "args": [
+                  "Day"
+                ],
+                "span": {
+                  "s": 212,
+                  "e": 215
+                }
+              },
+              "span": {
+                "s": 207,
+                "e": 216
+              }
+            },
+            "span": {
+              "s": 202,
+              "e": 217
+            }
+          },
+          "span": {
+            "s": 195,
+            "e": 217
+          }
+        },
+        {
+          "name": "shifts",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "List",
+              "elem": {
+                "kind": "Alias",
+                "args": [
+                  "Stamp"
+                ],
+                "span": {
+                  "s": 236,
+                  "e": 241
+                }
+              },
+              "span": {
+                "s": 231,
+                "e": 242
+              }
+            },
+            "span": {
+              "s": 226,
+              "e": 243
+            }
+          },
+          "span": {
+            "s": 219,
+            "e": 243
+          }
+        }
+      ],
+      "span": {
+        "s": 142,
+        "e": 245
+      }
+    }
+  ]
+}

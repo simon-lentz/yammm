@@ -1,13 +1,11 @@
 package schema
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"log/slog"
 	"maps"
 	"os"
 	"path"
@@ -15,9 +13,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"unicode/utf8"
+
+	"github.com/simon-lentz/yammm/internal/hostpath"
 
 	"golang.org/x/text/unicode/norm"
 
@@ -36,24 +35,25 @@ func errorToFatalIssue(err error) diag.Issue {
 	return diag.NewIssue(diag.Fatal, code, err.Error()).Build()
 }
 
-// fatalResult creates a diag.Result containing a single Fatal diagnostic from an error,
-// optionally merged with a partial result that may contain earlier diagnostics.
-func fatalResult(err error, partial diag.Result) (*Schema, diag.Result) {
-	c := diag.NewCollectorUnlimited()
-	c.Merge(partial)
+// fatalErr returns the error of a load that err stopped: the failures prior
+// holds, which are the load's so far, and a Fatal issue for err, which joins
+// them past loadIssueLimit since it ends the collection the limit bounds.
+func fatalErr(err, prior error) error {
+	c := diag.NewCollector(diag.NoLimit)
+	if re, ok := errors.AsType[*diag.ResultError](prior); ok {
+		c.Merge(re.Result)
+	}
 	c.Collect(errorToFatalIssue(err))
-	return nil, c.Result()
+	return c.Err()
 }
 
-// issueResult creates a diag.Result carrying a single non-Fatal issue and a
-// nil Schema. It is the shape a load takes when it fails on user content
-// before any source is parsed — a malformed module-root marker, today — which
-// its author corrects, rather than the machine-level failure Fatal marks. The
-// load still stops: [Load] returns a nil Schema with this result.
-func issueResult(issue diag.Issue) diag.Result {
-	c := diag.NewCollectorUnlimited()
+// issueErr returns the error of a load that stops on one issue before any
+// source is parsed — a malformed module-root marker, today — which its author
+// corrects, rather than the machine-level failure Fatal marks.
+func issueErr(issue diag.Issue) error {
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(issue)
-	return c.Result()
+	return c.Err()
 }
 
 // rootLoader provides sandboxed file access for imports using os.Root.
@@ -70,7 +70,7 @@ type rootLoader struct {
 func newRootLoader(moduleRoot string) (*rootLoader, error) {
 	info, err := os.Stat(moduleRoot)
 	if err == nil && !info.IsDir() {
-		err = syscall.ENOTDIR
+		err = hostpath.ErrNotDirectory
 	}
 	if err != nil {
 		return nil, fmt.Errorf("open module root %q: %w", moduleRoot, err)
@@ -80,7 +80,7 @@ func newRootLoader(moduleRoot string) (*rootLoader, error) {
 		return nil, fmt.Errorf("open module root %q: %w", moduleRoot, err)
 	}
 	// Get the canonical path for consistent SourceID construction
-	canonicalRoot, err := location.ResolveHostPath(moduleRoot)
+	canonicalRoot, err := hostpath.Resolve(moduleRoot)
 	if err != nil {
 		_ = root.Close() // best-effort cleanup; primary error is canonicalization failure
 		return nil, fmt.Errorf("canonicalize module root %q: %w", moduleRoot, err)
@@ -89,7 +89,7 @@ func newRootLoader(moduleRoot string) (*rootLoader, error) {
 }
 
 // openFile opens a regular file relative to the module root with sandboxed
-// access. Returns ErrPathEscape if the path would escape the module root and
+// access. Returns a [pathEscapeError] if the path would escape the module root and
 // errNotRegularFile if it names anything but a regular file.
 func (rl *rootLoader) openFile(relativePath string) (*os.File, error) {
 	cleanPath := filepath.Clean(relativePath)
@@ -182,7 +182,7 @@ func readSourceFile(absPath string) ([]byte, error) {
 
 // readFile reads a file relative to the module root with sandboxed access,
 // returning its content and the path under the root it was read from.
-// Returns ErrPathEscape if the path would escape the module root.
+// Returns a [pathEscapeError] if the path would escape the module root.
 func (rl *rootLoader) readFile(relativePath string) ([]byte, string, error) {
 	f, err := rl.openFile(relativePath)
 	if err != nil {
@@ -247,31 +247,33 @@ func (e *pathEscapeError) Error() string {
 // nearest ancestor holding a yammm.mod marker, else the entry's directory.
 //
 // ctx must not be nil. Passing nil will panic.
-// A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish — an I/O failure, a cancellation, input a
-// load cannot begin from, or a source whose header cannot be parsed;
-// the package documentation enumerates them.
-func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.Result) {
+// A load that fails returns a zero Schema and a *[diag.ResultError] holding its
+// failures, or, for an option Load does not take, an error naming it. A Fatal
+// failure is a load that could not start or finish — an I/O failure, a
+// cancellation, an internal fault, input a load cannot begin from, or a source
+// whose header cannot be parsed; the package documentation enumerates them.
+// Load takes [WithModuleRoot], [WithImportsAllowed], [CaptureSources] and
+// [WithWarnings].
+func Load(ctx context.Context, path string, opts ...Option) (Schema, error) {
 	if ctx == nil {
-		panic("load.Load: context must not be nil")
+		panic("schema.Load: nil context")
 	}
 
-	cfg := defaultLoadConfig()
-	applyLoadOptions(cfg, opts)
+	cfg := newLoadConfig(opts)
 	cfg.startCapture()
-	if err := rejectInMemoryOptions(cfg); err != nil {
-		return fatalResult(err, diag.Result{})
+	if err := cfg.refuse("Load", optModuleRoot, optImportsAllowed, optCaptureSources, optWarnings); err != nil {
+		return Schema{}, err
 	}
 
 	// One resolution gives the entry's identity and the host path it is read from.
 	sourceID, absPath, err := location.ResolveSourcePath(path)
 	if err != nil {
-		return fatalResult(fmt.Errorf("resolve path %q: %w", path, err), diag.Result{})
+		return Schema{}, fatalErr(fmt.Errorf("resolve path %q: %w", path, err), nil)
 	}
 
 	content, err := readSourceFile(absPath)
 	if err != nil {
-		return fatalResult(err, diag.Result{})
+		return Schema{}, fatalErr(err, nil)
 	}
 
 	// Determine module root and canonicalize for consistent path comparison.
@@ -292,7 +294,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 			// A marker the author wrote and the loader could not honour fails
 			// the load. Falling through to the entry directory would be the
 			// silently-ignored marker this mechanism exists to remove.
-			return nil, issueResult(ModuleRootIssue(err))
+			return Schema{}, issueErr(ModuleRootIssue(err))
 		case found:
 			moduleRoot, rootOrigin = discovered, diag.ModuleRootDiscovered
 		default:
@@ -300,9 +302,9 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 		}
 	} else {
 		var err error
-		moduleRoot, err = location.ResolveHostPath(moduleRoot)
+		moduleRoot, err = hostpath.Resolve(moduleRoot)
 		if err != nil {
-			return fatalResult(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), nil)
 		}
 	}
 
@@ -314,19 +316,11 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	// serve no import would otherwise pass every load that imports nothing.
 	if rootOrigin == diag.ModuleRootExplicit {
 		if err := ldr.ensureRootLoader(); err != nil {
-			return fatalResult(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), nil)
 		}
 	}
 
-	s, result, err := ldr.loadFile(ctx, sourceID, absPath, content)
-	if err != nil {
-		return fatalResult(err, result)
-	}
-	if s == nil {
-		return nil, result
-	}
-
-	return s, result
+	return ldr.finish(ldr.loadFile(ctx, sourceID, absPath, content))
 }
 
 // LoadString loads a schema from a string source.
@@ -335,50 +329,51 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 // sourceName. For consistent error messages, use a meaningful path-like name.
 //
 // Imports are not supported when loading from a string.
-// The loader always disallows imports for string sources, regardless of other options.
+// The loader disallows imports for string sources, and LoadString refuses
+// every option that bears on them: [WithImportsAllowed], [WithModuleRoot],
+// [WithSourcesOnly] and [WithSyntheticRoot].
 // The rejection (a single E_IMPORT_NOT_ALLOWED at the first import
-// declaration) does not suppress the source's other diagnostics: analysis
-// continues with the rejected aliases deferred, and the rejected imports
-// are never probed or resolved.
+// declaration the parser keeps, which drops one with a reserved alias) does not end the analysis: it
+// continues with the rejected aliases deferred as a failed import's is, and
+// the rejected imports are never probed or resolved.
 //
 // ctx must not be nil. Passing nil will panic.
-// A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish — an I/O failure, a cancellation, input a
-// load cannot begin from, or a source whose header cannot be parsed;
-// the package documentation enumerates them.
-func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...LoadOption) (*Schema, diag.Result) {
+// A load that fails returns a zero Schema and a *[diag.ResultError] holding its
+// failures, or, for an option LoadString does not take, an error naming it. A
+// Fatal failure is a load that could not start or finish — an I/O failure, a
+// cancellation, an internal fault, input a load cannot begin from, or a source
+// whose header cannot be parsed; the package documentation enumerates them.
+// LoadString takes [CaptureSources] and [WithWarnings].
+func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Option) (Schema, error) {
 	if ctx == nil {
-		panic("load.String: context must not be nil")
+		panic("schema.LoadString: nil context")
 	}
 
-	cfg := defaultLoadConfig()
-	applyLoadOptions(cfg, opts)
+	cfg := newLoadConfig(opts)
 	cfg.startCapture()
-	if err := rejectInMemoryOptions(cfg); err != nil {
-		return fatalResult(err, diag.Result{})
+	if err := cfg.refuse("LoadString", optCaptureSources, optWarnings); err != nil {
+		return Schema{}, err
 	}
-	cfg.disallowImports = true // Always disallow imports from string, even if user opts try to enable
+	cfg.disallowImports = true
 	if !utf8.ValidString(sourceName) {
-		return fatalResult(fmt.Errorf("source name %q: %w", sourceName, location.ErrInvalidUTF8Path), diag.Result{})
+		return Schema{}, fatalErr(fmt.Errorf("source name %q: %w", sourceName, location.ErrInvalidUTF8Path), nil)
 	}
-
-	// Create a synthetic source ID (NewSourceID returns just SourceID, no error)
-	sourceID := location.NewSourceID("string://" + sourceName)
+	sourceID, err := location.NewSourceID("string://" + sourceName)
+	if err != nil {
+		return Schema{}, fatalErr(fmt.Errorf("source name %q: %w", sourceName, err), nil)
+	}
 
 	// Create loader and load from string. A string source has no directory,
 	// so it has no root to default to — the origin is "none", not "default".
 	ldr := newLoader(cfg, "", "", diag.ModuleRootNone)
-	s, result, err := ldr.loadSource(ctx, sourceID, []byte(sourceCode))
-	if err != nil {
-		return fatalResult(err, result)
-	}
-	return s, result
+	return ldr.finish(ldr.loadSource(ctx, sourceID, []byte(sourceCode)))
 }
 
 // LoadSourcesWithEntry loads a schema from in-memory sources with an explicit entry point.
 //
-// The sources map keys are paths, a relative one resolved under moduleRoot, or
-// under the synthetic root with [WithSyntheticRoot]; values are the file
+// The sources map keys are paths, a relative one resolved under the
+// [WithModuleRoot] root, under the working directory without one, or under the
+// synthetic root with [WithSyntheticRoot]; values are the file
 // contents. The provided entryPath selects the entry point; an empty
 // entryPath falls back to sorted key order.
 //
@@ -387,46 +382,51 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 // one is being analyzed.
 //
 // The entryPath must exist in the sources map (as either an absolute path
-// or relative to moduleRoot). Under [WithSyntheticRoot] an absolute key is an
+// or a relative one, resolved as a relative key is). Under [WithSyntheticRoot] an absolute key is an
 // error, so the entry must be given in its relative form there. If entryPath is
 // empty, the lexicographically smallest key is selected.
 //
 // ctx must not be nil. Passing nil will panic.
-// A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish — an I/O failure, a cancellation, input a
-// load cannot begin from, or a source whose header cannot be parsed;
-// the package documentation enumerates them.
-func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...LoadOption) (*Schema, diag.Result) {
+// A load that fails returns a zero Schema and a *[diag.ResultError] holding its
+// failures, or, for [WithSyntheticRoot] beside [WithModuleRoot], an error naming
+// both. A Fatal failure is a load that could not start or finish — an I/O
+// failure, a cancellation, an internal fault, input a load cannot begin from,
+// or a source whose header cannot be parsed; the package documentation
+// enumerates them. LoadSourcesWithEntry takes every [Option].
+func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, opts ...Option) (Schema, error) {
 	if ctx == nil {
-		panic("load.SourcesWithEntry: context must not be nil")
+		panic("schema.LoadSourcesWithEntry: nil context")
 	}
 
-	cfg := defaultLoadConfig()
-	applyLoadOptions(cfg, opts)
+	cfg := newLoadConfig(opts)
 	cfg.startCapture()
+	if cfg.gave(optSyntheticRoot) && cfg.gave(optModuleRoot) {
+		return Schema{}, errors.New("schema.LoadSourcesWithEntry does not take the WithSyntheticRoot option with WithModuleRoot: the synthetic root stands in for the module root")
+	}
 
 	if len(sources) == 0 {
-		return fatalResult(errors.New("no sources provided"), diag.Result{})
+		return Schema{}, fatalErr(errors.New("no sources provided"), nil)
 	}
 
-	syntheticRoot, err := normalizeSyntheticRoot(cfg, moduleRoot)
+	syntheticRoot, err := normalizeSyntheticRoot(cfg)
 	if err != nil {
-		return fatalResult(err, diag.Result{})
+		return Schema{}, fatalErr(err, nil)
 	}
 
-	// Resolve moduleRoot, so a relative key joins the host path every identity
-	// under the root is resolved from.
+	// Resolve the module root, so a relative key joins the host path every
+	// identity under the root is resolved from.
+	moduleRoot := cfg.moduleRoot
 	if moduleRoot != "" {
-		canonical, err := location.ResolveHostPath(moduleRoot)
+		canonical, err := hostpath.Resolve(moduleRoot)
 		if err != nil {
-			return fatalResult(fmt.Errorf("invalid module root %q: %w", moduleRoot, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("invalid module root %q: %w", moduleRoot, err), nil)
 		}
 		moduleRoot = canonical
 	}
 
-	// Create loader. The moduleRoot argument is "explicit" whatever produced
+	// Create loader. A root given to this load is "explicit" whatever produced
 	// it: a root the caller discovered before calling arrives here as a plain
-	// argument, and the loader has no way to know its provenance.
+	// option, and the loader has no way to know its provenance.
 	rootOrigin := diag.ModuleRootNone
 	switch {
 	case syntheticRoot != "":
@@ -445,15 +445,15 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		content := sources[path]
 		sourceID, hostPath, err := ldr.inMemorySource(path)
 		if err != nil {
-			return fatalResult(fmt.Errorf("invalid path %q: %w", path, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("invalid path %q: %w", path, err), nil)
 		}
 		if other, dup := keyOf[sourceID]; dup {
-			return fatalResult(fmt.Errorf("source keys %q and %q name one source, %s", other, path, sourceID), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("source keys %q and %q name one source, %s", other, path, sourceID), nil)
 		}
 		keyOf[sourceID] = path
 
 		if err := ldr.sourceRegistry.Register(sourceID, content); err != nil {
-			return fatalResult(fmt.Errorf("register source %q: %w", path, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("register source %q: %w", path, err), nil)
 		}
 
 		ldr.sourceContent[sourceID] = content
@@ -476,23 +476,28 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	// entry lookup hits the just-registered content.
 	sourceID, err := ldr.inMemorySourceID(selectedEntry)
 	if err != nil {
-		return fatalResult(fmt.Errorf("invalid entry path %q: %w", selectedEntry, err), diag.Result{})
+		return Schema{}, fatalErr(fmt.Errorf("invalid entry path %q: %w", selectedEntry, err), nil)
 	}
 
 	content, ok := ldr.sourceContent[sourceID]
 	if !ok {
-		return fatalResult(fmt.Errorf("entry path %q not found in sources", selectedEntry), diag.Result{})
+		return Schema{}, fatalErr(fmt.Errorf("entry path %q not found in sources", selectedEntry), nil)
 	}
 
-	s, result, err := ldr.loadSource(ctx, sourceID, content)
+	return ldr.finish(ldr.loadSource(ctx, sourceID, content))
+}
+
+// finish returns a load's outcome from its entry schema and the error that
+// stopped it, which carries only a cancellation: the zero Schema and the
+// failures the load collected, or s.
+func (l *loader) finish(s Schema, err error) (Schema, error) {
 	if err != nil {
-		return fatalResult(err, result)
+		return Schema{}, fatalErr(err, l.collector.Err())
 	}
-	if s == nil {
-		return nil, result
+	if err := l.collector.Err(); err != nil {
+		return Schema{}, err
 	}
-
-	return s, result
+	return s, nil
 }
 
 // importBinding records one import alias's resolution within a single schema
@@ -506,100 +511,56 @@ type importBinding struct {
 	decl     *importDecl // original declaration for diagnostics
 	failed   bool
 	sourceID location.SourceID
-	schema   *Schema // resolved schema; nil for failures
+	schema   Schema // resolved schema; zero for failures
 }
 
-// loader handles the schema loading process.
+// loader handles the schema loading process. One goroutine runs a load, so its
+// maps take no lock, and a panic below a load reaches the caller.
 type loader struct {
 	cfg             *loadConfig
 	moduleRoot      string
 	rootOrigin      string      // where moduleRoot came from; one of diag's ModuleRoot* origin values
 	syntheticRoot   string      // normalized WithSyntheticRoot value; empty for every other load
 	rootLoader      *rootLoader // sandboxed file access for imports (nil if no moduleRoot)
-	registry        *Registry
 	sourceRegistry  *source.Registry
 	collector       *diag.Collector
-	logger          *slog.Logger
 	disallowImports bool
 
-	// Tracking state
-	mu              sync.Mutex
-	sourceContent   map[location.SourceID][]byte
-	loadedSchemas   map[location.SourceID]*Schema
-	loadingSchemas  map[location.SourceID]bool     // For cycle detection
-	imports         map[string]importBinding       // alias -> binding (resolved or failed) for current schema
-	failedCompiles  map[location.SourceID]struct{} // sources whose nested compile failed (memo, per Load call)
-	closureSeen     map[*Schema]struct{}           // schemas whose cached closures are already registered
-	registryClosure map[location.SourceID]*Schema  // schemas the shared registry holds inside an import closure; nil until first needed
-	closureBound    map[location.SourceID]*Schema  // every closure member a bound schema brought into this load, by SourceID
-	closureConflict map[*Schema]*closureConflict   // a bound schema whose closure conflicted with this load, and how
-	hostPaths       map[location.SourceID]string   // file-backed source -> the host path its bytes were read from
-	resolveMu       sync.Mutex
-	resolved        map[string]resolvedSource // path -> its one resolution in this load
-}
-
-// loadRegistry is the completionRegistry a load completes against: the schemas
-// this load has bound, among them a cached closure's, then the shared registry.
-type loadRegistry struct {
-	l *loader
-}
-
-// LookupBySourceID implements the completionRegistry interface.
-func (r loadRegistry) LookupBySourceID(id location.SourceID) (*Schema, bool) {
-	r.l.mu.Lock()
-	s, ok := r.l.loadedSchemas[id]
-	r.l.mu.Unlock()
-	if ok {
-		return s, true
-	}
-	return r.l.registry.LookupBySourceID(id)
-}
-
-// registryAdapter adapts *Registry to the completionRegistry interface.
-type registryAdapter struct {
-	r *Registry
-}
-
-// LookupBySourceID implements the completionRegistry interface.
-func (a *registryAdapter) LookupBySourceID(id location.SourceID) (*Schema, bool) {
-	s, ok := a.r.LookupBySourceID(id)
-	return s, ok
+	// Tracking state. loadedSchemas holds one object per SourceID: bindIfKnown
+	// consults it before any source is compiled.
+	sourceContent  map[location.SourceID][]byte
+	loadedSchemas  map[location.SourceID]Schema
+	schemaByName   map[string]Schema              // each schema this load compiled, by declared name
+	loadingSchemas map[location.SourceID]bool     // For cycle detection
+	imports        map[string]importBinding       // alias -> binding (resolved or failed) for current schema
+	failedCompiles map[location.SourceID]struct{} // sources whose nested compile failed (memo, per Load call)
+	hostPaths      map[location.SourceID]string   // file-backed source -> the host path its bytes were read from
+	resolved       map[string]resolvedSource      // path -> its one resolution in this load
 }
 
 // newLoader creates a new loader with the given configuration.
 func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot, rootOrigin string) *loader {
-	registry := cfg.registry
-	if registry == nil {
-		registry = NewRegistry()
-	}
-
 	sourceReg := cfg.sourceRegistry
 	if sourceReg == nil {
 		sourceReg = source.NewRegistry()
 	}
-
-	// Use provided logger or create a discard logger (zero overhead when unused)
-	logger := cfg.logger
-	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}
+	collector := diag.NewCollector(loadIssueLimit)
+	collector.RouteWarnings(cfg.warnings)
 
 	return &loader{
 		cfg:             cfg,
 		moduleRoot:      moduleRoot,
 		rootOrigin:      rootOrigin,
 		syntheticRoot:   syntheticRoot,
-		registry:        registry,
 		sourceRegistry:  sourceReg,
-		collector:       diag.NewCollector(cfg.issueLimit),
-		logger:          logger,
+		collector:       collector,
 		disallowImports: cfg.disallowImports,
 		sourceContent:   make(map[location.SourceID][]byte),
-		loadedSchemas:   make(map[location.SourceID]*Schema),
+		loadedSchemas:   make(map[location.SourceID]Schema),
+		schemaByName:    make(map[string]Schema),
 		loadingSchemas:  make(map[location.SourceID]bool),
 		imports:         make(map[string]importBinding),
 		failedCompiles:  make(map[location.SourceID]struct{}),
-		closureSeen:     make(map[*Schema]struct{}),
 		hostPaths:       make(map[location.SourceID]string),
 		resolved:        make(map[string]resolvedSource),
 	}
@@ -639,12 +600,12 @@ func (l *loader) Close() error {
 }
 
 // loadFile loads a schema from a file path.
-func (l *loader) loadFile(ctx context.Context, sourceID location.SourceID, absPath string, content []byte) (*Schema, diag.Result, error) {
+func (l *loader) loadFile(ctx context.Context, sourceID location.SourceID, absPath string, content []byte) (Schema, error) {
 	// Register the source content
 	if err := l.sourceRegistry.Register(sourceID, content); err != nil {
-		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+		l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 			fmt.Sprintf("register source %q: %v", absPath, err)).Build())
-		return nil, l.collector.Result(), nil
+		return Schema{}, nil
 	}
 
 	l.sourceContent[sourceID] = content
@@ -653,30 +614,21 @@ func (l *loader) loadFile(ctx context.Context, sourceID location.SourceID, absPa
 	return l.loadSource(ctx, sourceID, content)
 }
 
-// loadSource loads a schema from source content.
-func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, content []byte) (*Schema, diag.Result, error) {
-	// Check if already loaded
-	l.mu.Lock()
-	if s, ok := l.loadedSchemas[sourceID]; ok {
-		l.mu.Unlock()
-		return s, l.collector.Result(), nil
-	}
-
+// loadSource loads a schema from source content. The error carries only a
+// cancellation; every other failure is collected.
+func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, content []byte) (Schema, error) {
 	l.loadingSchemas[sourceID] = true
-	l.mu.Unlock()
 
 	// Ensure loadingSchemas marker is always cleaned up on exit.
 	// This prevents persistent false "import cycle" errors after any failure.
 	defer func() {
-		l.mu.Lock()
 		delete(l.loadingSchemas, sourceID)
-		l.mu.Unlock()
 	}()
 
 	// Check for cancellation before starting expensive work (/19)
 	// Per, cancellation is returned as error, not collected as diagnostic.
 	if err := ctx.Err(); err != nil {
-		return nil, l.collector.Result(), fmt.Errorf("load cancelled: %w", err)
+		return Schema{}, fmt.Errorf("load cancelled: %w", err)
 	}
 
 	// The collector is shared across the whole Load call, so "any errors
@@ -701,14 +653,12 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 		l.imports = parentImports
 	}()
 
-	l.logger.Debug("loading schema", "source", sourceID.String())
-
 	// Register source content if not already registered
 	if _, ok := l.sourceContent[sourceID]; !ok {
 		if err := l.sourceRegistry.Register(sourceID, content); err != nil {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("register source %s: %v", sourceID, err)).Build())
-			return nil, l.collector.Result(), nil
+			return Schema{}, nil
 		}
 		l.sourceContent[sourceID] = content
 	}
@@ -718,7 +668,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	m := parser.Parse(content)
 
 	if m == nil {
-		return nil, l.collector.Result(), nil
+		return Schema{}, nil
 	}
 
 	// When the load context structurally disallows imports, the rejection
@@ -731,11 +681,11 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// extra declarations. Otherwise imports load normally; content
 	// failures are collected at their declarations and analysis continues
 	// with the failed aliases deferred. Either way the error-delta gate
-	// below keeps the returned schema nil whenever anything failed.
+	// below keeps the returned schema zero whenever anything failed.
 	if l.rejectDisallowedImports(m) {
 		l.markUnboundImportsFailed(m.Imports)
 	} else if err := l.loadImports(ctx, sourceID, m); err != nil {
-		return nil, l.collector.Result(), err // propagate cancellation
+		return Schema{}, err // propagate cancellation
 	}
 
 	// Build the completion map from the loader's bindings: a successful import
@@ -754,57 +704,31 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	}
 
 	// Complete the schema (resolve types, validate, etc.)
-	s := completeModel(m, sourceID, l.collector, loadRegistry{l}, resolvedImports)
+	s := completeModel(m, sourceID, l.collector, l.loadedSchemas, resolvedImports)
 
-	if s == nil {
-		return nil, l.collector.Result(), nil
+	if s.IsZero() {
+		return Schema{}, nil
 	}
 
-	// Wire resolved schema references (SourceID already set during completion).
-	// The Import's own ResolvedSourceID is the single authority for whether to
-	// wire — exactly as [Builder.wireImports] uses it. A completer-resolved
-	// import (non-zero SourceID) carries a schema; a deferred import — a failed
-	// load, or an alias the loader resolved but the completer then rejected (e.g.
-	// colliding with a local name) — has a zero SourceID and stays schema-less.
-	// Wiring the loader's still-resolved schema onto a deferred Import would give
-	// it a non-nil Schema contradicting its zero ResolvedSourceID, so the
-	// zero-SourceID check — not the loader binding's failed flag — is what gates
-	// this (the binding is then known non-failed, so its schema is real).
-	//
-	// The schema pointer comes from the loader binding rather than a
-	// registry-by-SourceID lookup (the shape Builder.wireImports uses): the
-	// binding is the loader's authoritative within-load record, whereas s and its
-	// freshly-loaded imports are not registered until after this loop (see
-	// l.registry.Register below), so a registry lookup here would couple wiring to
-	// registration order.
-	for _, imp := range s.ImportsSlice() {
-		if imp.ResolvedSourceID().IsZero() {
-			continue
-		}
-		if binding, ok := l.imports[imp.Alias()]; ok {
-			imp.setSchema(binding.schema)
-		}
+	// The completer builds an Import only for an alias the loader bound, and a
+	// failed binding holds a zero schema, so its Import stays schema-less.
+	for imp := range s.Imports() {
+		imp.setSchema(l.imports[imp.Alias()].schema)
 	}
 
-	// Seal all imports to prevent further mutation
-	for _, imp := range s.ImportsSlice() {
-		imp.seal()
-	}
-
-	// A registry-cached import can bring closure members the registry never
-	// registered, whose names its name check cannot see.
-	if issue, clash := closureNameClash(s); clash {
-		l.collector.Collect(issue)
-		return nil, l.collector.Result(), nil
-	}
-
-	// Schema must be nil if this schema's load contributed any errors —
+	// Schema must be zero if this schema's load contributed any errors —
 	// its own findings or those of imports loaded on its behalf (the
 	// error-delta against the entry snapshot; errors collected before this
 	// schema began belong to siblings and do not poison it).
-	// Check BEFORE registration to avoid registering schemas we'll discard.
 	if gate.tripped() {
-		return nil, l.collector.Result(), nil
+		return Schema{}, nil
+	}
+
+	// A load holds one schema per name, so an import closure does too. A schema
+	// already failed takes no name, so it draws no report of one.
+	if prior, taken := l.schemaByName[s.Name()]; taken {
+		l.collector.Collect(duplicateSchemaIssue(s, prior))
+		return Schema{}, nil
 	}
 
 	// Attach sources for diagnostics rendering and record the load's
@@ -814,7 +738,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// against — hasImportRoot already treats the two as one — so it is what
 	// the accessor reports. Recording "" here would deny the root the loader
 	// used and leave every module-root-relative key deriving from a fallback.
-	s.setSources(NewSources(l.sourceRegistry))
+	s.setSources(newSources(l.sourceRegistry))
 	if l.syntheticRoot != "" {
 		s.setModuleRoot(l.syntheticRoot)
 	} else {
@@ -824,79 +748,24 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// Seal the schema to prevent further mutation
 	s.seal()
 
-	l.logger.Debug("schema loaded",
-		"source", sourceID.String(),
-		"name", s.Name(),
-		"types", len(s.TypesSlice()),
-		"imports", len(s.ImportsSlice()))
-
-	// Register the schema
-	if err := l.registry.Register(s); err != nil {
-		l.collector.Collect(l.registerFailureIssue(s, err))
-		return nil, l.collector.Result(), nil
-	}
-
-	// Two loads sharing a registry can both complete one import in the window
-	// between the cache miss and this call; Register keeps the first and
-	// returns nil for an identical second. Adopt the registered pointer so
-	// every reader of this load sees one object per SourceID.
-	if canonical, ok := l.registry.LookupBySourceID(sourceID); ok {
-		s = canonical
-	}
-
-	l.mu.Lock()
 	l.loadedSchemas[sourceID] = s
-	l.mu.Unlock()
+	l.schemaByName[s.Name()] = s
 
-	return s, l.collector.Result(), nil
+	return s, nil
 }
 
-// registerFailureIssue renders a Registry.Register refusal at the schema
-// declaration it is about, over a two-way partition. DuplicateName and
-// DuplicateSourceID are the caller's conditions and name what clashed:
-// E_DUPLICATE_SCHEMA, which points at the source already holding the name, and
-// E_LOAD_SOURCE_CHANGED, whose message the registry writes. InvalidSourceID
-// and InvalidName mean the loader built something unregisterable, and draw
-// E_INTERNAL, as does any error that is not a RegistryError.
-func (l *loader) registerFailureIssue(s *Schema, err error) diag.Issue {
-	regErr, ok := errors.AsType[*RegistryError](err)
-	if !ok {
-		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
-			"register schema: "+err.Error()).WithSpan(s.Span()).Build()
-	}
-
-	switch regErr.Kind {
-	case DuplicateName:
-		existing, found := l.registry.LookupByName(s.Name())
-		held := "another source in this closure"
-		if found {
-			held = existing.SourceID().String()
-		}
-		b := diag.NewIssue(diag.Error, diag.E_DUPLICATE_SCHEMA,
-			fmt.Sprintf("schema name %q is already registered by %s; a registry holds "+
-				"one schema per name", s.Name(), held)).
-			WithSpan(s.Span()).
-			WithDetail(diag.DetailKeySchemaName, s.Name())
-		if found {
-			b = b.WithRelated(location.RelatedInfo{
-				Span:    existing.Span(),
-				Message: fmt.Sprintf("%q is declared here", existing.Name()),
-			})
-		}
-		return b.Build()
-	case DuplicateSourceID:
-		// A caller's condition, not the loader's: the registry holds this
-		// source as another load compiled it, and it no longer matches.
-		return diag.NewIssue(diag.Error, diag.E_LOAD_SOURCE_CHANGED, regErr.Message).
-			WithSpan(s.Span()).Build()
-	case InvalidSourceID, InvalidName:
-		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
-			"the loader built an unregisterable schema: "+regErr.Message).
-			WithSpan(s.Span()).Build()
-	default:
-		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
-			"register schema: "+regErr.Message).WithSpan(s.Span()).Build()
-	}
+// duplicateSchemaIssue reports s, at its declaration, as a second schema of the
+// name prior declares.
+func duplicateSchemaIssue(s, prior Schema) diag.Issue {
+	return diag.NewIssue(diag.Error, diag.E_DUPLICATE_SCHEMA,
+		fmt.Sprintf("schema name %q is already declared by %s; a load holds one schema per name",
+			s.Name(), prior.SourceID())).
+		WithSpan(s.Span()).
+		WithDetail(diag.DetailKeySchemaName, s.Name()).
+		WithRelated(diag.RelatedInfo{
+			Span:    prior.Span(),
+			Message: fmt.Sprintf("%q is declared here", prior.Name()),
+		}).Build()
 }
 
 // rejectDisallowedImports reports whether the load context structurally
@@ -904,11 +773,9 @@ func (l *loader) registerFailureIssue(s *Schema, err error) diag.Issue {
 // declares any: it collects the single E_IMPORT_NOT_ALLOWED rejection and
 // returns true, so the caller marks the declared aliases deferred and skips
 // loading. It returns false when imports may load normally. All other
-// declaration-level validation — duplicate aliases, reserved keywords,
-// collisions with local names — is owned by the completer, the one layer both
-// front doors (parsed sources and the Builder) share; resolution-level
-// validation (duplicate resolved SourceIDs) is owned by the resolver, in
-// validateResolvedImports.
+// declaration-level validation — duplicate aliases, collisions with local
+// names — is owned by the completer; resolution-level validation (duplicate
+// resolved SourceIDs) is owned by the resolver, in validateResolvedImports.
 func (l *loader) rejectDisallowedImports(m *model) bool {
 	if l.disallowImports && len(m.Imports) > 0 {
 		// Per spec: single E_IMPORT_NOT_ALLOWED issue with import_count detail,
@@ -957,6 +824,10 @@ func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, m 
 		if l.aliasBound(imp.Alias) {
 			continue
 		}
+		if imp.PathRefused {
+			l.markImportFailed(imp)
+			continue
+		}
 		if err := l.loadImport(ctx, sourceID, imp); err != nil {
 			return err // propagate cancellation
 		}
@@ -976,8 +847,6 @@ func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, m 
 // into exactly one binding, and aliasBound gates re-attempts of an already-bound
 // alias before they reach loadImport (keep-first).
 func (l *loader) aliasBound(alias string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	_, ok := l.imports[alias]
 	return ok
 }
@@ -988,14 +857,6 @@ func (l *loader) aliasBound(alias string) bool {
 // inert and surfacing to the completer as a deferred entry. A compile failure,
 // which does have a resolved SourceID, uses [loader.reportFailedCompile].
 func (l *loader) markImportFailed(imp *importDecl) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.markImportFailedLocked(imp)
-}
-
-// markImportFailedLocked records imp's alias as a failed (no-SourceID) binding.
-// Caller must hold l.mu; see [loader.markImportFailed] for the contract.
-func (l *loader) markImportFailedLocked(imp *importDecl) {
 	l.imports[imp.Alias] = importBinding{decl: imp, failed: true}
 }
 
@@ -1003,14 +864,10 @@ func (l *loader) markImportFailedLocked(imp *importDecl) {
 // an already-bound alias is left as-is). Used when imports are categorically
 // rejected (disallowed) or unresolvable as a group (no module root), so the
 // completer defers references through them instead of re-reporting per site.
-// The check-and-set runs under a single lock for the whole batch rather than a
-// lock cycle per import.
 func (l *loader) markUnboundImportsFailed(imports []*importDecl) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	for _, imp := range imports {
 		if _, bound := l.imports[imp.Alias]; !bound {
-			l.markImportFailedLocked(imp)
+			l.markImportFailed(imp)
 		}
 	}
 }
@@ -1020,11 +877,9 @@ func (l *loader) markUnboundImportsFailed(imports []*importDecl) {
 // source reports its own failure, while the broken source's own diagnostics
 // were collected once (by the first attempt — see the failedCompiles memo).
 // The retained sourceID lets validateResolvedImports still see that two aliases
-// name the same (broken) file. The caller must NOT hold l.mu.
+// name the same (broken) file.
 func (l *loader) reportFailedCompile(imp *importDecl, sourceID location.SourceID) {
-	l.mu.Lock()
 	l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: sourceID}
-	l.mu.Unlock()
 	l.collector.Collect(diag.NewIssue(diag.Error, diag.E_UPSTREAM_FAIL,
 		fmt.Sprintf("import %q failed to compile", imp.Path)).
 		WithSpan(imp.Span).
@@ -1043,9 +898,6 @@ func (l *loader) reportFailedCompile(imp *importDecl, sourceID location.SourceID
 // order. All duplicates are reported; findings are diagnostics, so there is
 // nothing to return.
 func (l *loader) validateResolvedImports(imports []*importDecl) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	seenSourceIDs := make(map[location.SourceID]importBinding)
 	for _, imp := range imports {
 		binding, found := l.imports[imp.Alias]
@@ -1065,7 +917,7 @@ func (l *loader) validateResolvedImports(imports []*importDecl) {
 				WithDetail(diag.DetailKeyFirstLine, strconv.Itoa(existing.decl.Span.Start.Line)).
 				WithDetail(diag.DetailKeyDuplicateAlias, binding.decl.Alias).
 				WithDetail(diag.DetailKeyDuplicateLine, strconv.Itoa(binding.decl.Span.Start.Line)).
-				WithRelated(location.RelatedInfo{
+				WithRelated(diag.RelatedInfo{
 					Span:    existing.decl.Span,
 					Message: fmt.Sprintf("first imported here as %q", existing.decl.Alias),
 				}).Build())
@@ -1075,160 +927,61 @@ func (l *loader) validateResolvedImports(imports []*importDecl) {
 	}
 }
 
-// bindIfKnown binds imp to an already-known schema for sourceID without reading
-// or compiling it: a prior compile failure in this load, a within-Load cache hit
-// (l.loadedSchemas), or a shared-registry hit. It returns true when it handled
-// imp — bound, or (for a prior compile failure) reported imp's own
-// E_UPSTREAM_FAIL — and false when sourceID is not yet known, leaving imp for the
-// caller to read and load.
+// bindIfKnown binds imp to the schema this load already compiled for sourceID,
+// or refuses imp: a source still loading, or a prior compile failure in this
+// load. It returns true when it handled imp — bound it, or reported the refusal
+// that fails it — and false when sourceID is not yet known, leaving imp for the
+// caller to compile.
 //
 // The failed-compile memo is why a diamond over a broken import does not
 // re-parse it per importer: the broken source's own diagnostics are collected
 // once (by the first attempt that recursively loaded it), while every importer
 // still reports its own E_UPSTREAM_FAIL here.
-//
-// Acquires l.mu internally; the caller must NOT hold it.
 func (l *loader) bindIfKnown(imp *importDecl, sourceID location.SourceID) bool {
-	l.mu.Lock()
 	if _, failed := l.failedCompiles[sourceID]; failed {
-		l.mu.Unlock() // reportFailedCompile takes l.mu itself
 		l.reportFailedCompile(imp, sourceID)
+		return true
+	}
+	if l.loadingSchemas[sourceID] {
+		l.failImportCycle(imp, sourceID)
 		return true
 	}
 	loaded, ok := l.loadedSchemas[sourceID]
 	if !ok {
-		loaded, ok = l.registry.LookupBySourceID(sourceID)
-		if !ok {
-			var refused bool
-			loaded, refused = l.registeredClosureMember(sourceID)
-			if refused {
-				l.mu.Unlock()
-				l.reportAmbiguousImport(imp, sourceID)
-				return true
-			}
-			ok = loaded != nil
-		}
-		if !ok {
-			l.mu.Unlock()
-			return false
-		}
+		return false
 	}
-	if c := l.registerCachedClosureSources(loaded); c != nil {
-		l.mu.Unlock()
-		l.reportClosureConflict(imp, sourceID, c)
-		return true
-	}
-	l.loadedSchemas[sourceID] = loaded
 	l.imports[imp.Alias] = importBinding{sourceID: sourceID, schema: loaded, decl: imp}
-	l.mu.Unlock()
 	return true
 }
 
-// reportAmbiguousImport fails imp: the shared registry holds sourceID as two
-// compiles with different bytes, so no load that shares it can bind one, in
-// whatever order the load imports the schemas whose closures hold it.
-func (l *loader) reportAmbiguousImport(imp *importDecl, sourceID location.SourceID) {
-	l.mu.Lock()
+// failImportCycle fails imp, which closes a cycle through sourceID, with no
+// E_UPSTREAM_FAIL since nothing failed to compile. The binding keeps that SourceID,
+// so a second declaration of it draws validateResolvedImports' duplicate import, not
+// a second cycle.
+func (l *loader) failImportCycle(imp *importDecl, sourceID location.SourceID) {
+	repeated := false
+	for _, b := range l.imports {
+		if b.sourceID == sourceID {
+			repeated = true
+			break
+		}
+	}
 	l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: sourceID}
-	l.mu.Unlock()
-	root, origin := l.loaderRoot()
-	l.collector.Collect(importResolveIssue(root, origin,
-		fmt.Sprintf("import %q names a source the shared registry holds as two compiles with different bytes", imp.Path), imp))
-}
-
-// closureConflict names a closure member one load cannot hold beside what it
-// already holds: two compiles of one source from different bytes, or, when
-// sourceChanged, bytes this load holds that differ from the ones the shared
-// registry compiled the member from.
-type closureConflict struct {
-	member        location.SourceID
-	sourceChanged bool
-}
-
-// reportClosureConflict fails imp on c. Two compiles of one source are an
-// unresolvable import; a source this load holds differently from the registry's
-// compile is a changed source, the registry assuming its files do not change
-// while it lives. The binding keeps sourceID, so a second declaration of the
-// same import draws a duplicate.
-func (l *loader) reportClosureConflict(imp *importDecl, sourceID location.SourceID, c *closureConflict) {
-	l.mu.Lock()
-	l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: sourceID}
-	l.mu.Unlock()
-	if !c.sourceChanged {
+	if !repeated {
 		root, origin := l.loaderRoot()
-		l.collector.Collect(importResolveIssue(root, origin,
-			fmt.Sprintf("import %q holds %s in its closure compiled from different bytes than the compile this load already holds", imp.Path, c.member), imp))
-		return
+		l.collector.Collect(importCycleIssue(root, origin, imp))
 	}
-	l.collector.Collect(diag.NewIssue(diag.Error, diag.E_LOAD_SOURCE_CHANGED,
-		fmt.Sprintf("import %q: the shared registry compiled %s from different bytes than this load holds for it", imp.Path, c.member)).
-		WithSpan(imp.Span).
-		WithDetail(diag.DetailKeyImportPath, imp.Path).
-		WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
-}
-
-// registeredClosureMember returns the compiled schema the shared registry holds
-// for sourceID inside a registered schema's import closure. Without it, whether
-// such an import binds that schema or reads its bytes would depend on whether the
-// load had already bound the schema whose closure holds it. A source held by two
-// compiled schemas whose bytes differ is refused, and refused reports it, so an
-// import of it fails rather than reading the source again. Callers hold l.mu.
-func (l *loader) registeredClosureMember(sourceID location.SourceID) (member *Schema, refused bool) {
-	if l.registryClosure == nil {
-		l.registryClosure = make(map[location.SourceID]*Schema)
-		seen := make(map[*Schema]struct{})
-		var walk func(*Schema)
-		walk = func(s *Schema) {
-			if _, ok := seen[s]; ok {
-				return
-			}
-			seen[s] = struct{}{}
-			for _, imp := range s.ImportsSlice() {
-				sub := imp.Schema()
-				if sub == nil {
-					continue
-				}
-				id := sub.SourceID()
-				switch prev, ok := l.registryClosure[id]; {
-				case !ok:
-					l.registryClosure[id] = sub
-				case prev != nil && prev != sub && !sameSourceBytes(prev, sub):
-					l.registryClosure[id] = nil
-				}
-				walk(sub)
-			}
-		}
-		for _, s := range l.registry.All() {
-			walk(s)
-		}
-	}
-	s, ok := l.registryClosure[sourceID]
-	return s, ok && s == nil
-}
-
-// sameSourceBytes reports whether two compiled schemas of one SourceID were
-// compiled from the same bytes. A schema without sources matches only itself.
-func sameSourceBytes(a, b *Schema) bool {
-	as, bs := a.Sources(), b.Sources()
-	if as == nil || bs == nil {
-		return false
-	}
-	ac, aok := as.ContentBySource(a.SourceID())
-	bc, bok := bs.ContentBySource(b.SourceID())
-	return aok && bok && bytes.Equal(ac, bc)
 }
 
 // loadImport loads a single imported schema. A content failure is
 // collected at the declaration and the alias recorded as failed; the
 // error return carries only cancellation.
 func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp *importDecl) error {
-	l.logger.Debug("loading import", "path", imp.Path, "alias", imp.Alias)
-
 	// Resolve the import path to a relative path (relative to module root)
 	relativePath, err := l.resolveImportToRelative(sourceID, imp.Path)
 	if err != nil {
 		if errors.Is(err, errNoHostPath) {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("resolve import %q: %v", imp.Path, err)).WithSpan(imp.Span).Build())
 			l.markImportFailed(imp)
 			return nil
@@ -1240,26 +993,8 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 		return nil
 	}
 
-	// Cross-Load short-circuit: derive the candidate SourceIDs without
-	// reading the import file, then check the within-Load cache and the
-	// shared Registry. If either holds the schema, reuse the existing pointer
-	// and skip the read + parse + compile + register pipeline entirely.
-	// ensureRootLoader canonicalizes l.moduleRoot into l.rootLoader.rootPath
-	// without touching the import file itself; any error is absorbed here
-	// and re-surfaced uniformly by readImportFile on the fall-through path.
-	// A sources-only load never reads from disk, so the module-root sandbox
-	// is never opened for it.
-	if !l.cfg.sourcesOnly {
-		_ = l.ensureRootLoader() //nolint:errcheck // readImportFile re-runs ensureRootLoader and surfaces the error uniformly
-	}
-	for _, cand := range l.candidateImportSourceIDs(relativePath) {
-		if l.bindIfKnown(imp, cand) {
-			return nil
-		}
-	}
-
 	// Read the import using rootLoader (sandboxed) or in-memory sources
-	content, importSourceID, err := l.readImportFile(relativePath, imp)
+	content, importSourceID, err := l.readImportFile(relativePath)
 	if err != nil {
 		root, origin := l.loaderRoot()
 		if _, ok := errors.AsType[*pathEscapeError](err); ok { //nolint:errcheck // type check only, value unused
@@ -1273,12 +1008,6 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 		return nil
 	}
 
-	// Post-read within-Load belt-and-braces check. The pre-read candidate
-	// SourceIDs above cover the typical path-resolution cases, but retaining
-	// this check preserves the existing within-Load cache invariant (and
-	// survives any future path-resolution edge case that the candidate
-	// derivation above doesn't anticipate). The failed-compile memo gets the
-	// same treatment for the same reason.
 	if l.bindIfKnown(imp, importSourceID) {
 		return nil
 	}
@@ -1286,7 +1015,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	// Register the source if not already registered
 	if _, exists := l.sourceContent[importSourceID]; !exists {
 		if err := l.sourceRegistry.Register(importSourceID, content); err != nil {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("register import source: %v", err)).Build())
 			l.markImportFailed(imp)
 			return nil
@@ -1294,60 +1023,26 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 		l.sourceContent[importSourceID] = content
 	}
 
-	// Importing a schema still loading closes a cycle: report it here, with no
-	// E_UPSTREAM_FAIL, since nothing failed to compile.
-	l.mu.Lock()
-	cycle := l.loadingSchemas[importSourceID]
-	l.mu.Unlock()
-	if cycle {
-		// The binding keeps the file's SourceID, so a second declaration of it
-		// draws validateResolvedImports' duplicate import, not a second cycle.
-		l.mu.Lock()
-		repeated := false
-		for _, b := range l.imports {
-			if b.sourceID == importSourceID {
-				repeated = true
-				break
-			}
-		}
-		l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: importSourceID}
-		l.mu.Unlock()
-		if !repeated {
-			root, origin := l.loaderRoot()
-			l.collector.Collect(importCycleIssue(root, origin, imp))
-		}
-		return nil
-	}
-
 	// Recursively load the imported schema
-	s, _, err := l.loadSource(ctx, importSourceID, content)
+	s, err := l.loadSource(ctx, importSourceID, content)
 	if err != nil {
 		return err // propagate cancellation
 	}
-	if s == nil {
-		l.mu.Lock()
+	if s.IsZero() {
 		l.failedCompiles[importSourceID] = struct{}{}
-		l.mu.Unlock()
 		l.reportFailedCompile(imp, importSourceID)
 		return nil
 	}
 
 	// Store the resolved import information for later wiring to the schema's Import objects
-	l.mu.Lock()
 	l.imports[imp.Alias] = importBinding{
 		sourceID: importSourceID,
 		schema:   s,
 		decl:     imp,
 	}
-	l.mu.Unlock()
 
 	return nil
 }
-
-// errImportBackslash refuses an import path holding a backslash, which Windows
-// reads as a separator and every other host as part of a file name, so the path
-// would name a different file on each.
-var errImportBackslash = errors.New("an import path separates its segments with / and holds no backslash")
 
 // errNoHostPath reports a file-backed source the loader never recorded reading,
 // which leaves its relative imports nothing to resolve against.
@@ -1355,15 +1050,15 @@ var errNoHostPath = errors.New("no host path recorded for the importing source")
 
 // resolveImportToRelative resolves an import path to a path relative to the module root.
 func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath string) (string, error) {
-	if strings.ContainsRune(importPath, '\\') {
-		return "", errImportBackslash
+	if err := source.CheckImportPath(importPath); err != nil {
+		return "", err //nolint:wrapcheck // the caller names the import path
 	}
 	// Relative import (./foo or ../bar)
 	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
 		// Under a synthetic root a source's key is its identity past the root,
 		// so a relative import resolves against the key's directory, as text.
 		if key, ok := l.syntheticKey(sourceID); ok {
-			return importKeyText(key, importPath), nil
+			return source.ImportKeyText(key, importPath), nil
 		}
 		if !sourceID.IsFilePath() {
 			return "", errors.New("relative imports require a file-based source or a synthetic root")
@@ -1376,8 +1071,9 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 		}
 		sourceDir := filepath.Dir(importer)
 
-		// Compute the target path
-		targetPath := filepath.Join(sourceDir, importPath)
+		// The target is the file with its extension, so a path spelling an
+		// ancestor of the root names that ancestor's sibling file and escapes.
+		targetPath := source.ImportFileName(filepath.Join(sourceDir, importPath))
 
 		// Make it relative to module root
 		if l.moduleRoot != "" {
@@ -1398,38 +1094,8 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 		return "", errors.New("module-style imports require a module root")
 	}
 
-	return importPath, nil
-}
-
-// SyntheticImportKey returns the key a load under [WithSyntheticRoot] looks
-// an import up by: importPath resolved as text against importerKey, the key of
-// the source declaring it — from the importer's directory for "./" and "../",
-// from the root otherwise — with ".yammm" added when absent. A key climbing
-// above the root keeps its leading "..". It is the loader's own rule, so a
-// generator writing embedded sources keys each one exactly as the re-load
-// will ask for it. importerKey is read as the loader reads a key, through
-// [location.NormalizeSyntheticKey], and a key the loader refuses is refused.
-func SyntheticImportKey(importerKey, importPath string) (string, error) {
-	if strings.ContainsRune(importPath, '\\') {
-		return "", errImportBackslash
-	}
-	importer, err := location.NormalizeSyntheticKey(importerKey)
-	if err != nil {
-		return "", fmt.Errorf("importer: %w", err)
-	}
-	key, err := location.NormalizeSyntheticKey(importCandidates(importKeyText(importer, importPath))[0])
-	if err != nil {
-		return "", fmt.Errorf("import %q: %w", importPath, err)
-	}
-	return key, nil
-}
-
-// importKeyText resolves an import path against its importer's key as text.
-func importKeyText(importerKey, importPath string) string {
-	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
-		return path.Join(path.Dir(importerKey), importPath)
-	}
-	return importPath
+	// Separators after a file name are read past, as the relative arm's join does.
+	return strings.TrimRight(importPath, "/"), nil
 }
 
 // syntheticKey returns the key a synthetic-root load registered id under: its
@@ -1441,156 +1107,22 @@ func (l *loader) syntheticKey(id location.SourceID) (string, bool) {
 	return strings.CutPrefix(id.String(), l.syntheticRoot+"/")
 }
 
-// importCandidates returns the file names an import path may resolve to.
-//
-// An import written without the extension resolves ONLY to "<path>.yammm". The
-// bare path was a second candidate, so `import "./parts"` would compile a file
-// literally named "parts" of any content type — against the extension rule
-// docs/SPEC.md states. One function serves both derivation sites because they
-// must agree: readImportFile does the read, candidateImportSourceIDs derives
-// the identities the cross-Load short-circuit looks up, and a short-circuit that
-// admitted a candidate the reader refuses would bind an import without ever
-// reaching the tightened read.
-func importCandidates(relativePath string) []string {
-	if strings.HasSuffix(relativePath, ".yammm") {
-		return []string{relativePath}
-	}
-	return []string{relativePath + ".yammm"}
-}
-
-// candidateImportSourceIDs returns the SourceIDs readImportFile could produce
-// for the given relative path, without reading any file. Used by the
-// cross-Load short-circuit in loadImport to detect already-registered imports
-// before paying the read cost.
-//
-// It derives its candidates from [importCandidates], the same function
-// readImportFile reads through, and emits an identity for each of the two code
-// paths readImportFile exercises: the in-memory lookup joins a relative key to
-// l.moduleRoot, or to l.syntheticRoot under a synthetic root, and
-// rootLoader.readFile joins the root it resolved when it opened. Both forms are
-// emitted so a Registry populated by either path hits on the short-circuit. Paths that fail canonicalization are silently dropped;
-// they would fail again in readImportFile with a uniform diagnostic.
-func (l *loader) candidateImportSourceIDs(relativePath string) []location.SourceID {
-	candidates := importCandidates(relativePath)
-
-	ids := make([]location.SourceID, 0, 2*len(candidates))
-	seen := make(map[location.SourceID]struct{}, 2*len(candidates))
-	appendUnique := func(id location.SourceID) {
-		if _, dup := seen[id]; dup {
-			return
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-
-	// Mirror readImportFile's in-memory lookup: l.moduleRoot + candidate.
-	for _, candidate := range candidates {
-		if id, err := l.inMemorySourceID(candidate); err == nil {
-			appendUnique(id)
-		}
-	}
-
-	// Mirror rootLoader.readFile's path computation: its resolved root joined
-	// with the cleaned candidate.
-	if l.rootLoader != nil {
-		for _, candidate := range candidates {
-			absPath := filepath.Join(l.rootLoader.rootPath, filepath.Clean(candidate))
-			if id, _, err := l.resolveSource(absPath); err == nil {
-				appendUnique(id)
-			}
-		}
-	}
-
-	return ids
-}
-
-// registerCachedClosureSources copies the source content of a registry-cached
-// schema and its transitive imports into this load's source registries, so the
-// load's Sources() carries the whole import closure even when the cross-Load
-// short-circuit skipped the read+parse pipeline; diagnostics rendered across
-// imports and gogen's embedded store read that content. One load
-// holds one content per SourceID: a member compiled from different bytes than a
-// compile this load already holds, or whose bytes differ from the content this
-// load already holds, is a conflict, which the walk returns and the caller
-// fails the import on. The conflict is remembered per schema, so a second
-// import of the same schema is refused too; every other schema is visited at
-// most once per load (closureSeen), since a diamond-shaped import graph has
-// exponentially many import paths but only linearly many schemas. Callers hold
-// l.mu.
-func (l *loader) registerCachedClosureSources(s *Schema) *closureConflict {
-	if c, found := l.closureConflict[s]; found {
-		return c
-	}
-	if _, seen := l.closureSeen[s]; seen {
-		return nil
-	}
-	l.closureSeen[s] = struct{}{}
-	c := l.walkCachedClosure(s)
-	if c != nil {
-		if l.closureConflict == nil {
-			l.closureConflict = make(map[*Schema]*closureConflict)
-		}
-		l.closureConflict[s] = c
-	}
-	return c
-}
-
-// walkCachedClosure is registerCachedClosureSources' walk of one schema, below
-// its memo: the compile and content checks, then its imports. Callers hold l.mu.
-func (l *loader) walkCachedClosure(s *Schema) *closureConflict {
-	id := s.SourceID()
-	if l.closureBound == nil {
-		l.closureBound = make(map[location.SourceID]*Schema)
-	}
-	for _, prev := range []*Schema{l.loadedSchemas[id], l.closureBound[id]} {
-		if prev != nil && prev != s && !sameSourceBytes(prev, s) {
-			return &closureConflict{member: id}
-		}
-	}
-	l.closureBound[id] = s
-	if srcs := s.Sources(); srcs != nil {
-		if content, found := srcs.ContentBySource(id); found {
-			if held, ok := l.sourceContent[id]; ok {
-				if !bytes.Equal(held, content) {
-					return &closureConflict{member: id, sourceChanged: true}
-				}
-			} else if err := l.sourceRegistry.Register(id, content); err != nil {
-				return &closureConflict{member: id, sourceChanged: true}
-			} else {
-				l.sourceContent[id] = content
-			}
-		}
-	}
-	for _, imp := range s.ImportsSlice() {
-		if sub := imp.Schema(); sub != nil {
-			if c := l.registerCachedClosureSources(sub); c != nil {
-				return c
-			}
-		}
-	}
-	return nil
-}
-
 // readImportFile reads an import file from the in-memory sources, else through
 // the sandboxed rootLoader. Every read it makes is bounded and non-blocking;
 // there is no unsandboxed fallback.
-func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, location.SourceID, error) {
-	candidates := importCandidates(relativePath)
+func (l *loader) readImportFile(relativePath string) ([]byte, location.SourceID, error) {
+	name := source.ImportFileName(relativePath)
 
-	// First check the content this load already holds; the candidate
-	// derivation matches pre-registration's.
-	for _, candidate := range candidates {
-		testID, err := l.inMemorySourceID(candidate)
-		if err != nil {
-			continue
-		}
+	// First check the content this load already holds; the derivation matches
+	// pre-registration's.
+	if testID, err := l.inMemorySourceID(name); err == nil {
 		if content, ok := l.sourceContent[testID]; ok {
 			return content, testID, nil
 		}
 	}
 
-	// Under WithSourcesOnly the in-memory set is the whole universe:
-	// a miss is an error, never a filesystem read.
+	// Under WithSourcesOnly or a synthetic root the in-memory set is the
+	// whole universe: a miss is an error, never a filesystem read.
 	if l.cfg.sourcesOnly {
 		return nil, location.SourceID{}, errors.New("not among the pre-registered sources")
 	}
@@ -1608,34 +1140,16 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 			"not among the pre-registered sources, and no module root is in play")
 	}
 
-	// Try each candidate with rootLoader.
-	// We try each candidate and keep track of the last error.
-	// For path escape errors, we return immediately since they are security-relevant.
-	var lastErr error
-	for _, candidate := range candidates {
-		content, path, err := l.rootLoader.readFile(candidate)
-		if err == nil {
-			sourceID, hostPath, rerr := l.resolveSource(path)
-			if rerr != nil {
-				return nil, location.SourceID{}, fmt.Errorf("create source ID for %q: %w", candidate, rerr)
-			}
-			l.hostPaths[sourceID] = hostPath
-			return content, sourceID, nil
-		}
-
-		// Check if this is a path escape error - return immediately
-		if _, ok := errors.AsType[*pathEscapeError](err); ok { //nolint:errcheck // type check only, value unused
-			return nil, location.SourceID{}, err
-		}
-
-		lastErr = err
+	content, path, err := l.rootLoader.readFile(name)
+	if err != nil {
+		return nil, location.SourceID{}, err
 	}
-
-	// Return the last error, or a generic "not found" if we had no errors
-	if lastErr != nil {
-		return nil, location.SourceID{}, lastErr
+	sourceID, hostPath, err := l.resolveSource(path)
+	if err != nil {
+		return nil, location.SourceID{}, fmt.Errorf("create source ID for %q: %w", name, err)
 	}
-	return nil, location.SourceID{}, fmt.Errorf("import file %q not found", imp.Path)
+	l.hostPaths[sourceID] = hostPath
+	return content, sourceID, nil
 }
 
 // resolvedSource is one resolution of a path: its identity and its spelling
@@ -1645,12 +1159,10 @@ type resolvedSource struct {
 	host string
 }
 
-// resolveSource resolves p once per load. Pre-registration, the import
-// candidates, the in-memory lookup and the sandboxed read all derive an
-// identity for one path, and each receives the one answer the filesystem gave.
+// resolveSource resolves p once per load. Pre-registration, the in-memory lookup
+// and the sandboxed read all derive an identity for one path, and each receives
+// the one answer the filesystem gave.
 func (l *loader) resolveSource(p string) (location.SourceID, string, error) {
-	l.resolveMu.Lock()
-	defer l.resolveMu.Unlock()
 	if r, ok := l.resolved[p]; ok {
 		return r.id, r.host, nil
 	}
@@ -1685,13 +1197,17 @@ func (l *loader) inMemorySourceID(key string) (location.SourceID, error) {
 func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 	if l.syntheticRoot != "" {
 		// Every derivation site reaches this line, so one key gives one identity.
-		normalized, err := location.NormalizeSyntheticKey(key)
+		normalized, err := source.NormalizeSyntheticKey(key)
 		if err != nil {
 			return location.SourceID{}, "", fmt.Errorf("under synthetic root %s: %w", l.syntheticRoot, err)
 		}
 		// The joined string is never cleaned: path.Clean would collapse the
-		// root's "//". NewSourceID skips validation, and the root was validated.
-		return location.NewSourceID(l.syntheticRoot + "/" + normalized), "", nil
+		// root's "//".
+		id, err := location.NewSourceID(l.syntheticRoot + "/" + normalized)
+		if err != nil {
+			return location.SourceID{}, "", fmt.Errorf("under synthetic root %s: %w", l.syntheticRoot, err)
+		}
+		return id, "", nil
 	}
 
 	if key == "" {
@@ -1699,7 +1215,7 @@ func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 	}
 	hostKey := key
 	if !filepath.IsAbs(key) && l.moduleRoot != "" {
-		hostKey = filepath.Join(l.moduleRoot, key)
+		hostKey = hostpath.DirectoryForm(key, filepath.Join(l.moduleRoot, key))
 	}
 	id, host, err := l.resolveSource(hostKey)
 	if err != nil {
@@ -1708,50 +1224,62 @@ func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 	return id, host, nil
 }
 
-// normalizeSyntheticRoot validates cfg's synthetic root against the load it was
-// given to and returns the value the derivation sites use, or "" when the
-// option was not passed.
-func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) {
+// normalizeSyntheticRoot validates cfg's synthetic root and returns the value
+// the derivation sites use, or "" when the option was not passed. A root makes
+// the load sources-only: it names every identity the load mints, so the given
+// sources are every source it reads.
+func normalizeSyntheticRoot(cfg *loadConfig) (string, error) {
 	if !cfg.syntheticRootSet {
 		return "", nil
 	}
 	root, err := syntheticRootForm(cfg.syntheticRoot)
-	if err == nil {
-		err = location.ValidateSyntheticSourceID(root)
-	}
 	if err != nil {
 		return "", fmt.Errorf("invalid synthetic root %q: %w", cfg.syntheticRoot, err)
 	}
-	if !cfg.sourcesOnly {
-		return "", fmt.Errorf("synthetic root %q requires WithSourcesOnly: without it an unresolved import "+
-			"reads from disk and mints a file-backed identity into the same closure", cfg.syntheticRoot)
-	}
-	if moduleRoot != "" {
-		return "", fmt.Errorf("synthetic root %q cannot be combined with module root %q: "+
-			"pass an empty module root, which the synthetic root stands in for", cfg.syntheticRoot, moduleRoot)
-	}
-	// NFC, as location.NormalizeSyntheticKey applies to the key half: two
-	// spellings of one root must mint one identity, as two spellings of one key do.
-	return norm.NFC.String(root), nil
+	cfg.sourcesOnly = true
+	return root, nil
 }
 
-// syntheticRootForm returns root with its scheme in lower case and its path
-// cleaned, or an error when root is not scheme://authority with an optional
-// path; its caller's NFC completes the one form. A backslash and a path
-// climbing above the authority are refused.
+// stringScheme is the scheme of the identity [LoadString] mints.
+const stringScheme = "string"
+
+// syntheticRootForm returns the one form of root, with its scheme in lower
+// case, its text in NFC and its path cleaned. It refuses a root that is not
+// scheme://authority with an optional path, a one-letter or "string" scheme,
+// text that is not UTF-8, an authority of "." or "..", a character
+// [rootCharacterFault] refuses, and a path that climbs above the authority.
 func syntheticRootForm(root string) (string, error) {
 	scheme, rest, ok := strings.Cut(root, "://")
 	if !ok || !isURIScheme(scheme) {
 		return "", errors.New("a synthetic root has the form scheme://authority, such as embedded://app")
 	}
-	authority, rootPath, _ := strings.Cut(rest, "/")
+	scheme = strings.ToLower(scheme)
 	switch {
-	case authority == "":
-		return "", errors.New("the root names no authority after its scheme")
-	case strings.ContainsRune(rest, '\\'):
-		return "", errors.New("the root holds a backslash; a synthetic root separates its segments with / alone")
+	case len(scheme) == 1:
+		return "", errors.New("the root's scheme is one letter, which reads as a drive; a scheme of two characters or more is no host path")
+	case scheme == stringScheme:
+		return "", errors.New("the scheme string names a LoadString source; a root takes another scheme")
 	}
-	form := strings.ToLower(scheme) + "://" + authority
+	if !utf8.ValidString(rest) {
+		return "", errors.New("the root is not valid UTF-8")
+	}
+	// NFC first, as source.NormalizeSyntheticKey applies it to a key: two
+	// spellings of one root mint one identity, and NFC can make a refused character.
+	rest = norm.NFC.String(rest)
+	authority, rootPath, _ := strings.Cut(rest, "/")
+	switch authority {
+	case "":
+		return "", errors.New("the root names no authority after its scheme")
+	case ".", "..":
+		return "", fmt.Errorf("the root's authority is the dot segment %q, which names nothing", authority)
+	}
+	if fault := rootCharacterFault(authority, false); fault != "" {
+		return "", errors.New(fault)
+	}
+	if fault := rootCharacterFault(rootPath, true); fault != "" {
+		return "", errors.New(fault)
+	}
+	form := scheme + "://" + authority
 	switch cleaned := path.Clean(strings.TrimLeft(rootPath, "/")); {
 	case cleaned == ".":
 	case cleaned == ".." || strings.HasPrefix(cleaned, "../"):
@@ -1760,6 +1288,29 @@ func syntheticRootForm(root string) (string, error) {
 		form += "/" + cleaned
 	}
 	return form, nil
+}
+
+// rootMarks are the marks RFC 3986 admits in a registered name and in a path
+// segment beside letters and digits: its unreserved marks and its sub-delims.
+const rootMarks = "-._~!$&'()*+,;="
+
+// rootCharacterFault describes the first character of text that RFC 3986 admits
+// in no registered name, or with inPath in no path, or returns "". Narrower
+// than the RFC, it admits no percent escape; wider, a character past ASCII that
+// [strconv.IsPrint] reports printable, as a synthetic identity holds alone.
+func rootCharacterFault(text string, inPath bool) string {
+	for _, r := range text {
+		switch {
+		case r >= utf8.RuneSelf && strconv.IsPrint(r):
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune(rootMarks, r):
+		case inPath && (r == '/' || r == ':' || r == '@'):
+		case r == ':' || r == '@':
+			return fmt.Sprintf("the root's authority holds %q; a root names no user and no port", r)
+		default:
+			return fmt.Sprintf("the root holds %q; after its scheme a root holds letters, digits, / and the marks - . _ ~ ! $ & ' ( ) * + , ; =, with : and @ in its path alone, and printable characters past ASCII, so no space, control or format character, backslash, percent escape, query or fragment", r)
+		}
+	}
+	return ""
 }
 
 // isURIScheme reports whether s is a URI scheme as RFC 3986 section 3.1 spells
@@ -1779,18 +1330,4 @@ func isURIScheme(s string) bool {
 
 func isASCIILetter(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-// rejectInMemoryOptions refuses on Load and LoadString the two options only
-// LoadSourcesWithEntry serves: under WithSourcesOnly an import of Load that no
-// shared registry holds fails as not pre-registered, and on LoadString either
-// option is a silent no-op.
-func rejectInMemoryOptions(cfg *loadConfig) error {
-	switch {
-	case cfg.syntheticRootSet:
-		return errors.New("WithSyntheticRoot applies to LoadSourcesWithEntry only")
-	case cfg.sourcesOnly:
-		return errors.New("WithSourcesOnly applies to LoadSourcesWithEntry only")
-	}
-	return nil
 }

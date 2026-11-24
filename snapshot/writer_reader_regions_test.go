@@ -3,13 +3,19 @@ package snapshot_test
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/instance"
+
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -58,18 +64,9 @@ type Basin {
 }
 `
 
-func mustProvenance(t *testing.T, name, p string) *location.Provenance {
-	t.Helper()
-	parsed, err := path.Parse(p)
-	if err != nil {
-		t.Fatalf("parse provenance path %q: %v", p, err)
-	}
-	return location.NewProvenance(name, parsed, location.Span{})
-}
-
-// Provenance must survive the round trip at every instance position. Rebuilt
-// from parts because that is the only entry point that sets provenance
-// directly.
+// Provenance must survive the round trip at every instance position. Stated in a
+// document because that is the only entry point that sets each position's
+// provenance directly.
 //
 // Mutation: w.Provenance = nil in marshalInstance.
 func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
@@ -79,40 +76,37 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 	parentID := mustTypeID(t, s, "Parent")
 	childID := mustTypeID(t, s, "Child")
 
-	parts := graph.SnapshotParts{
+	parts := snapparts.Parts{
 		Types: []schema.TypeID{parentID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
-				Provenance: mustProvenance(t, "parents.json", "$.rows[0]"),
-				Composed: map[string][]graph.InstanceParts{
+				Provenance: instance.NewProvenance("parents.json", "$.rows[0]", location.Span{}),
+				Composed: map[string][]snapparts.Instance{
 					"CHILDREN": {{
 						TypeID:     childID,
 						PrimaryKey: immutable.WrapKey([]any{"c1"}),
 						Properties: immutable.WrapProperties(map[string]any{"id": "c1", "value": "v"}),
-						Provenance: mustProvenance(t, "children.json", "$.rows[1]"),
+						Provenance: instance.NewProvenance("children.json", "$.rows[1]", location.Span{}),
 					}},
 				},
 			},
 		},
 	}
 
-	built, result := graph.RebuildSnapshot(s, parts)
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
-	data, result := snapshot.Marshal(ctx, built)
-	if err := result.Err(); err != nil {
+	built := snappartstest.Loaded(t, s, parts)
+	data, readErr := snapshot.Marshal(ctx, built)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if !strings.Contains(string(data), "parents.json") || !strings.Contains(string(data), "children.json") {
 		t.Fatalf("marshalled document carries no provenance:\n%s", data)
 	}
 
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	root, ok := loaded.InstanceByKey(parentID, graph.FormatKey("p1"))
@@ -120,19 +114,19 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 		t.Fatal("parent missing after round trip")
 	}
 	rp := root.Provenance()
-	if rp == nil {
+	if rp.IsZero() {
 		t.Fatal("root provenance is nil after the round trip")
 	}
 	if rp.SourceName() != "parents.json" {
 		t.Errorf("root provenance source = %q, want %q", rp.SourceName(), "parents.json")
 	}
 
-	children := root.Composed("CHILDREN")
+	children := slices.Collect(root.Composed("CHILDREN"))
 	if len(children) != 1 {
 		t.Fatalf("CHILDREN = %d, want 1", len(children))
 	}
 	cp := children[0].Provenance()
-	if cp == nil {
+	if cp.IsZero() {
 		t.Fatal("composed-child provenance is nil after the round trip")
 	}
 	if cp.SourceName() != "children.json" {
@@ -146,25 +140,27 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, result := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
-	if result.HasErrors() {
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), nestedSchema, "nested.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(result) != nil {
 		t.Fatalf("load nested schema: %s", result)
 	}
 	rootID := mustTypeID(t, s, "Root")
 
-	parts := graph.SnapshotParts{
+	parts := snapparts.Parts{
 		Types: []schema.TypeID{rootID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     rootID,
 				PrimaryKey: immutable.WrapKey([]any{"r1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
-				Composed: map[string][]graph.InstanceParts{
+				Composed: map[string][]snapparts.Instance{
 					"MID": {{
 						TypeID:     mustTypeID(t, s, "Mid"),
 						PrimaryKey: immutable.WrapKey([]any{"m1"}),
 						Properties: immutable.WrapProperties(map[string]any{"id": "m1"}),
-						Composed: map[string][]graph.InstanceParts{
+						Composed: map[string][]snapparts.Instance{
 							"LEAF": {{
 								TypeID:     mustTypeID(t, s, "Leaf"),
 								PrimaryKey: immutable.WrapKey([]any{"l1"}),
@@ -177,36 +173,37 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 		},
 	}
 
-	built, result := graph.RebuildSnapshot(s, parts)
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
-	data, result := snapshot.Marshal(ctx, built)
-	if err := result.Err(); err != nil {
+	built := snappartstest.Loaded(t, s, parts)
+	data, result := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, built)
+	})
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if !strings.Contains(string(data), `"deep"`) {
 		t.Fatalf("the depth-2 child never reached the wire:\n%s", data)
 	}
 
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithWarnings(warn))
+	})
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	root, ok := loaded.InstanceByKey(rootID, graph.FormatKey("r1"))
 	if !ok {
 		t.Fatal("root missing after round trip")
 	}
-	mids := root.Composed("MID")
+	mids := slices.Collect(root.Composed("MID"))
 	if len(mids) != 1 {
 		t.Fatalf("MID = %d, want 1", len(mids))
 	}
-	leaves := mids[0].Composed("LEAF")
+	leaves := slices.Collect(mids[0].Composed("LEAF"))
 	if len(leaves) != 1 {
 		t.Fatalf("LEAF = %d, want 1 — the grandchild was dropped between marshal and load", len(leaves))
 	}
-	if got, ok := leaves[0].Properties().Get("label"); !ok || got.Unwrap() != "deep" {
-		t.Errorf("grandchild label = %v, want %q", got.Unwrap(), "deep")
+	if got, ok := leaves[0].Properties().Get("label"); !ok || got.Any() != "deep" {
+		t.Errorf("grandchild label = %v, want %q", got.Any(), "deep")
 	}
 }
 
@@ -218,20 +215,22 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
-		"entry.yammm": []byte(crossSchemaEdgeEntry),
-		"base.yammm":  []byte(crossSchemaEdgeBase),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+			"entry.yammm": []byte(crossSchemaEdgeEntry),
+			"base.yammm":  []byte(crossSchemaEdgeBase),
+		}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."), schema.WithWarnings(warn))
+	})
+	if diagtest.Err(result) != nil {
 		t.Fatalf("load cross-schema-with-edge fixture: %s", result)
 	}
 
 	anchorID := mustTypeIDIn(t, s, "", "Anchor")
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
 
-	parts := graph.SnapshotParts{
+	parts := snapparts.Parts{
 		Types: []schema.TypeID{anchorID, basinID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
@@ -243,7 +242,7 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(7)}),
 			},
 		},
-		Edges: []graph.EdgeParts{{
+		Edges: []snapparts.Edge{{
 			Relation:   "DRAINS",
 			SourceType: anchorID,
 			SourceKey:  immutable.WrapKey([]any{"a1"}),
@@ -252,16 +251,17 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 		}},
 	}
 
-	built, result := graph.RebuildSnapshot(s, parts)
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
-	data, result := snapshot.Marshal(ctx, built)
-	if err := result.Err(); err != nil {
+	built := snappartstest.Loaded(t, s, parts)
+	data, result := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, built)
+	})
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithWarnings(warn))
+	})
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
@@ -269,7 +269,7 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 	if !ok {
 		t.Fatal("anchor missing after round trip")
 	}
-	edges := loaded.EdgesFrom(anchor)
+	edges := slices.Collect(loaded.EdgesFrom(anchor))
 	if len(edges) != 1 {
 		t.Fatalf("edges from anchor = %d, want 1", len(edges))
 	}
@@ -295,33 +295,29 @@ func TestUpdateMetadata_PreservesAnIntShapedBodyThatReMarshalHeals(t *testing.T)
 
 	// Marshal always writes the healed form, so the int shape is put back by
 	// hand and the document re-sealed.
-	written, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	written, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	if !bytes.Contains(written, []byte(`"reading":2.0`)) {
 		t.Fatalf("fixture does not carry the healed form to un-heal:\n%s", written)
 	}
-	intShaped, result := snapshot.UpdateMetadata(ctx,
-		bytes.Replace(written, []byte(`"reading":2.0`), []byte(`"reading":2`), 1), nil)
-	if err := result.Err(); err != nil {
-		t.Fatalf("re-sealing the int-shaped fixture: %v", err)
-	}
+	intShaped := rehashDocument(t, bytes.Replace(written, []byte(`"reading":2.0`), []byte(`"reading":2`), 1))
 	if !bytes.Contains(intShaped, []byte(`"reading":2,`)) {
 		t.Fatalf("fixture is not int-shaped:\n%s", intShaped)
 	}
 
-	updated, result := snapshot.UpdateMetadata(ctx, intShaped, map[string]string{"stage": "done"})
-	if err := result.Err(); err != nil {
+	updated, readErr := snapshot.UpdateMetadata(ctx, intShaped, map[string]string{"stage": "done"})
+	if err := readErr; err != nil {
 		t.Fatalf("UpdateMetadata: %v", err)
 	}
 
-	loaded, result := snapshot.Load(ctx, intShaped, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, intShaped, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	healed, result := snapshot.Marshal(ctx, loaded)
-	if err := result.Err(); err != nil {
+	healed, readErr := snapshot.Marshal(ctx, loaded)
+	if err := readErr; err != nil {
 		t.Fatalf("re-marshal: %v", err)
 	}
 
@@ -335,8 +331,8 @@ func TestUpdateMetadata_PreservesAnIntShapedBodyThatReMarshalHeals(t *testing.T)
 	}
 }
 
-// parallelEdgeSchema declares many associations between one pair of instances,
-// so a document can hold edges that tie under graph's edge comparator.
+// parallelEdgeSchema declares many associations from one instance to the same
+// targets, so a document holds many edges that agree on all but one arm.
 var parallelEdgeSchema = func() string {
 	var src strings.Builder
 	src.WriteString("schema \"parallel\"\n\ntype Node {\n\tid String primary\n")
@@ -351,19 +347,19 @@ var parallelEdgeSchema = func() string {
 const parallelRelations = "ABCDEFGHIJKLMNOP"
 
 // TestLoad_ParallelEdgeOrderIsDeterministic pins the round trip against map
-// iteration order. Edges differing only in properties tie under the edge
-// comparator, and the sort is not stable, so reading them in map order let a
-// reload permute them and move the output bytes.
+// iteration order: the reader reads each root's edge lists in map order, and
+// the sort that follows is not stable, so only a total edge order keeps the
+// bytes.
 //
 // The fixture is deliberately large: Go's sort runs insertion sort below a
 // dozen elements and is stable there by accident, so a small fixture passes
-// whether or not the defect is present.
+// whether or not the order is total.
 func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(t.Context(), parallelEdgeSchema, "parallel.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load parallel schema: %s", res)
+	s, loadErr := schema.LoadString(t.Context(), parallelEdgeSchema, "parallel.yammm")
+	if loadErr != nil {
+		t.Fatalf("load parallel schema: %s", loadErr)
 	}
 	typ, ok := s.Type("Node")
 	if !ok {
@@ -371,52 +367,51 @@ func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 	}
 	id := typ.ID()
 
-	node := func(k string) graph.InstanceParts {
-		return graph.InstanceParts{
+	node := func(k string) snapparts.Instance {
+		return snapparts.Instance{
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{k}),
 			Properties: immutable.WrapProperties(map[string]any{"id": k}),
 		}
 	}
-	var edges []graph.EdgeParts
+	var edges []snapparts.Edge
 	weight := 0.0
 	for _, r := range parallelRelations {
-		for range 3 {
+		for _, target := range []string{"n2", "n3", "n4"} {
 			weight++
-			edges = append(edges, graph.EdgeParts{
+			edges = append(edges, snapparts.Edge{
 				Relation:   "R" + string(r),
 				SourceType: id, SourceKey: immutable.WrapKey([]any{"n1"}),
-				TargetKey:  immutable.WrapKey([]any{"n2"}),
+				TargetKey:  immutable.WrapKey([]any{target}),
 				Properties: immutable.WrapProperties(map[string]any{"w": weight}),
 			})
 		}
 	}
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{id},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			node("n1"),
 			node("n2"),
+			node("n3"),
+			node("n4"),
 		},
 		Edges: edges,
 	})
-	if res.HasErrors() {
-		t.Fatalf("assembling: %s", res)
-	}
-	if len(built.Edges()) != len(edges) {
-		t.Fatalf("fixture is vacuous: %d edges survived assembly, want %d", len(built.Edges()), len(edges))
+	if len(slices.Collect(built.Edges())) != len(edges) {
+		t.Fatalf("fixture is vacuous: %d edges survived assembly, want %d", len(slices.Collect(built.Edges())), len(edges))
 	}
 
-	first, mres := snapshot.Marshal(ctx, built)
-	if err := mres.Err(); err != nil {
+	first, readErr := snapshot.Marshal(ctx, built)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	for i := range 16 {
-		loaded, lres := snapshot.Load(ctx, first, s)
-		if err := lres.Err(); err != nil {
+		loaded, readErr := snapshot.Unmarshal(ctx, first, s)
+		if err := readErr; err != nil {
 			t.Fatalf("load: %v", err)
 		}
-		again, ares := snapshot.Marshal(ctx, loaded)
-		if err := ares.Err(); err != nil {
+		again, readErr2 := snapshot.Marshal(ctx, loaded)
+		if err := readErr2; err != nil {
 			t.Fatalf("re-marshal: %v", err)
 		}
 		if !bytes.Equal(first, again) {

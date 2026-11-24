@@ -39,19 +39,17 @@ func TestWrap_RefusesACyclicValue(t *testing.T) {
 		call func()
 	}{
 		{"Wrap", func() { _ = Wrap(selfReferencingMap()) }},
-		{"Wrap with clone", func() { _ = Wrap(selfReferencingMap(), WithClone(true)) }},
-		{"WrapMap", func() { _ = WrapMap(selfReferencingMap()) }},
 		{"WrapProperties", func() { _ = WrapProperties(selfReferencingMap()) }},
 		{"WrapSlice", func() { _ = WrapSlice([]any{selfReferencingMap()}) }},
 		{"WrapKey", func() { _ = WrapKey([]any{selfReferencingMap()}) }},
 		{"a cyclic slice", func() { _ = Wrap(selfReferencingSlice()) }},
-		{"a non-string-keyed cyclic map, cloned", func() {
+		{"a non-string-keyed cyclic map", func() {
 			m := map[int]any{}
 			m[1] = m
-			_ = Wrap(m, WithClone(true))
+			_ = Wrap(m)
 		}},
-		{"a cyclic slice under a non-string-keyed map, cloned", func() {
-			_ = Wrap(map[int]any{1: selfReferencingSlice()}, WithClone(true))
+		{"a cyclic slice under a non-string-keyed map", func() {
+			_ = WrapProperties(map[string]any{"a": map[int]any{1: selfReferencingSlice()}})
 		}},
 	}
 
@@ -59,34 +57,6 @@ func TestWrap_RefusesACyclicValue(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			wantCyclePanic(t, row.call)
-		})
-	}
-}
-
-// TestValue_Clone_RefusesACyclicValue holds Clone to refusing a cyclic value that
-// Wrap stored as it is. Wrap does not walk such a value, so Clone walks it first.
-func TestValue_Clone_RefusesACyclicValue(t *testing.T) {
-	t.Parallel()
-
-	rows := []struct {
-		name  string
-		value func() Value
-	}{
-		{"a non-string-keyed cyclic map", func() Value {
-			m := map[int]any{}
-			m[1] = m
-			return Wrap(m)
-		}},
-		{"a cyclic slice under a non-string-keyed map", func() Value {
-			return Wrap(map[int]any{1: selfReferencingSlice()})
-		}},
-	}
-
-	for _, row := range rows {
-		t.Run(row.name, func(t *testing.T) {
-			t.Parallel()
-			v := row.value()
-			wantCyclePanic(t, func() { _ = v.Clone() })
 		})
 	}
 }
@@ -105,18 +75,18 @@ func TestWrap_DeepValueIsNotACycle(t *testing.T) {
 	}
 
 	v := Wrap(current)
-	m, ok := v.Map()
+	m, ok := v.Any().(Properties)
 	if !ok {
-		t.Fatalf("Map() = _, false; want the wrapped map")
+		t.Fatalf("Wrap stored %T; want Properties", v.Any())
 	}
 	for range depth {
 		next, ok := m.Get("next")
 		if !ok {
 			t.Fatal("the wrapped value is shallower than it was built")
 		}
-		m, ok = next.Map()
+		m, ok = next.Any().(Properties)
 		if !ok {
-			t.Fatal("a level of the wrapped value is not a map")
+			t.Fatal("a level of the wrapped value is not a Properties")
 		}
 	}
 	if _, ok := m.Get("leaf"); !ok {
@@ -164,10 +134,8 @@ func TestWrap_SharedValueIsNotACycle(t *testing.T) {
 	}{
 		{"a string-keyed map, wrapped", stringKeyedDiamond(), func(v any) any { return Wrap(v).Clone() }},
 		{"a slice, wrapped", sliceDiamond(), func(v any) any { return Wrap(v).Clone() }},
-		{"a non-string-keyed map, wrapped with clone", intKeyedDiamond(), func(v any) any {
-			return Wrap(v, WithClone(true)).Unwrap()
-		}},
-		{"a slice under a non-string-keyed map, cloned", map[int]any{0: sliceDiamond()}, func(v any) any {
+		{"a non-string-keyed map, wrapped", intKeyedDiamond(), func(v any) any { return Wrap(v).Any() }},
+		{"a slice under a non-string-keyed map, wrapped", map[int]any{0: sliceDiamond()}, func(v any) any {
 			return Wrap(v).Clone()
 		}},
 	}

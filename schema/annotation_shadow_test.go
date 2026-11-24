@@ -105,3 +105,30 @@ type C extends A, B {
 		t.Errorf("want 2 W_ANNOTATION_SHADOWED (one per shadowed ancestor), got %d: %v", n, res)
 	}
 }
+
+// The warning stands at the re-declaration and points at the annotation it drops.
+func TestAnnotation_Shadow_WarningLocatesBothDeclarations(t *testing.T) {
+	t.Parallel()
+	_, res := loadNoErr(t, `schema "main"
+type Base {
+	id String primary
+	state String @index
+}
+type Derived extends Base {
+	state String required
+}`)
+	for issue := range res.Issues() {
+		if issue.Code() != diag.W_ANNOTATION_SHADOWED {
+			continue
+		}
+		if line := issue.Span().Start.Line; line != 7 {
+			t.Errorf("span starts at line %d, want the re-declaration on line 7", line)
+		}
+		related := issue.Related()
+		if len(related) != 1 || related[0].Span.Start.Line != 4 || related[0].Message != "inherited annotation declared here" {
+			t.Errorf("related = %v, want the inherited @index on line 4", related)
+		}
+		return
+	}
+	t.Errorf("no W_ANNOTATION_SHADOWED: %v", res)
+}

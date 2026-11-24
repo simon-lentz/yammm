@@ -34,23 +34,23 @@ func TestInvariant_StringLiteralsResolveTheLexerVocabulary(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "schema \"lit\"\n\ntype T {\n\tname String primary\n\t! \"m\" name == " +
 				tc.literal + "\n}\n"
-			s, result := schema.LoadString(t.Context(), src, "lit.yammm")
-			if result.HasErrors() {
-				t.Fatalf("schema carrying %s did not load: %s", tc.literal, result)
+			s, err := schema.LoadString(t.Context(), src, "lit.yammm")
+			if err != nil {
+				t.Fatalf("schema carrying %s did not load: %s", tc.literal, err)
 			}
 
 			v := instance.NewValidator(s)
-			if _, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{
+			if _, err := v.ValidateOne(t.Context(), "T", instance.RawInstance{
 				Properties: map[string]any{"name": tc.value},
-			}); !res.OK() {
-				t.Errorf("%s did not resolve to %q: %s", tc.literal, tc.value, res)
+			}); err != nil {
+				t.Errorf("%s did not resolve to %q: %s", tc.literal, tc.value, err)
 			}
 
 			// The invariant must also be able to fail, or the case above
 			// proves nothing about the resolved value.
-			if _, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{
+			if _, err := v.ValidateOne(t.Context(), "T", instance.RawInstance{
 				Properties: map[string]any{"name": tc.value + "x"},
-			}); res.OK() {
+			}); err == nil {
 				t.Errorf("%s accepted a value it should reject — the invariant cannot fail", tc.literal)
 			}
 		})

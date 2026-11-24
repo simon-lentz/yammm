@@ -1,9 +1,11 @@
 package schema_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -32,8 +34,7 @@ type Car {
 	*-> WHEEL (one) Wheel
 }
 
-type Base {
-	id String primary
+abstract type Base {
 	pos String @writeOnce
 }
 
@@ -45,9 +46,9 @@ part type Wheel extends Base {
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, res := schema.LoadString(t.Context(), src, "part.yammm")
-			if !res.HasCode(diag.E_INVALID_ANNOTATION_TARGET) {
-				t.Fatalf("@writeOnce on a part type's property must draw E_INVALID_ANNOTATION_TARGET; got %v", res)
+			_, err := schema.LoadString(t.Context(), src, "part.yammm")
+			if !errors.Is(err, diag.E_INVALID_ANNOTATION_TARGET) {
+				t.Fatalf("@writeOnce on a part type's property must draw E_INVALID_ANNOTATION_TARGET; got %v", err)
 			}
 		})
 	}
@@ -58,7 +59,7 @@ part type Wheel extends Base {
 // validated it at its declaring type.
 func TestAnnotation_WriteOnce_InheritedByConcreteSubtypeIsLegal(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), `schema "s"
+	_, err := schema.LoadString(t.Context(), `schema "s"
 
 type Base {
 	id String primary
@@ -69,8 +70,8 @@ type Leaf extends Base {
 	extra String
 }
 `, "leaf.yammm")
-	if res.HasErrors() {
-		t.Fatalf("an inherited @writeOnce on a concrete subtype is legal; got %v", res)
+	if err != nil {
+		t.Fatalf("an inherited @writeOnce on a concrete subtype is legal; got %v", err)
 	}
 }
 
@@ -79,7 +80,8 @@ type Leaf extends Base {
 // report the same defect a second time.
 func TestAnnotation_WriteOnce_DeclaredOnPartTypeReportsOnce(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), `schema "s"
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "s"
 
 type Car {
 	vin String primary
@@ -89,7 +91,8 @@ type Car {
 part type Wheel {
 	pos String @writeOnce
 }
-`, "part.yammm")
+`, "part.yammm", schema.WithWarnings(warn))
+	})
 	var n int
 	for iss := range res.Issues() {
 		if iss.Code() == diag.E_INVALID_ANNOTATION_TARGET {

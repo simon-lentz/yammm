@@ -1,11 +1,12 @@
 package cli
 
 import (
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // DiagnosticSink collects everything one invocation diagnoses, and writes it so
@@ -22,11 +23,17 @@ type DiagnosticSink struct {
 	isTTY    bool
 	provider diag.SourceProvider
 	root     string
-	captured *schema.Sources
+	captured schema.Sources
 	results  []diag.Result
 	flushed  int
 	closed   bool
+	load     *diag.Collector // the schema load SchemaLoadOptions began
+	read     *diag.Collector // the snapshot read SnapshotWarnings began
 }
+
+// callIssueLimit is the most issues the sink keeps of one schema load or one
+// snapshot call, warnings and failures together, the most severe first.
+const callIssueLimit = 100
 
 // NewDiagnosticSink returns a sink that renders to w.
 func NewDiagnosticSink(w io.Writer, format OutputFormat, noColor, isTTY bool) *DiagnosticSink {
@@ -64,20 +71,6 @@ func (s *DiagnosticSink) Result() diag.Result {
 	return MergeResults(s.results...)
 }
 
-// Statusf writes a progress line to the command's error stream, and nothing at
-// all under [FormatJSON].
-//
-// A status line reports progress rather than a fact about the artefact, so a
-// machine consumer is owed none of it — and one reaching stderr under
-// FormatJSON would sit beside the document and stop it parsing. A fact about
-// the artefact is a diagnostic instead, and goes through [DiagnosticSink.Add].
-func (s *DiagnosticSink) Statusf(format string, args ...any) {
-	if s.format == FormatJSON {
-		return
-	}
-	fmt.Fprintf(s.w, format, args...)
-}
-
 // Flush writes, under [FormatText], every result added since the last flush. A
 // command that emits a payload calls it first, so an operator reads the
 // diagnostics above the payload. Under [FormatJSON] it writes nothing.
@@ -103,7 +96,7 @@ func (s *DiagnosticSink) Close(err error) error {
 	if s.format == FormatJSON {
 		if failure, ok := FailureResult(err); ok {
 			s.results = append(s.results, failure)
-			err = &ExitError{Code: ExitForError(err)}
+			err = Exit(ExitForError(err))
 		}
 		// Under FormatJSON nothing is flushed before Close, and the one
 		// document is written even when no result was added.
@@ -129,12 +122,60 @@ func (s *DiagnosticSink) renderFrom(i int) {
 	_ = RenderResult(s.w, renderer, s.format, MergeResults(s.results[i:]...))
 }
 
-// CaptureSchemaSources returns a load option that keeps the load's sources on
-// the sink, so a load that fails still renders excerpts: it returns no schema
-// to take them from.
-func (s *DiagnosticSink) CaptureSchemaSources() schema.LoadOption {
-	return schema.CaptureSources(&s.captured)
+// SchemaLoadOptions returns the options that keep what a schema load diagnoses
+// on the sink: its sources, so a load that fails still renders excerpts though
+// it returns no schema to take them from, and each warning as the load finds
+// it. [DiagnosticSink.AddSchemaLoad] records the load.
+func (s *DiagnosticSink) SchemaLoadOptions() []schema.Option {
+	s.load = diag.NewCollector(callIssueLimit)
+	return []schema.Option{schema.CaptureSources(&s.captured), schema.WithWarnings(s.load.Collect)}
 }
 
-// CapturedSources returns the sources the last captured load read, or nil.
-func (s *DiagnosticSink) CapturedSources() *schema.Sources { return s.captured }
+// AddSchemaLoad records the schema load [DiagnosticSink.SchemaLoadOptions]
+// began: its warnings and the failures err holds, as one result under
+// callIssueLimit. It returns the exit that result earns, nil for a load
+// that did not fail. An err holding no [diag.ResultError] is a runtime failure.
+func (s *DiagnosticSink) AddSchemaLoad(err error) error {
+	load := s.load
+	s.load = nil
+	return s.addCall(load, err)
+}
+
+// SnapshotWarnings returns the option that keeps each warning a snapshot read
+// finds on the sink. [DiagnosticSink.AddSnapshot] records the read.
+func (s *DiagnosticSink) SnapshotWarnings() snapshot.Option {
+	s.read = diag.NewCollector(callIssueLimit)
+	return snapshot.WithWarnings(s.read.Collect)
+}
+
+// AddSnapshot records a snapshot call: the warnings
+// [DiagnosticSink.SnapshotWarnings] kept for it, if it began one, and the
+// failures err holds, as one result under callIssueLimit. It returns the exit
+// that result earns, nil for a call that did not fail. An err holding no
+// [diag.ResultError] is a runtime failure.
+func (s *DiagnosticSink) AddSnapshot(err error) error {
+	read := s.read
+	s.read = nil
+	return s.addCall(read, err)
+}
+
+// addCall adds the result of one call: what c kept of its warnings, c nil for
+// a call that kept none, and the failures err holds.
+func (s *DiagnosticSink) addCall(c *diag.Collector, err error) error {
+	if c == nil {
+		c = diag.NewCollector(callIssueLimit)
+	}
+	re, ok := errors.AsType[*diag.ResultError](err)
+	if err != nil && !ok {
+		return Runtime(err)
+	}
+	if ok {
+		c.Merge(re.Result)
+	}
+	result := c.Result()
+	s.Add(result)
+	return Exit(ExitForResult(result))
+}
+
+// CapturedSources returns the sources the last captured load read, or the zero Sources.
+func (s *DiagnosticSink) CapturedSources() schema.Sources { return s.captured }

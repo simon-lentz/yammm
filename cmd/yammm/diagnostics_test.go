@@ -21,9 +21,6 @@ const (
 	// hashAlgoFixture states an unrecognized hash algorithm, which a
 	// header-only read reports as a Warning and a body read as an Error.
 	hashAlgoFixture = "testdata/hash_algo_unsupported.ys"
-	// provenanceFixture is the only input that makes snapshot.Info return
-	// warnings and no errors: an instance provenance path that will not parse.
-	provenanceFixture = "testdata/provenance_unparseable.ys"
 	// shadowedSchema loads clean with W_ANNOTATION_SHADOWED, so it is the
 	// load-warning probe for every command that loads a schema.
 	shadowedSchema = "testdata/annotation_shadowed.yammm"
@@ -59,10 +56,8 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 
 	dir := t.TempDir()
 	missingData := filepath.Join(dir, "nonexistent.json")
-	for name, body := range map[string]string{"rows.csv": "id\na\n", "empty.json": "{}"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(dir, "empty.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	tests := []struct {
@@ -70,9 +65,6 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 		args []string
 	}{
 		{"check, unreadable data file", []string{"check", shadowedSchema, missingData}},
-		{"check, a CSV type the schema lacks", []string{"check", "--type", "Nope", shadowedSchema, filepath.Join(dir, "rows.csv")}},
-		{"export, unreadable data file", []string{"export", "--to", "json", shadowedSchema, missingData}},
-		{"load, unreadable data file", []string{"load", shadowedSchema, missingData}},
 		{"snapshot save, an unreadable second data file", []string{
 			"snapshot", "save", "-o", filepath.Join(dir, "out.ys"), shadowedSchema, filepath.Join(dir, "empty.json"), missingData,
 		}},
@@ -89,23 +81,21 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 	}
 }
 
-// TestNeo4jConstraints_RefusesAnEditionBeforeWork: the whole flag set is
-// refused before any I/O, so an unrecognised --edition is a usage error that
-// loads no schema — its warning never appears — and writes nothing to stdout.
-func TestNeo4jConstraints_RefusesAnEditionBeforeWork(t *testing.T) {
-	t.Parallel()
-
-	code, stdout, stderr := executeCmdOutput(t, "neo4j", "constraints", "--edition", "bogus", shadowedSchema)
-	if code != cli.ExitUsage {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
+// TestGenCypher_RefusesAnEditionBeforeWork: --edition is judged when the flags
+// are read, before any I/O, so an unrecognised one is a usage error that loads
+// no schema — its warning never appears — and writes nothing to stdout.
+func TestGenCypher_RefusesAnEditionBeforeWork(t *testing.T) {
+	code, stdout, stderr := runCLI(t, "gen", "--to", "cypher", "--edition", "bogus", shadowedSchema)
+	if code != cli.ExitUsage || !strings.Contains(stderr, `invalid edition "bogus"`) {
+		t.Errorf("exit code = %d, want %d and the edition refused; stderr:\n%s", code, cli.ExitUsage, stderr)
 	}
 	if stdout != "" || strings.Contains(stderr, "W_ANNOTATION_SHADOWED") {
 		t.Errorf("work ran before the flag was refused; stdout %q, stderr:\n%s", stdout, stderr)
 	}
 }
 
-// TestSnapshotInfoSurfacesWarnings pins both sites where a warning is
-// reachable. A render gated on HasErrors prints the summary, exits 0 and writes
+// TestSnapshotInfoSurfacesWarnings pins the header-only read, the one site
+// where a warning is reachable. A render gated on HasErrors prints the summary, exits 0 and writes
 // nothing to stderr for a result that carries only warnings, so the operator
 // is not told that the document's identity could not be checked.
 func TestSnapshotInfoSurfacesWarnings(t *testing.T) {
@@ -120,11 +110,6 @@ func TestSnapshotInfoSurfacesWarnings(t *testing.T) {
 			name: "header-only, unrecognized hash algorithm",
 			args: []string{"snapshot", "info", "--header-only", hashAlgoFixture},
 			code: "E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM",
-		},
-		{
-			name: "full read, unparseable provenance path",
-			args: []string{"snapshot", "info", provenanceFixture},
-			code: "W_SNAPSHOT_PATH_FALLBACK",
 		},
 	}
 
@@ -186,36 +171,22 @@ func TestSnapshotInfoDirMarksWarnings(t *testing.T) {
 
 	t.Run("json still carries the issue", func(t *testing.T) {
 		t.Parallel()
-		_, stdout, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--format", "json")
+		_, stdout, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--json")
 		if !strings.Contains(stdout, "E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM") {
 			t.Errorf("the JSON entry must carry the warning; stdout:\n%s", stdout)
 		}
 	})
 }
 
-// TestOwnPhaseDiagnosticsReachTheOperator pins the results a command produces
-// after the schema has loaded, on the two paths nothing else exercises: an
-// export whose source snapshot could not be fully verified, and an emitter that
-// refuses a property name Cypher reserves.
+// TestOwnPhaseDiagnosticsReachTheOperator pins the result a command produces
+// after the schema has loaded, on the path nothing else exercises: an emitter
+// that refuses a property name Cypher reserves.
 func TestOwnPhaseDiagnosticsReachTheOperator(t *testing.T) {
 	t.Parallel()
 
-	t.Run("export from a snapshot carrying a warning", func(t *testing.T) {
+	t.Run("gen --to cypher refusing a reserved identifier", func(t *testing.T) {
 		t.Parallel()
-		code, _, stderr := executeCmdOutput(t, "export", "--to", "json",
-			"--output", filepath.Join(t.TempDir(), "out.json"),
-			"testdata/valid.yammm", provenanceFixture)
-		if code != cli.ExitOK {
-			t.Errorf("exit code = %d, want %d: a warning is not a failure", code, cli.ExitOK)
-		}
-		if !strings.Contains(stderr, "W_SNAPSHOT_PATH_FALLBACK") {
-			t.Errorf("the snapshot's warning was discarded; stderr:\n%s", stderr)
-		}
-	})
-
-	t.Run("neo4j indexes refusing a reserved identifier", func(t *testing.T) {
-		t.Parallel()
-		code, _, stderr := executeCmdOutput(t, "neo4j", "indexes", "testdata/reserved_index.yammm")
+		code, _, stderr := executeCmdOutput(t, "gen", "--to", "cypher", "--type-constraints", "none", "testdata/reserved_index.yammm")
 		if code != cli.ExitValidation {
 			t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
 		}
@@ -225,32 +196,9 @@ func TestOwnPhaseDiagnosticsReachTheOperator(t *testing.T) {
 	})
 }
 
-// TestSnapshotSaveSurfacesImportedWarning pins the imported snapshot's own
-// diagnostics on the path that succeeds: a merge whose source could not be
-// fully verified still says so, and a warning does not fail the save.
-func TestSnapshotSaveSurfacesImportedWarning(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	into := filepath.Join(dir, "into.ys")
-	copyFile(t, provenanceFixture, into)
-
-	code, _, stderr := executeCmdOutput(t, "snapshot", "save",
-		"--into", into, "-o", filepath.Join(dir, "merged.ys"),
-		"testdata/valid.yammm", "testdata/data_carol.json")
-	if code != cli.ExitOK {
-		t.Errorf("exit code = %d, want %d: a warning is not a failure", code, cli.ExitOK)
-	}
-	if !strings.Contains(stderr, "W_SNAPSHOT_PATH_FALLBACK") {
-		t.Errorf("the imported snapshot's warning was discarded; stderr:\n%s", stderr)
-	}
-}
-
-// TestUpdateMetadataSurfacesHeaderWarning pins that the header read's result
-// renders when it carries only a warning. Otherwise the one warning HeaderOnly
-// can produce is dropped, and the operator sees the later error alone, with no
-// statement that the header was read and found unverifiable.
-func TestUpdateMetadataSurfacesHeaderWarning(t *testing.T) {
+// An unsupported hash algorithm is one break, so update-metadata reports it
+// once, as the Error every whole-document read reports.
+func TestUpdateMetadataReportsAnUnsupportedAlgorithmOnce(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "subject.ys")
@@ -260,11 +208,8 @@ func TestUpdateMetadataSurfacesHeaderWarning(t *testing.T) {
 	if code != cli.ExitValidation {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
 	}
-	if !strings.Contains(stderr, "schema hash verification skipped") {
-		t.Errorf("the header read's warning was discarded; stderr:\n%s", stderr)
-	}
-	if !strings.Contains(stderr, "the document cannot be checked against a schema") {
-		t.Errorf("the update's own error must still render; stderr:\n%s", stderr)
+	if got := strings.Count(stderr, "E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM"); got != 1 || !strings.Contains(stderr, "error[E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM]") {
+		t.Errorf("stderr reports the break %d times, want one Error:\n%s", got, stderr)
 	}
 }
 
@@ -290,43 +235,10 @@ func TestDiagnosticsPrecedeThePayload(t *testing.T) {
 			payload: "Snapshot: test",
 		},
 		{
-			name:    "snapshot info",
-			args:    []string{"snapshot", "info", provenanceFixture},
-			first:   "W_SNAPSHOT_PATH_FALLBACK",
-			payload: "Snapshot: test",
-		},
-		{
-			name:    "neo4j constraints",
-			args:    []string{"neo4j", "constraints", shadowedSchema},
+			name:    "gen --to cypher",
+			args:    []string{"gen", "--to", "cypher", "testdata/annotation_shadowed_indexed.yammm"},
 			first:   "W_ANNOTATION_SHADOWED",
 			payload: "CREATE CONSTRAINT",
-		},
-		{
-			name:    "neo4j indexes",
-			args:    []string{"neo4j", "indexes", "testdata/annotation_shadowed_indexed.yammm"},
-			first:   "W_ANNOTATION_SHADOWED",
-			payload: "CREATE INDEX",
-		},
-		{
-			name:    "export to stdout",
-			args:    []string{"export", "--to", "json", shadowedSchema, "testdata/annotation_shadowed_good.json"},
-			first:   "W_ANNOTATION_SHADOWED",
-			payload: `"Doc"`,
-		},
-		{
-			name:    "export from a snapshot, to stdout",
-			args:    []string{"export", "--to", "json", "testdata/valid.yammm", provenanceFixture},
-			first:   "W_SNAPSHOT_PATH_FALLBACK",
-			payload: `"Person"`,
-		},
-		{
-			name: "snapshot save, whose payload is its status line",
-			args: []string{
-				"snapshot", "save", "-o", filepath.Join(t.TempDir(), "made.snap"),
-				shadowedSchema, "testdata/annotation_shadowed_good.json",
-			},
-			first:   "W_SNAPSHOT_PATH_EXTENSION",
-			payload: "saved snapshot:",
 		},
 		{
 			name:    "gen",
@@ -373,7 +285,7 @@ func executeCmdCombined(t *testing.T, args ...string) string {
 }
 
 // TestStderrIsOneJSONDocument pins the rule DiagnosticSink.Close states: under
-// --format json stderr carries exactly one complete JSON document. Two
+// --json stderr carries exactly one complete JSON document. Two
 // documents concatenated fail a reader that parses one document, and an empty
 // stream reads the same for a clean run and a process that died before it
 // rendered.
@@ -390,6 +302,9 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 	if err := os.WriteFile(corrupt, []byte(`{"yammm_snapshot":{`), 0o600); err != nil {
 		t.Fatalf("write corrupt fixture: %v", err)
 	}
+	// update-metadata rewrites its operand in place, so it is given a copy.
+	hashAlgoCopy := filepath.Join(dir, "hash_algo_unsupported.ys")
+	copyFile(t, hashAlgoFixture, hashAlgoCopy)
 
 	tests := []struct{ name, cmd string }{
 		{"validate, unreadable schema", "validate " + missing},
@@ -397,42 +312,31 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 		{"fmt, unreadable path", "fmt " + missing},
 		{"check, unreadable schema", "check " + missing + " testdata/data.json"},
 		{"check, unreadable data", "check " + shadowedSchema + " " + missing + ".json"},
-		{"check, undetectable data format", "check --from xml " + shadowedSchema + " testdata/data.json"},
-		{"check, csv without --type", "check " + shadowedSchema + " testdata/data.csv"},
 		{"check, validation errors", "check " + shadowedSchema + " testdata/annotation_shadowed_bad.json"},
-		{"load, unreadable schema", "load " + missing + " testdata/data.json"},
-		{"load, unreadable data", "load " + shadowedSchema + " " + missing + ".json"},
-		{"export, unreadable schema", "export --to json " + missing + " testdata/data.json"},
-		{"export, unreadable data", "export --to json " + shadowedSchema + " " + missing + ".json"},
-		{"export, unsupported target", "export --to xml " + shadowedSchema + " testdata/data.json"},
-		{"export, contradictory destinations", "export --to csv --output " + missing + " --output-dir " + dir + " " + shadowedSchema + " testdata/data.json"},
 		{"gen, unreadable schema", "gen --to go " + missing},
 		{"gen, unsupported target", "gen --to rust " + shadowedSchema},
 		{"snapshot save, unreadable schema", "snapshot save -o " + missing + ".ys " + missing + " testdata/data.json"},
-		{"snapshot save, undetectable data format", "snapshot save -o " + missing + ".ys " + shadowedSchema + " " + shadowedSchema},
+		{"snapshot save, a data file that is not JSON", "snapshot save -o " + missing + ".ys " + shadowedSchema + " " + shadowedSchema},
 		{"snapshot save, no destination", "snapshot save " + shadowedSchema + " testdata/data.json"},
 		{"snapshot info, unreadable file", "snapshot info " + missing + ".ys"},
 		{"snapshot info, corrupt file", "snapshot info " + corrupt},
 		{"snapshot info, header-only warning", "snapshot info --header-only " + hashAlgoFixture},
-		{"snapshot info, body warning", "snapshot info " + provenanceFixture},
 		{"snapshot info, unreadable directory", "snapshot info --dir " + missing},
 		{"snapshot info, no argument", "snapshot info"},
 		{"snapshot verify, unreadable schema", "snapshot verify " + missing + " " + corrupt},
 		{"snapshot verify, corrupt snapshot", "snapshot verify " + shadowedSchema + " " + corrupt},
 		{"snapshot update-metadata, unreadable file", "snapshot update-metadata -s a=b " + missing + ".ys"},
 		{"snapshot update-metadata, no operation", "snapshot update-metadata " + corrupt},
-		{"snapshot update-metadata, header warning", "snapshot update-metadata -s a=b " + hashAlgoFixture},
-		{"neo4j constraints, unreadable schema", "neo4j constraints " + missing},
-		{"neo4j constraints, unrecognized edition", "neo4j constraints --edition bogus " + shadowedSchema},
-		{"neo4j indexes, unreadable schema", "neo4j indexes " + missing},
+		{"snapshot update-metadata, header warning", "snapshot update-metadata -s a=b " + hashAlgoCopy},
+		{"gen --to cypher, unreadable schema", "gen --to cypher " + missing},
+		{"gen --to cypher, unrecognized edition", "gen --to cypher --edition bogus " + shadowedSchema},
 		{"neo4j diff, no --uri", "neo4j diff " + shadowedSchema},
-		{"neo4j introspect, no --uri", "neo4j introspect"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := append([]string{"--format", "json"}, strings.Fields(tt.cmd)...)
+			args := append([]string{"--json"}, strings.Fields(tt.cmd)...)
 			_, _, stderr := executeCmdOutput(t, args...)
 			assertOneJSONDocument(t, stderr)
 		})
@@ -440,8 +344,8 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 }
 
 // TestStderrIsOneJSONDocumentOnSuccess is the invariant's other half, and the
-// one the command-writer harness cannot see: a status summary written straight
-// to the process stream sits beside the document and stops it parsing.
+// one the command-writer harness cannot see: a line written straight to the
+// process stream sits beside the document and stops it parsing.
 //
 // It drives run(), so what it reads is the byte stream a shell redirect would
 // capture. Success paths only — a failure adds run()'s own "error: " line,
@@ -457,26 +361,19 @@ func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"validate, clean", []string{"validate", "--format", "json", "testdata/valid.yammm"}},
-		{"check, clean", []string{"check", "--format", "json", "testdata/valid.yammm", "testdata/data.json"}},
-		{"fmt --check, clean", []string{"fmt", "--format", "json", "--check", "testdata/valid.yammm"}},
-		{"load, whose pipeline reports a count", []string{
-			"load", "--format", "json", shadowedSchema, "testdata/annotation_shadowed_good.json",
-		}},
-		{"snapshot save, whose summary follows the document", []string{
-			"snapshot", "save", "--format", "json", "-o", snap,
+		{"validate, clean", []string{"validate", "--json", "testdata/valid.yammm"}},
+		{"check, clean", []string{"check", "--json", "testdata/valid.yammm", "testdata/data.json"}},
+		{"fmt -l, clean", []string{"fmt", "--json", "-l", "testdata/valid.yammm"}},
+		{"snapshot save", []string{
+			"snapshot", "save", "--json", "-o", snap,
 			shadowedSchema, "testdata/annotation_shadowed_good.json",
 		}},
 		{"snapshot save onto a path that is not .ys", []string{
-			"snapshot", "save", "--format", "json", "-o", notYS,
+			"snapshot", "save", "--json", "-o", notYS,
 			shadowedSchema, "testdata/annotation_shadowed_good.json",
 		}},
-		{"export --output-dir, which reports a file count", []string{
-			"export", "--format", "json", "--to", "csv", "--output-dir", dir,
-			shadowedSchema, "testdata/annotation_shadowed_good.json",
-		}},
-		{"snapshot update-metadata, whose summary is a status line", []string{
-			"snapshot", "update-metadata", "--format", "json", "-s", "a=b", meta,
+		{"snapshot update-metadata", []string{
+			"snapshot", "update-metadata", "--json", "-s", "a=b", meta,
 		}},
 	}
 
@@ -491,23 +388,39 @@ func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
 	}
 }
 
-// TestStatusSummariesShareOneStream pins that update-metadata reports its
-// result on stderr, where every other command reports progress. A summary on
-// stdout reaches the payload channel of a caller that redirects the two apart.
-func TestStatusSummariesShareOneStream(t *testing.T) {
+// TestCommands_PrintNothingOnSuccess pins that a command that succeeds and
+// owes no payload writes nothing on either stream, as go build does, so a
+// hook that reads any output as a finding stays quiet.
+func TestCommands_PrintNothingOnSuccess(t *testing.T) {
 	dir := t.TempDir()
 	meta := filepath.Join(dir, "meta.ys")
 	copyFile(t, "testdata/valid_snapshot.ys", meta)
+	formatted := filepath.Join(dir, "formatted.yammm")
+	copyFile(t, "testdata/valid.yammm", formatted)
 
-	code, stdout, stderr := runCLI(t, "snapshot", "update-metadata", "-s", "env=prod", meta)
-	if code != cli.ExitOK {
-		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
-	}
-	if !strings.Contains(stderr, "updated metadata") {
-		t.Errorf("the summary must reach stderr, where every other command reports progress; stderr:\n%s", stderr)
-	}
-	if strings.Contains(stdout, "updated metadata") {
-		t.Errorf("stdout is the payload channel and carries no summary; stdout:\n%s", stdout)
+	made := filepath.Join(dir, "made.ys")
+	// In order: the merge reads the file the save before it writes.
+	for _, tt := range []struct {
+		name string
+		args []string
+	}{
+		{"validate", []string{"validate", "testdata/valid.yammm"}},
+		{"check", []string{"check", "testdata/valid.yammm", "testdata/data.json"}},
+		{"fmt -l -w", []string{"fmt", "-l", "-w", formatted}},
+		{"snapshot save", []string{"snapshot", "save", "-o", made, "testdata/valid.yammm", "testdata/data.json"}},
+		{"snapshot save --into", []string{"snapshot", "save", "--into", made, "testdata/valid.yammm", "testdata/data_carol.json"}},
+		{"snapshot update-metadata", []string{"snapshot", "update-metadata", "-s", "a=b", meta}},
+		{"gen -o", []string{"gen", "--to", "md", "-o", filepath.Join(dir, "doc.md"), "testdata/valid.yammm"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, tt.args...)
+			if code != cli.ExitOK {
+				t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
+			}
+			if stdout != "" || stderr != "" {
+				t.Errorf("a success printed stdout %q and stderr %q", stdout, stderr)
+			}
+		})
 	}
 }
 

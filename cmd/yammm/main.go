@@ -2,7 +2,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -21,7 +20,7 @@ func main() {
 }
 
 // run executes the CLI and is the one write site for a failure a command
-// returned rather than diagnosed. Under --format json a command's sink has
+// returned rather than diagnosed. Under --json a command's sink has
 // already folded its failure into the document, so a message reaching here is
 // one cobra raised before any command ran, and it becomes a document.
 func run() int {
@@ -37,24 +36,27 @@ func run() int {
 }
 
 // execute runs cmd and classifies what it returns. Every error a command
-// returns is a [cli.ExitError] ([withDiagnostics]), so any other error is
+// returns carries an exit code ([withDiagnostics], [initHelpAndCompletion]),
+// so any other error is
 // cobra's own — an unknown command or flag, a wrong operand count — and is a
 // usage error.
 func execute(cmd *cobra.Command) error {
-	initHelpAndCompletion(cmd)
-	err := cmd.Execute()
-	if _, ok := errors.AsType[*cli.ExitError](err); err != nil && !ok {
-		return &cli.ExitError{Code: cli.ExitUsage, Err: err}
+	helpRefusal := initHelpAndCompletion(cmd)
+	if err := cmd.Execute(); err != nil {
+		return cli.Usage(err)
 	}
-	return err
+	return cli.Usage(helpRefusal())
 }
 
-// jsonRequested reports whether args ask for --format json. It parses that
-// flag alone, because cobra parses no flag at all before it fails to find a
+// jsonRequested reports whether args ask for --json. It reads the flag
+// itself, because cobra parses no flag at all before it fails to find a
 // command, and an unknown command is still owed a document.
 func jsonRequested(args []string) bool {
 	probe := &cobra.Command{FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true}}
-	format := probe.Flags().String("format", string(cli.FormatText), "")
+	asJSON := probe.Flags().Bool("json", false, "")
+	// pflag stops at an undefined -h or --help, even with unknown flags
+	// allowed, so without it a --json after either is never read.
+	probe.Flags().BoolP("help", "h", false, "")
 	_ = probe.ParseFlags(args)
-	return *format == string(cli.FormatJSON)
+	return *asJSON
 }

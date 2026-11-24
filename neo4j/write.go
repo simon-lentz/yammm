@@ -1,0 +1,824 @@
+package neo4j
+
+import (
+	"cmp"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
+	"slices"
+	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/mapping"
+	"github.com/simon-lentz/yammm/internal/typeorder"
+	"github.com/simon-lentz/yammm/internal/value"
+	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/cypher"
+)
+
+// NodeQueryKind names a [NodeQuery]'s phase. The write surface is
+// phased: every NodeMerge precedes every CompositionReplace, which
+// precedes every CompositionCreate (parent-first by depth) — a documented
+// ordering guarantee, so executing the slice in order replaces each
+// parent's subtree without orphans.
+// The zero NodeQueryKind names no phase.
+type NodeQueryKind int
+
+const (
+	// NodeMerge upserts root nodes.
+	NodeMerge NodeQueryKind = iota + 1
+	// CompositionReplace deletes a root's whole composed subtree.
+	CompositionReplace
+	// CompositionCreate creates one (parent, relation, part) group's
+	// children.
+	CompositionCreate
+)
+
+// String names the phase for logs and the CLI's phase comments.
+func (k NodeQueryKind) String() string {
+	switch k {
+	case NodeMerge:
+		return "node-merge"
+	case CompositionReplace:
+		return "composition-replace"
+	case CompositionCreate:
+		return "composition-create"
+	default:
+		return fmt.Sprintf("NodeQueryKind(%d)", int(k))
+	}
+}
+
+// NodeQuery represents an UNWIND-based batch node write.
+//
+// Construct via [NodeQueries]; do not create directly.
+type NodeQuery struct {
+	Statement string         // Cypher UNWIND $rows AS row statement
+	Params    map[string]any // Contains "rows" key with []map[string]any value
+	Kind      NodeQueryKind  // The phase this query belongs to
+}
+
+// EdgeQuery represents an UNWIND-based batch relationship merge.
+//
+// Construct via [EdgeQueries]; do not create directly.
+type EdgeQuery struct {
+	Statement    string         // Cypher UNWIND $rows AS row MATCH ... MERGE ... SET statement
+	Params       map[string]any // Contains "rows" key with []map[string]any value
+	RelationType string         // Neo4j relationship type (e.g., "IN_REGION")
+}
+
+// Option configures a call of this package. Each call's doc names the options
+// it takes, and a call refuses any other with an error, with no diagnostic
+// code, that names the option and the call.
+type Option func(*config)
+
+// optionKind names the constructor that built an [Option], so a call can refuse
+// one it does not take.
+type optionKind uint8
+
+const (
+	optNodeChunkSize optionKind = iota
+	optEdgeChunkSize
+	optWarnings
+)
+
+var optionNames = [...]string{
+	optNodeChunkSize: "WithNodeChunkSize",
+	optEdgeChunkSize: "WithEdgeChunkSize",
+	optWarnings:      "WithWarnings",
+}
+
+type config struct {
+	given []optionKind // every option passed, in argument order
+
+	nodeChunkSize int
+	edgeChunkSize int
+
+	// warnings receives each issue below failure severity a call draws; nil
+	// discards them.
+	warnings func(diag.Issue)
+}
+
+const (
+	defaultNodeChunkSize = 5000
+	defaultEdgeChunkSize = 5000
+)
+
+// newConfig applies opts to the state every call starts from.
+func newConfig(opts []Option) config {
+	cfg := config{
+		nodeChunkSize: defaultNodeChunkSize,
+		edgeChunkSize: defaultEdgeChunkSize,
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
+// refuse returns an error naming the first option, in argument order, that
+// call does not take, or nil when it takes every option it was given.
+func (c *config) refuse(call string, takes ...optionKind) error {
+	for _, g := range c.given {
+		if !slices.Contains(takes, g) {
+			return fmt.Errorf("neo4j.%s does not take the %s option", call, optionNames[g])
+		}
+	}
+	return nil
+}
+
+// WithNodeChunkSize sets the maximum number of nodes per UNWIND batch.
+// Default: 5000. Only [NodeQueries] takes it.
+func WithNodeChunkSize(size int) Option {
+	return func(c *config) {
+		c.given = append(c.given, optNodeChunkSize)
+		c.nodeChunkSize = size
+	}
+}
+
+// WithEdgeChunkSize sets the maximum number of edges per UNWIND batch.
+// Default: 5000. Only [EdgeQueries] takes it.
+func WithEdgeChunkSize(size int) Option {
+	return func(c *config) {
+		c.given = append(c.given, optEdgeChunkSize)
+		c.edgeChunkSize = size
+	}
+}
+
+// WithWarnings sets fn to receive every issue below failure severity that
+// [Diff] draws: the constraint generation's warnings, which
+// [github.com/simon-lentz/yammm/schema/cypher.WithWarnings] states. fn is
+// called as each is found, in that order, on the goroutine that made the call
+// and before it returns; no such issue is ever in the call's error. Without the
+// option, and with a nil fn, such issues are discarded. Only [Diff] takes it.
+func WithWarnings(fn func(diag.Issue)) Option {
+	return func(c *config) {
+		c.given = append(c.given, optWarnings)
+		c.warnings = fn
+	}
+}
+
+// NodeQueries generates UNWIND-batched MERGE queries for all instances
+// of each type in snap, labelled under c.
+//
+// The immutable-key shape is selected per type: a type with derived @writeOnce
+// keys gets the ON CREATE / ON MATCH split, while an unannotated type in the
+// same snapshot stays mutable.
+//
+// Returns a phased, ordered slice: every [NodeMerge] query, then every
+// [CompositionReplace], then every [CompositionCreate] parent-first by
+// depth — execute in order and each parent's composed subtree is replaced
+// whole (see [NodeQueryKind]). A phase with more rows than the chunk size
+// produces several queries.
+//
+// Each call derives every type's label and keys from the snapshot's own schema
+// (see the package doc's "Write Surface"), and refuses a zero snapshot with
+// [ErrZeroSnapshot]. NodeQueries takes [WithNodeChunkSize], and refuses any
+// other option with an error naming it.
+func NodeQueries(
+	ctx context.Context,
+	c cypher.Config,
+	snap graph.Snapshot,
+	opts ...Option,
+) ([]NodeQuery, error) {
+	cfg := newConfig(opts)
+	if err := cfg.refuse("NodeQueries", optNodeChunkSize); err != nil {
+		return nil, err
+	}
+
+	shapes, err := writeShape(c, snap)
+	if err != nil {
+		return nil, err
+	}
+	var queries []NodeQuery
+
+	for _, typeID := range snap.Types() {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("batch node queries: %w", err)
+		}
+		typeName := schema.TagForm(snap.Schema(), typeID)
+		nodeShape := shapes.types[typeID]
+		schemaType, _ := snap.Schema().TypeByID(typeID)
+
+		// The effective immutable set is the type's derived @writeOnce keys.
+		writeOnceKeys := nodeShape.immutableKeys
+		km := mutableKeys
+		if len(writeOnceKeys) > 0 {
+			km = immutableKeys
+		}
+
+		instances := slices.Collect(snap.InstancesOf(typeID))
+		var rows []map[string]any
+		where := fmt.Sprintf("type %q", typeName)
+
+		for _, inst := range instances {
+			keyProps, err := extractKeyProps(inst.Properties(), &nodeShape, where)
+			if err != nil {
+				return nil, err
+			}
+
+			props, err := propsToParamMap(inst.Properties(), schemaType)
+			if err != nil {
+				return nil, fmt.Errorf("type %q: %w", typeName, err)
+			}
+			// Key entries are prefixed to keep them in a namespace disjoint from
+			// `props` and `update_props`; see [buildBatchNodeMergeQuery], whose
+			// template reads them back as row.key_<name>.
+			row := make(map[string]any, len(keyProps)+2)
+			for k, v := range keyProps {
+				row[batchKeyParamPrefix+k] = v
+			}
+			row["props"] = props
+			if len(writeOnceKeys) > 0 {
+				row["update_props"] = removeKeys(props, writeOnceKeys)
+			}
+			rows = append(rows, row)
+		}
+
+		stmt := buildBatchNodeMergeQuery(nodeShape.label, nodeShape.primaryKeys, km)
+		for _, chunk := range chunkSlice(rows, cfg.nodeChunkSize) {
+			queries = append(queries, NodeQuery{
+				Statement: stmt,
+				Params:    map[string]any{"rows": chunk},
+				Kind:      NodeMerge,
+			})
+		}
+	}
+
+	composed, err := composedQueries(ctx, snap, shapes, &cfg)
+	if err != nil {
+		return nil, err
+	}
+	queries = append(queries, composed...)
+
+	return queries, nil
+}
+
+// EdgeQueries generates UNWIND-batched MERGE queries for edges,
+// grouped by (sourceType, relationType, targetType) signature.
+//
+// Returns one [EdgeQuery] per signature per chunk. Each endpoint's label and
+// keys are derived as [NodeQueries] derives them, so a zero snapshot
+// and a schema whose labels that derivation refuses are refused here too. An edge
+// whose relationship type [cypher.IsIdentifier] refuses, a reserved keyword
+// included, is refused with an error that names it. EdgeQueries takes
+// [WithEdgeChunkSize], and refuses any other option with an error naming it.
+func EdgeQueries(
+	ctx context.Context,
+	c cypher.Config,
+	snap graph.Snapshot,
+	opts ...Option,
+) ([]EdgeQuery, error) {
+	cfg := newConfig(opts)
+	if err := cfg.refuse("EdgeQueries", optEdgeChunkSize); err != nil {
+		return nil, err
+	}
+
+	shapes, err := writeShape(c, snap)
+	if err != nil {
+		return nil, err
+	}
+
+	edges := slices.Collect(snap.Edges())
+
+	// Validate all relationship types upfront (fail fast).
+	for _, edge := range edges {
+		if problem := mapping.IdentifierProblem(edge.Relation()); problem != "" {
+			return nil, fmt.Errorf("relationship type %q is not a Neo4j identifier: the name %s", edge.Relation(), problem)
+		}
+	}
+
+	groups := groupEdgesBySignature(edges)
+
+	// Sort signatures for deterministic output.
+	sigs := make([]edgeSignature, 0, len(groups))
+	for sig := range groups {
+		sigs = append(sigs, sig)
+	}
+	order := typeorder.New(snap.Schema())
+	slices.SortFunc(sigs, func(a, b edgeSignature) int {
+		return cmp.Or(
+			order.Compare(a.sourceType, b.sourceType),
+			cmp.Compare(a.relType, b.relType),
+			order.Compare(a.targetType, b.targetType),
+		)
+	})
+
+	var queries []EdgeQuery
+
+	for _, sig := range sigs {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("batch edge queries: %w", err)
+		}
+		sigEdges := groups[sig]
+
+		srcShape := shapes.types[sig.sourceType]
+		tgtShape := shapes.types[sig.targetType]
+
+		// Resolve the relation so typed edge properties coerce to
+		// driver-native types; a zero rel means coerceRelProps passes them through.
+		// By identity, which reaches the whole closure — an imported type's
+		// rendered name is in no schema's local table.
+		var rel schema.Relation
+		if len(sigEdges) > 0 {
+			if srcType, ok := snap.Schema().TypeByID(sigEdges[0].Source().TypeID()); ok {
+				rel, _ = srcType.Relation(sig.relType)
+			}
+		}
+
+		// Detect if any edge in this group has properties.
+		hasProps := false
+		for _, edge := range sigEdges {
+			if edge.HasProperties() {
+				hasProps = true
+				break
+			}
+		}
+
+		// One coercion per distinct endpoint instance, not one per edge.
+		// extractKeyProps runs every key value through the full coerceValue
+		// chokepoint, and a hub node at the end of a thousand edges paid for it
+		// a thousand times.
+		keyCache := make(map[string]map[string]any)
+		endpointKeys := func(inst graph.Instance, shape *nodeShape, where string) (map[string]any, error) {
+			id := inst.TypeID().String() + "\x00" + inst.PrimaryKey().String()
+			if cached, ok := keyCache[id]; ok {
+				return cached, nil
+			}
+			keys, err := extractKeyProps(inst.Properties(), shape, where)
+			if err != nil {
+				return nil, err
+			}
+			keyCache[id] = keys
+			return keys, nil
+		}
+		srcWhere := fmt.Sprintf("source type %q", schema.TagForm(snap.Schema(), sig.sourceType))
+		tgtWhere := fmt.Sprintf("target type %q", schema.TagForm(snap.Schema(), sig.targetType))
+
+		var rows []map[string]any
+		for _, edge := range sigEdges {
+			srcKeys, err := endpointKeys(edge.Source(), &srcShape, srcWhere)
+			if err != nil {
+				return nil, err
+			}
+			tgtKeys, err := endpointKeys(edge.Target(), &tgtShape, tgtWhere)
+			if err != nil {
+				return nil, err
+			}
+
+			row := make(map[string]any)
+			for k, v := range srcKeys {
+				row[RelFromRowPrefix+k] = v
+			}
+			for k, v := range tgtKeys {
+				row[RelToRowPrefix+k] = v
+			}
+			if hasProps {
+				if edge.HasProperties() {
+					held := edge.Properties().Clone()
+					if k, err := firstRefusedProp(held, relConstraint(rel)); err != nil {
+						return nil, fmt.Errorf("relation %q: property %q: %w", sig.relType, k, err)
+					}
+					relProps, err := coerceRelProps(held, rel)
+					if err != nil {
+						// coerceRelProps names the relation and the property itself.
+						return nil, err
+					}
+					row["rel_props"] = relProps
+				} else {
+					row["rel_props"] = map[string]any{}
+				}
+			}
+			rows = append(rows, row)
+		}
+
+		stmt := BuildBatchRelationshipMergeQuery(
+			srcShape.label, srcShape.primaryKeys,
+			sig.relType,
+			tgtShape.label, tgtShape.primaryKeys,
+			hasProps,
+		)
+		for _, chunk := range chunkSlice(rows, cfg.edgeChunkSize) {
+			queries = append(queries, EdgeQuery{
+				Statement:    stmt,
+				Params:       map[string]any{"rows": chunk},
+				RelationType: sig.relType,
+			})
+		}
+	}
+
+	return queries, nil
+}
+
+// propsToParamMap converts instance properties to a Neo4j-driver-compatible
+// map, routing every scalar through [coerceScalar] and every []any slice through
+// [coerceSlice] against the property's schema constraint. A json.Number at a Float becomes a
+// float64 and a Date or Timestamp string a driver temporal value, so the driver
+// receives native types that satisfy Neo4j TYPE constraints (IS :: FLOAT,
+// IS :: DATE, IS :: ZONED DATETIME).
+// Returns an error, naming the offending property, if a value cannot be coerced
+// to its declared kind (e.g. an unparseable Timestamp/Date string). Properties
+// are processed in sorted key order, so when several fail the error names the
+// lexicographically-first failing property on every run — matching [CoerceParams],
+// the failure is reproducible rather than map-iteration-order dependent. The
+// output map is independent of key order (maps are unordered); only error
+// selection is affected.
+//
+// A value that holds one at a List whose element is a collection is refused
+// first ([nestedCollection]). Every other value is then read by [heldForm],
+// declared or not, and a value it refuses is an error too.
+func propsToParamMap(props immutable.Properties, schemaType schema.Type) (map[string]any, error) {
+	raw := props.Clone()
+	for _, key := range slices.Sorted(maps.Keys(raw)) {
+		val := raw[key]
+		if value.Absent(val) {
+			raw[key] = nil
+			continue
+		}
+		c := propertyConstraint(schemaType, key)
+		// A property type Neo4j cannot store is refused before its value is read,
+		// as coerceScalar refuses it, so no element's own fault takes its place.
+		if err := nestedCollection(c); err != nil {
+			return nil, fmt.Errorf("property %q: %w", key, markUnrepresentable(err))
+		}
+		val, err := heldForm(val, c)
+		if err != nil {
+			return nil, fmt.Errorf("property %q: %w", key, err)
+		}
+		cv, err := coerceValue(c, val)
+		if err != nil {
+			return nil, fmt.Errorf("property %q: %w", key, err)
+		}
+		raw[key] = cv
+	}
+	return raw, nil
+}
+
+// errNoForm refuses a list or a map nested past [maxFormDepth]. Only a snapshot
+// whose values no validator judged holds one.
+var errNoForm = unrepresentable("holds a list or a map nested past the depth the write path writes")
+
+// errUnheldNumber refuses a json.Number no driver number holds: a literal no
+// finite float64 holds, or an integer literal no int64 holds outside a Float and
+// a Vector element, which the .ys reader keeps as its text. Only a snapshot whose values no
+// validator judged holds one.
+var errUnheldNumber = unrepresentable("holds a json.Number no driver number holds, so the server would store another number")
+
+// firstRefusedProp returns the least name in props whose value [heldForm] refuses
+// at the constraint constraintOf returns for it, with its fault. A batch of sound
+// rows allocates nothing for the check.
+func firstRefusedProp(props map[string]any, constraintOf func(string) schema.Constraint) (string, error) {
+	var bad string
+	var badErr error
+	for k, v := range props {
+		if _, err := heldForm(v, constraintOf(k)); err != nil && (badErr == nil || k < bad) {
+			bad, badErr = k, err
+		}
+	}
+	return bad, badErr
+}
+
+// heldForm returns v, a value a validator or a document holds, as the driver's
+// own value at c, the constraint v's position declares, or nil. A list and a
+// string-keyed map are read element by element; one nested past [maxFormDepth]
+// is [errNoForm]. A json.Number is returned as the driver's number
+// ([driverNumber]).
+func heldForm(v any, c schema.Constraint) (any, error) {
+	f, _, err := heldFormAt(v, c, 0)
+	return f, err
+}
+
+// maxFormDepth bounds how deep [heldForm] reads.
+const maxFormDepth = 256
+
+// heldFormAt is [heldForm] at a depth. It reports whether the form differs
+// from x, so a list or a map is copied only when an element changed: a value
+// can share storage with the snapshot.
+func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
+	if depth > maxFormDepth {
+		return nil, false, errNoForm
+	}
+	switch t := x.(type) {
+	case []any:
+		if t == nil {
+			return nil, true, nil
+		}
+		elem := elementConstraint(c)
+		out := t
+		for i, e := range t {
+			f, changed, err := heldFormAt(e, elem, depth+1)
+			if err != nil {
+				return nil, false, err
+			}
+			if changed {
+				if len(out) > 0 && &out[0] == &t[0] {
+					out = slices.Clone(t)
+				}
+				out[i] = f
+			}
+		}
+		if len(out) == 0 || &out[0] == &t[0] {
+			return x, false, nil
+		}
+		return out, true, nil
+	case map[string]any:
+		if t == nil {
+			return nil, true, nil
+		}
+		var out map[string]any
+		for k, e := range t {
+			f, changed, err := heldFormAt(e, nil, depth+1)
+			if err != nil {
+				return nil, false, err
+			}
+			if changed {
+				if out == nil {
+					out = maps.Clone(t)
+				}
+				out[k] = f
+			}
+		}
+		if out == nil {
+			return x, false, nil
+		}
+		return out, true, nil
+	case json.Number:
+		n, err := driverNumber(t, c)
+		if err != nil {
+			return nil, false, err
+		}
+		return n, true, nil
+	}
+	return x, false, nil
+}
+
+// driverNumber reads a JSON number literal as the driver's number, as the
+// validator reads it at c: at a Float, its nearest float64, so -0 keeps its
+// sign; elsewhere an integer literal is the int64 it spells and a float literal
+// its nearest float64, which an Integer position then refuses as a float. A
+// literal no such number holds is [errUnheldNumber].
+func driverNumber(n json.Number, c schema.Constraint) (any, error) {
+	if value.IsIntegerLiteral(n) && !renders(c, schema.KindFloat) {
+		i, err := n.Int64()
+		if err != nil {
+			return nil, errUnheldNumber
+		}
+		return i, nil
+	}
+	f, err := n.Float64()
+	if err != nil {
+		return nil, errUnheldNumber
+	}
+	return f, nil
+}
+
+// renders reports whether c, resolved through its aliases, is of one of kinds.
+func renders(c schema.Constraint, kinds ...schema.ConstraintKind) bool {
+	return c != nil && slices.Contains(kinds, schema.ResolveAlias(c).Kind())
+}
+
+// nestedCollection returns an error wrapping [ErrUnsupportedListElem] and the
+// refusal [mapping.ListElementType] gives c's element when c is a List whose
+// element is itself a collection, and nil for any other constraint. The write path refuses a value at such a constraint by it, so a
+// property the DDL refuses never reaches the driver.
+func nestedCollection(c schema.Constraint) error {
+	// A Vector's element is a Float, so only a List can nest; elementConstraint
+	// would allocate a FloatConstraint for every Vector value.
+	l, ok := schema.ResolveAlias(c).(schema.ListConstraint)
+	if !ok {
+		return nil
+	}
+	if _, err := mapping.ListElementType(l.Element()); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnsupportedListElem, err)
+	}
+	return nil
+}
+
+// coerceSlice converts raw, a list in the form the validator stores, to the
+// typed slice Neo4j requires at c ([]string, []int64, []float64, []dbtype.Date,
+// ...). A Vector's element is a Float. [scalarForm] reads each element, as it
+// reads a scalar, and one it refuses is an error naming its index.
+//
+// A []any under a scalar constraint is an error. A List whose element is a
+// collection is refused with [ErrUnsupportedListElem], an empty list included:
+// Neo4j has no nested collection property type, and the DDL refuses the
+// property so. The element switch is exhaustiveness-guarded, so a new
+// ConstraintKind fails the lint here.
+func coerceSlice(raw []any, c schema.Constraint) (any, error) {
+	c = schema.ResolveAlias(c)
+	// A judged constraint's List holds an element, so no element means a scalar.
+	elem := schema.ResolveAlias(elementConstraint(c))
+	if elem == nil {
+		return nil, fmt.Errorf("cannot coerce a list value against a scalar %s constraint", c.Kind())
+	}
+	//exhaustive:enforce
+	switch elem.Kind() {
+	case schema.KindString, schema.KindUUID, schema.KindEnum, schema.KindPattern:
+		return elements[string](raw, elem)
+	case schema.KindInteger:
+		return elements[int64](raw, elem)
+	case schema.KindFloat:
+		return elements[float64](raw, elem)
+	case schema.KindBoolean:
+		return elements[bool](raw, elem)
+	case schema.KindDate:
+		return elements[dbtype.Date](raw, elem)
+	case schema.KindTimestamp:
+		return elements[time.Time](raw, elem)
+	case schema.KindVector, schema.KindList, schema.KindAlias:
+		// Neo4j has no nested collection property type (List<Vector>,
+		// List<List<…>>), so the list is refused, an empty one included.
+		// KindAlias is unreachable here: elem is alias-resolved above, and a judged
+		// constraint's DataType reference holds a resolved constraint.
+		_, err := mapping.ListElementType(elem)
+		return nil, fmt.Errorf("%w: %w", ErrUnsupportedListElem, err)
+	default:
+		// Unreachable: schema.Constraint is sealed, so elem.Kind() is always one of
+		// the cases above. The //exhaustive:enforce directive fails the lint if a
+		// new ConstraintKind is added without a case, rather than letting a []any
+		// reach the driver un-coerced.
+		return nil, fmt.Errorf("coerceSlice: unhandled element kind %v", elem.Kind())
+	}
+}
+
+// elements returns raw as the []T the driver sends, each element read at elem by
+// [scalarForm]. T is the Go type scalarForm returns at elem's kind.
+func elements[T any](raw []any, elem schema.Constraint) (any, error) {
+	out := make([]T, len(raw))
+	for i, v := range raw {
+		cv, err := scalarForm(elem, v)
+		if err != nil {
+			return nil, fmt.Errorf("list element %d: %w", i, err)
+		}
+		e, ok := cv.(T)
+		if !ok {
+			// Unreachable while T is the type scalarForm returns at elem's kind.
+			return nil, fmt.Errorf("list element %d: coerce %s: the rule returned %T", i, elem.Kind(), cv)
+		}
+		out[i] = e
+	}
+	return out, nil
+}
+
+// coerceRelProps coerces a relationship property map against the relation's
+// declared property constraints, so typed edge properties (e.g. a Timestamp or
+// Float on an association) reach the driver as native types. A value that holds
+// none becomes nil, declared or not. Each other value is read by [heldForm] at
+// the constraint rel declares for it, or at none, and a value of a property rel
+// declares then routes through [coerceValue], as on the node path.
+//
+// Edge properties are scalar by language rule: List and Vector types on a
+// relationship are rejected at schema-load (diag.E_INVALID_EDGE_PROPERTY_TYPE,
+// alias-aware), so a declared edge property's constraint is never a List. A
+// []any value still reaches coerceValue's list arm, which refuses it against
+// the scalar constraint.
+//
+// A property rel does not declare passes through as [heldForm] reads it, for a
+// zero relation or one with no declared properties too. Properties are processed
+// in sorted key order, so a coercion error names the lexicographically-first
+// failing property on every run (matching [CoerceParams] and [propsToParamMap]).
+// Mutates and returns props.
+func coerceRelProps(props map[string]any, rel schema.Relation) (map[string]any, error) {
+	declares := !rel.IsZero() && rel.HasProperties()
+	for _, k := range slices.Sorted(maps.Keys(props)) {
+		v := props[k]
+		if value.Absent(v) {
+			props[k] = nil
+			continue
+		}
+		var c schema.Constraint
+		if declares {
+			if p, ok := rel.Property(k); ok {
+				c = p.Constraint()
+			}
+		}
+		read, err := heldForm(v, c)
+		if err != nil {
+			return nil, fmt.Errorf("relation %q: property %q: %w", rel.Name(), k, err)
+		}
+		if c == nil {
+			props[k] = read
+			continue
+		}
+		cv, err := coerceValue(c, read)
+		if err != nil {
+			return nil, fmt.Errorf("relation %q: property %q: %w", rel.Name(), k, err)
+		}
+		props[k] = cv
+	}
+	return props, nil
+}
+
+// relConstraint returns the constraint rel declares for a property name, or
+// nil for a name it does not declare or a zero rel.
+func relConstraint(rel schema.Relation) func(string) schema.Constraint {
+	return func(name string) schema.Constraint {
+		if rel.IsZero() {
+			return nil
+		}
+		p, ok := rel.Property(name)
+		if !ok {
+			return nil
+		}
+		return p.Constraint()
+	}
+}
+
+// coerceKey converts one primary-key value to the driver-native type its
+// declared constraint requires, using the same [coerceValue] chokepoint the
+// property path uses.
+//
+// A MERGE binds the key and SETs the property from two different maps, so a key
+// left raw where its property is coerced makes the two differ wherever the rule
+// changes a value: a Date's and a Timestamp's text become driver values, and a
+// UUID's text its canonical spelling. The pattern then matches no stored node,
+// and each write inserts another duplicate. The key is read by [heldForm] first.
+func coerceKey(shape *nodeShape, name string, raw any) (any, error) {
+	c := shape.keyConstraints[name]
+	held, err := heldForm(raw, c)
+	if err != nil {
+		return nil, fmt.Errorf("primary key %q: %w", name, err)
+	}
+	cv, err := coerceValue(c, held)
+	if err != nil {
+		return nil, fmt.Errorf("primary key %q: %w", name, err)
+	}
+	return cv, nil
+}
+
+// extractKeyProps returns a root's primary key properties, each coerced against
+// its declared constraint, and every key it cannot coerce as one joined error
+// whose every member is prefixed by where, the context the caller reports the
+// root in. A root of a snapshot holds each key property with a value: the
+// validator and the .ys reader refuse one that does not.
+func extractKeyProps(props immutable.Properties, shape *nodeShape, where string) (map[string]any, error) {
+	result := make(map[string]any, len(shape.primaryKeys))
+	var errs []error
+	for _, name := range shape.primaryKeys {
+		val, _ := props.Get(name)
+		cv, err := coerceKey(shape, name, val.Any())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", where, err))
+			continue
+		}
+		result[name] = cv
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return result, nil
+}
+
+// removeKeys creates a copy of props without the specified keys.
+func removeKeys(props map[string]any, keys []string) map[string]any {
+	result := make(map[string]any, len(props))
+	maps.Copy(result, props)
+	for _, k := range keys {
+		delete(result, k)
+	}
+	return result
+}
+
+// chunkSlice splits a slice into chunks of at most size elements.
+func chunkSlice[T any](items []T, size int) [][]T {
+	if size <= 0 {
+		size = 1
+	}
+	var chunks [][]T
+	for chunk := range slices.Chunk(items, size) {
+		// Clipped: an unclipped subslice runs to the end of the backing array,
+		// so a caller appending one row to a chunk's $rows would overwrite the
+		// first row of the next query in the same returned slice.
+		chunks = append(chunks, slices.Clip(chunk))
+	}
+	return chunks
+}
+
+// edgeSignature identifies edges that can be batched together. The endpoints
+// are identities, not rendered names, so a group is homogeneous by
+// construction: two same-named types in different schemas never share a
+// signature, and the shape each group resolves is the shape of the type its
+// edges actually hold.
+type edgeSignature struct {
+	sourceType schema.TypeID
+	relType    string
+	targetType schema.TypeID
+}
+
+// groupEdgesBySignature groups edges by their (sourceType, relationType, targetType) signature.
+func groupEdgesBySignature(edges []graph.Edge) map[edgeSignature][]graph.Edge {
+	groups := make(map[edgeSignature][]graph.Edge)
+	for _, edge := range edges {
+		sig := edgeSignature{
+			sourceType: edge.Source().TypeID(),
+			relType:    edge.Relation(),
+			targetType: edge.Target().TypeID(),
+		}
+		groups[sig] = append(groups[sig], edge)
+	}
+	return groups
+}

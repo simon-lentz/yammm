@@ -29,13 +29,6 @@ func runValidate(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) er
 	if err != nil {
 		return err
 	}
-	s, result := schema.Load(cmd.Context(), absPath, loadOpts...)
-	bindSchemaSource(sink, s, moduleRoot, absPath)
-	sink.Add(result)
-
-	exitCode := cli.ExitForResult(result)
-	if exitCode != cli.ExitOK {
-		return &cli.ExitError{Code: exitCode}
-	}
-	return nil
+	s, loadErr := schema.Load(cmd.Context(), absPath, loadOpts...)
+	return reportSchemaLoad(sink, s, moduleRoot, absPath, loadErr)
 }

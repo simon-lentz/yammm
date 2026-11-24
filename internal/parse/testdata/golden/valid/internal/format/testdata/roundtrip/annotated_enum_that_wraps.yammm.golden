@@ -1,0 +1,68 @@
+{
+  "name": "\"annotated_enum\"",
+  "span": {
+    "s": 0,
+    "e": 23
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 202,
+        "e": 203
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 213,
+              "e": 219
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 207,
+            "e": 227
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"pending_review\"",
+              "\"approved\"",
+              "\"rejected\"",
+              "\"needs_revision\"",
+              "\"escalated\"",
+              "\"archived\""
+            ],
+            "span": {
+              "s": 235,
+              "e": 324
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 325,
+                "e": 331
+              }
+            }
+          ],
+          "span": {
+            "s": 229,
+            "e": 331
+          }
+        }
+      ],
+      "span": {
+        "s": 197,
+        "e": 333
+      }
+    }
+  ]
+}

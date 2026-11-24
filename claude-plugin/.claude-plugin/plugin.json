@@ -1,7 +1,7 @@
 {
   "name": "yammm",
   "version": "0.21.1",
-  "description": "Schema DSL, Go library, and CLI support for yammm — typed data validation, graph construction, database export, and Go / JSON Schema / Markdown generation",
+  "description": "Schema DSL, Go library, and CLI support for yammm — typed data validation, graph construction, Neo4j DDL and drift diffs, and Go / Markdown generation",
   "author": {
     "name": "Simon Lentz"
   },

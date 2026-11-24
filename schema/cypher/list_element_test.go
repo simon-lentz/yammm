@@ -1,0 +1,146 @@
+package cypher
+
+import (
+	"context"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/schema"
+)
+
+// A list whose ELEMENT is itself a collection is valid yammm — docs/SPEC.md
+// teaches both `List<List<Integer>>` and `List<Vector[768]>` — but Neo4j has no
+// nested collection property type, so the emitter cannot express one and says so.
+//
+// The failure is worth pinning because it is whole-schema: Constraints
+// documents returning (nil, result) on any validation error, so ONE such property
+// suppresses every constraint the schema would otherwise emit, including those of
+// unrelated types. That is the intended fail-fast contract — a partial DDL script
+// would silently drop guarantees an operator believes they applied — but it makes
+// the diagnostic the only thing standing between a user and an empty output, so
+// the message has to name the property and the offending kind.
+
+// loadInline builds a sealed schema from source, failing the test if it does not
+// load. These cases need schemas that are VALID yammm and unemittable, which is a
+// narrow enough combination that inline source reads better than a fixture file.
+func loadInline(t *testing.T, src string) schema.Schema {
+	t.Helper()
+	s, loadErr := schema.LoadString(context.Background(), src, "list_element.yammm")
+	if err := loadErr; err != nil {
+		t.Fatalf("fixture is not valid yammm, so it cannot exercise the emitter: %v", err)
+	}
+	return s
+}
+
+func TestConstraints_UnsupportedListElement(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		property string
+		wantKind string // the element kind named in the message
+	}{{
+		name:     "nested list",
+		property: "matrix List<List<Integer>> required",
+		wantKind: "List",
+	}, {
+		name:     "list of vectors",
+		property: "embeddings List<Vector[768]> required",
+		wantKind: "Vector",
+	}, {
+		// An alias resolves before the element kind is judged, so a
+		// list-typed alias reports the kind it resolves TO, not "Alias".
+		// The KindAlias arm of mapping.ListElementType is unreachable for that
+		// reason and exists only to satisfy the exhaustiveness guard.
+		name:     "list of a list-typed alias",
+		property: "codes List<Codes> required",
+		wantKind: "List",
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := loadInline(t, `schema "le"
+type Codes = List<String>
+type A {
+    id   String primary
+    name String required
+    `+tc.property+`
+}
+`)
+
+			constraints, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+				return Config{}.Constraints(s, WithWarnings(warn))
+			})
+
+			if diagtest.Err(result) == nil {
+				t.Fatalf("emitted %d constraints for a property Neo4j cannot express", len(constraints))
+			}
+			// All-or-nothing: the schema's own id and name constraints are
+			// emittable and must still be withheld, or an operator applies a
+			// script that looks complete.
+			if constraints != nil {
+				t.Errorf("returned %d constraints alongside the error; the contract is (nil, result)", len(constraints))
+			}
+
+			var codes, messages []string
+			for iss := range result.Errors() {
+				codes = append(codes, iss.Code().String())
+				messages = append(messages, iss.Message())
+			}
+			if !slices.Contains(codes, E_NEO4J_UNSUPPORTED_TYPE.String()) {
+				t.Errorf("codes = %v; want %s", codes, E_NEO4J_UNSUPPORTED_TYPE)
+			}
+
+			joined := strings.Join(messages, " | ")
+			// The property name is what the user has to go and change; the kind
+			// is what tells them why. Without both, the only signal is empty output.
+			for _, want := range []string{propertyNameOf(tc.property), tc.wantKind} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("diagnostic does not name %q: %s", want, joined)
+				}
+			}
+		})
+	}
+}
+
+// The DDL's diagnostic states the element kind in its own words: the write
+// path's sentinel names the neo4j package, which this call never reaches.
+func TestConstraints_UnsupportedListElementNamesNoPackage(t *testing.T) {
+	t.Parallel()
+	s := loadInline(t, `schema "le"
+type A {
+    id     String primary
+    matrix List<List<Integer>> required
+}
+`)
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+		return Config{}.Constraints(s, WithWarnings(warn))
+	})
+	var issues []diag.Issue
+	for iss := range result.Errors() {
+		issues = append(issues, iss)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
+	}
+	if got, want := issues[0].Message(), `unsupported list element type for property "matrix" on type "A": list element kind List`; got != want {
+		t.Errorf("message = %q; want %q", got, want)
+	}
+	i := slices.IndexFunc(issues[0].Details(), func(d diag.Detail) bool { return d.Key == diag.DetailKeyDetail })
+	if i < 0 {
+		t.Fatalf("no %s detail: %v", diag.DetailKeyDetail, issues[0].Details())
+	}
+	if got, want := issues[0].Details()[i].Value, "list element kind List"; got != want {
+		t.Errorf("detail = %q; want %q", got, want)
+	}
+}
+
+// propertyNameOf returns the declared name from a property line.
+func propertyNameOf(declaration string) string {
+	name, _, _ := strings.Cut(declaration, " ")
+	return name
+}

@@ -4,11 +4,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
-// These rows record what ten sites do today, so a replacement is scored against
+// These rows record what nine sites do today, so a replacement is scored against
 // a measured bar rather than a remembered one. They are neither a survey of the
 // grammar nor a statement of the rule that decides which construct survives.
 // Every row draws exactly one diagnostic; the duplicates two of them once
@@ -48,14 +49,6 @@ var abandonedGroups = []struct {
 		count:  1,
 	},
 	{
-		name:   "timestamp format",
-		src:    "schema \"s\"\ntype T {\n\tt Timestamp[\"x\"\n}\n",
-		want:   `unexpected token "[" in a type body`,
-		anchor: "[",
-		types:  1,
-		count:  1,
-	},
-	{
 		name:   "import alias",
 		src:    "schema \"s\"\nimport \"a.yammm\" as one\n",
 		want:   `unexpected token "as" in a declaration`,
@@ -64,7 +57,7 @@ var abandonedGroups = []struct {
 		count:  1,
 	},
 	{
-		name:   "reverse clause",
+		name:   "a slash after the target",
 		src:    "schema \"s\"\ntype T {\n\t--> R B /\n}\n",
 		want:   `unexpected token "/" in a type body`,
 		anchor: "/",
@@ -108,15 +101,15 @@ var abandonedGroups = []struct {
 func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 	for _, tc := range abandonedGroups {
 		t.Run(tc.name, func(t *testing.T) {
-			f, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			f, issues := Parse([]byte(tc.src), sourcetest.ID("s.yammm"))
 			if len(issues) != tc.count {
 				t.Fatalf("got %d diagnostics, want %d: %v", len(issues), tc.count, issues)
 			}
 			if len(issues) == 0 {
 				return // a row may record a site that reports nothing
 			}
-			// diag.Result.OK() counts only Fatal and Error, so a severity
-			// downgrade here would let every one of these sources load clean.
+			// A load fails only on a Fatal or Error, so a severity downgrade
+			// here would let every one of these sources load clean.
 			for i, iss := range issues {
 				if iss.Code() != diag.E_SYNTAX || iss.Severity() != diag.Error {
 					t.Errorf("diagnostic %d is %s at %v, want E_SYNTAX at error",
@@ -127,7 +120,7 @@ func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 				t.Errorf("message = %q, want %q", issues[0].Message(), tc.want)
 			}
 			sp := issues[0].Span()
-			if covered := tc.src[sp.Start.Byte:sp.End.Byte]; covered != tc.anchor {
+			if covered := tc.src[sp.Start.Offset:sp.End.Offset]; covered != tc.anchor {
 				t.Errorf("anchored on %q, want %q", covered, tc.anchor)
 			}
 			if len(f.Types) != tc.types {
@@ -143,7 +136,7 @@ func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 	t.Run("an unterminated bound list keeps later declarations", func(t *testing.T) {
 		src := "schema \"s\"\ntype Code = String [5, 5\ntype Alpha {\n\tid String primary\n}\ntype Beta {\n\tid String primary\n}\n"
-		f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		f, _ := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		var names []string
 		for _, ty := range f.Types {
 			names = append(names, ty.Name)
@@ -153,9 +146,9 @@ func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 		}
 	})
 
-	t.Run("a failed reverse clause keeps the next association", func(t *testing.T) {
+	t.Run("a slash after the target keeps the next association", func(t *testing.T) {
 		src := "schema \"s\"\ntype T {\n\t--> R B /\n\t--> Q C\n}\n"
-		f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		f, _ := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(f.Types) != 1 {
 			t.Fatalf("got %d types, want 1", len(f.Types))
 		}
@@ -173,7 +166,7 @@ func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 
 	t.Run("a rejected multiplicity records no relation", func(t *testing.T) {
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> R (many:one) B\n}\n"
-		f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		f, _ := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(f.Types) != 1 {
 			t.Fatalf("got %d types, want 1", len(f.Types))
 		}

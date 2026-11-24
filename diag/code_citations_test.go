@@ -1,0 +1,50 @@
+package diag_test
+
+import (
+	"testing"
+
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/doclint"
+
+	// Each Neo4j package registers its own codes with diag when it is imported.
+	"github.com/simon-lentz/yammm/internal/raceskip"
+	_ "github.com/simon-lentz/yammm/neo4j"
+	_ "github.com/simon-lentz/yammm/schema/cypher"
+)
+
+// TestModuleCitesRegisteredCodes points the code-citation checker at the
+// module. A code renamed or removed in diag leaves its name behind in godoc and
+// in the Markdown corpus, and nothing else reads those names against the
+// registry.
+func TestModuleCitesRegisteredCodes(t *testing.T) {
+	t.Parallel()
+	// The module is read on one goroutine, and the detector multiplies each read.
+	raceskip.Skip(t)
+	var codes []string
+	for _, c := range diag.AllCodes() {
+		codes = append(codes, c.String())
+	}
+	n := doclint.AssertCitedCodesExist(t, "..", doclint.CodeRules{
+		Codes: codes,
+		Exclude: []string{
+			// Trigger queries are what a user might type, not claims about yammm.
+			"claude-plugin/skills/*/evals/*.md",
+		},
+		// NewCode's example registers a code, so it names one diag does not hold.
+		Placeholders: []string{"E_MY_ERROR"},
+	})
+	// Each floor sits at or under the count at the tree that set it, so a walk
+	// that stops reaching the source fails instead of passing over nothing.
+	if n.Comments < commentCitationFloor {
+		t.Errorf("read only %d code names in Go comments; the walk is not reaching the source", n.Comments)
+	}
+	if n.Markdown < markdownCitationFloor {
+		t.Errorf("read only %d code names in Markdown; the walk is not reaching the corpus", n.Markdown)
+	}
+	t.Logf("read %d code names in Go comments and %d in Markdown", n.Comments, n.Markdown)
+}
+
+const (
+	commentCitationFloor  = 582
+	markdownCitationFloor = 470
+)

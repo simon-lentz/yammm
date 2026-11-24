@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -14,7 +15,7 @@ import (
 // body-reading surface refuses a document whose schema identity it cannot
 // check, and a header-only read stays classifiable for dispatch. The old
 // algorithm is the current one minus one, so the test follows every bump:
-// a document written by the previous release draws this signal — and NOT
+// a document written under the previous algorithm draws this signal — and NOT
 // E_SNAPSHOT_INCOMPATIBLE_SCHEMA, because a version mismatch skips the
 // hash comparison — which is what a consumer's cutover routes on.
 func TestLoad_RefusesAnOldHashAlgorithm(t *testing.T) {
@@ -28,23 +29,23 @@ func TestLoad_RefusesAnOldHashAlgorithm(t *testing.T) {
 		t.Fatalf("fixture does not carry algorithm %d", schema.StructuralHashVersion)
 	}
 
-	_, res := snapshot.Load(t.Context(), old, s, snapshot.WithIntegrityCheck(false))
-	if !res.HasErrors() || !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) {
-		t.Fatalf("Load accepted a previous-algorithm document: %v", res)
+	_, err := snapshot.Unmarshal(t.Context(), old, s, snapshot.WithIntegrityCheck(false))
+	if err == nil || !errors.Is(err, diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) {
+		t.Fatalf("Load accepted a previous-algorithm document: %v", err)
 	}
-	if res.HasCode(diag.E_SNAPSHOT_INCOMPATIBLE_SCHEMA) {
+	if errors.Is(err, diag.E_SNAPSHOT_INCOMPATIBLE_SCHEMA) {
 		t.Fatal("a version mismatch must skip the hash comparison, not report it as incompatible")
 	}
-	if res := snapshot.Verify(t.Context(), old, s, snapshot.WithIntegrityCheck(false)); !res.HasErrors() || !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) {
-		t.Fatalf("Verify accepted a previous-algorithm document: %v", res)
+	if err := snapshot.Verify(t.Context(), old, s, snapshot.WithIntegrityCheck(false)); err == nil || !errors.Is(err, diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) {
+		t.Fatalf("Verify accepted a previous-algorithm document: %v", err)
 	}
 
-	header, hres := snapshot.HeaderOnly(t.Context(), old)
-	if hres.HasErrors() {
-		t.Fatalf("a header-only read must stay classifiable: %v", hres)
+	header, err := snapshot.ReadHeader(t.Context(), bytes.NewReader(old))
+	if err != nil {
+		t.Fatalf("a header-only read must stay classifiable: %v", err)
 	}
-	if !hres.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) {
-		t.Fatalf("a header-only read must still name the old algorithm, at Warning: %v", hres)
+	if got, want := header.SchemaHashAlgorithm, schema.StructuralHashVersion-1; got != want {
+		t.Fatalf("a header-only read names algorithm %d, want the old %d", got, want)
 	}
 	if header.SchemaHashMatches(s) {
 		t.Fatal("a header under an old algorithm must not match any schema")

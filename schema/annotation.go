@@ -3,7 +3,6 @@ package schema
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/location"
@@ -17,13 +16,11 @@ type AnnotationArgKind uint8
 
 const (
 	// ArgUnvalidated is the zero value: the argument's role is not known. It
-	// survives into a sealed schema in four cases — an annotation that failed
-	// validation, one whose argument list failed to parse, one whose check had to
-	// DEFER because the type has an unresolved supertype that may yet supply the
-	// referent (see validateIndexType), and one whose TARGET type could not be
-	// judged, where annotationTargetTypeUnknown returns before any kind is
-	// stamped. A consumer reading a sealed schema must therefore treat
-	// ArgUnvalidated as "not checked", never as "checked and found roleless".
+	// stays on an argument completion did not judge: one of an annotation that
+	// failed validation, of one whose check DEFERRED on an unresolved supertype,
+	// or of one whose TARGET type could not be judged. Each case comes with an
+	// error, so a schema a load returns holds none of them; a consumer still
+	// reads ArgUnvalidated as "not checked", never as "checked and found roleless".
 	ArgUnvalidated AnnotationArgKind = iota
 	// ArgPropertyRef marks an argument that resolves to a property of the type,
 	// e.g. a member of a @@index composite.
@@ -56,15 +53,15 @@ func (k AnnotationArgKind) String() string {
 // echo the argument in its source spelling.
 //
 // A quoted string is distinguished from a bare literal (number, boolean, regex)
-// because only the string's text was unquoted, so only it must be re-quoted to
-// reproduce the source; the others are already their own spelling. Both are
+// because only the string's text was unquoted, so only it holds its source
+// spelling apart, in raw; the others are already their own spelling. Both are
 // "literals" for eligibility ([AnnotationArg.isLiteral]).
 type annotationTokenKind uint8
 
 const (
 	tokenIdentifier annotationTokenKind = iota
 	tokenLiteral                        // a bare literal: number, boolean, regex — text is the source spelling
-	tokenString                         // a quoted string literal — text is UNQUOTED, source adds the quotes
+	tokenString                         // a quoted string literal — text is UNQUOTED, raw is the source spelling
 )
 
 // AnnotationArg is one argument of an annotation. It is a value type; the
@@ -79,8 +76,7 @@ type AnnotationArg struct {
 
 	// raw is the argument's source text for a quoted string, whose text field
 	// holds the UNQUOTED value; empty for every other kind (their text is
-	// already the source spelling) and for Builder-constructed arguments,
-	// which have no source. Read only by [AnnotationArg.displayText].
+	// already the source spelling). Read only by [AnnotationArg.displayText].
 	raw string
 }
 
@@ -108,96 +104,77 @@ func (a AnnotationArg) isLiteral() bool {
 // own spelling. Used by diagnostics that echo an argument back to the user.
 func (a AnnotationArg) displayText() string {
 	if a.tokenKind == tokenString {
-		if a.raw != "" {
-			return a.raw
-		}
-		// Builder-constructed arguments have no source text to preserve.
-		return strconv.Quote(a.text)
+		return a.raw
 	}
 	return a.text
 }
 
 // Annotation is a validated @name / @@name decorator carried on a property or
-// type. Meaning (DDL emission, write-shape derivation) lives in adapters; the
+// type. Meaning (DDL emission, write-shape derivation) lives in its readers; the
 // core carries structure and, after completion, validated argument kinds.
 // Annotations are immutable after schema completion.
-type Annotation struct {
+type Annotation struct{ *annotationState }
+
+// IsZero reports whether the handle names no record.
+func (a Annotation) IsZero() bool { return a.annotationState == nil }
+
+// annotationState is the record an [Annotation] names.
+type annotationState struct {
 	name string
 	args []AnnotationArg
 	doc  string
 	span location.Span
 
 	// detachedFrom is the line of the property this annotation binds to, set
-	// only when the annotation was written on a LATER line. Property
-	// annotations are postfix and whitespace is not significant, so an
-	// annotation on its own line binds to the PRECEDING property rather than
-	// the following one a reader would expect; completion reports that rather
-	// than letting the two readings diverge silently.
+	// only when the annotation begins a line. Property annotations are postfix
+	// and whitespace is not significant, so an annotation that begins a line
+	// binds to the PRECEDING property rather than the following one a reader
+	// would expect; completion reports that rather than letting the two
+	// readings diverge silently.
 	detachedFrom int
 }
 
 // newAnnotation builds an annotation from parsed parts. Argument semantic kinds
 // start ArgUnvalidated and are stamped by completion before sealing.
-func newAnnotation(name string, args []AnnotationArg, doc string, span location.Span) *Annotation {
-	return &Annotation{name: name, args: args, doc: doc, span: span}
+func newAnnotation(name string, args []AnnotationArg, doc string, span location.Span) Annotation {
+	return Annotation{&annotationState{name: name, args: args, doc: doc, span: span}}
 }
 
-// setDetachedFrom records the line this annotation was written on, when that
-// is later than the line of the property it binds to. Zero means attached.
-func (a *Annotation) setDetachedFrom(line int) { a.detachedFrom = line }
+// setDetachedFrom records the line of the property this annotation binds to,
+// when the annotation begins a line. Zero means attached.
+func (a Annotation) setDetachedFrom(line int) { a.detachedFrom = line }
 
 // Name returns the annotation name, without the @ / @@ sigil.
-func (a *Annotation) Name() string { return a.name }
+func (a Annotation) Name() string { return a.name }
 
 // Args returns a defensive copy of the annotation's arguments in source order.
-func (a *Annotation) Args() []AnnotationArg { return slices.Clone(a.args) }
+func (a Annotation) Args() []AnnotationArg { return slices.Clone(a.args) }
 
 // argCount returns the argument count without copying.
-func (a *Annotation) argCount() int { return len(a.args) }
+func (a Annotation) argCount() int { return len(a.args) }
 
 // Documentation returns the leading doc comment, if any. Only type-level
 // (@@name) annotations may carry one.
-func (a *Annotation) Documentation() string { return a.doc }
+func (a Annotation) Documentation() string { return a.doc }
 
 // Span returns the source location of the annotation.
-func (a *Annotation) Span() location.Span { return a.span }
+func (a Annotation) Span() location.Span { return a.span }
 
 // setArgKind stamps the validated semantic kind of the i-th argument. Internal;
 // called only during completion, before the owning type is sealed. It mutates
 // the backing slice in place; Args returns a copy, so the sealed public surface
 // stays immutable.
-func (a *Annotation) setArgKind(i int, kind AnnotationArgKind) {
+func (a Annotation) setArgKind(i int, kind AnnotationArgKind) {
 	a.args[i].kind = kind
 }
 
-// identity returns the annotation's deduplication key: name followed by the
-// ordered arguments, NUL-separated so a single arg "a,b" cannot collide with two
-// args "a", "b". Two type-level annotations are exact duplicates iff their
-// identities match (see mergeAnnotations).
-//
-// Each argument contributes its TOKEN KIND as well as its text, because text
-// alone is the unquoted value: a bare identifier `cosine` and the string literal
-// `"cosine"` are different source, mean different things to validation, and must
-// not compare equal — one is a keyword the loader accepts, the other a literal
-// it rejects.
-//
-// The encoding is length-prefixed rather than NUL-separated: an argument's text
-// is the UNQUOTED value of a string literal, which can itself contain a NUL byte
-// (written in source with a \x00 escape), so a NUL delimiter alone could be
-// forged to make two different argument lists produce the same key. Writing each
-// text's byte length before
-// its bytes makes the encoding self-delimiting and therefore injective,
-// whatever the text contains.
-func (a *Annotation) identity() string {
+// identity returns the annotation's deduplication key: the name, which as a
+// grammar word holds no NUL, then each argument's token kind and length-prefixed
+// text. The kind tells a bare `cosine` from the string `"cosine"`, and the length
+// keeps apart two argument lists whose values hold a NUL through a \x00 escape.
+func (a Annotation) identity() string {
 	const sep = "\x00"
 	var b strings.Builder
-	// The NAME is length-prefixed for the same reason the arguments are: it is
-	// the first field, so without a length its bytes run straight into the
-	// first argument's encoding and a name chosen to look like that encoding
-	// makes two different annotations produce one key. The DSL grammar cannot
-	// spell such a name, but [TypeBuilder.WithTypeAnnotation] and
-	// [TypeBuilder.WithPropertyAnnotation] take one as a plain string.
-	fmt.Fprintf(&b, "%d%s", len(a.name), sep)
 	b.WriteString(a.name)
 	for _, arg := range a.args {
 		fmt.Fprintf(&b, "%s%d%s%d%s", sep, arg.tokenKind, sep, len(arg.text), sep)

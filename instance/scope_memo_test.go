@@ -20,8 +20,8 @@ func TestScope_IsMemoisedAndLinearInDepth(t *testing.T) {
 	allocs := func(depth int) float64 {
 		s, raw := chainSchemaAndInstance(t, depth)
 		v := NewValidator(s)
-		if _, res := v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw}); res.Err() != nil {
-			t.Fatalf("depth %d: %v", depth, res.Err())
+		if _, err := v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw}); err != nil {
+			t.Fatalf("depth %d: %v", depth, err)
 		}
 		return testing.AllocsPerRun(20, func() {
 			_, _ = v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw})
@@ -51,17 +51,15 @@ func TestScope_IsMemoisedAndLinearInDepth(t *testing.T) {
 func TestScope_ParentHoldsTheChildsMemo(t *testing.T) {
 	s, raw := chainSchemaAndInstance(t, 2)
 	v := NewValidator(s)
-	root, res := v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw})
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	root, err := v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var child *ValidInstance
-	for name, val := range root.Compositions() {
-		if name == "NEXT" {
-			child = composedChildren(val.Unwrap())[0]
-		}
+	var child ValidInstance
+	for c := range root.Composed("NEXT") {
+		child = c
 	}
-	if child == nil {
+	if child.IsZero() {
 		t.Fatal("no NEXT composition on the root")
 	}
 	childMemo := v.scopeOf(child)
@@ -69,7 +67,7 @@ func TestScope_ParentHoldsTheChildsMemo(t *testing.T) {
 	if !ok {
 		t.Fatal("the root's scope has no entry under the composition's name")
 	}
-	parentHeld := entry.Unwrap()
+	parentHeld := entry.Any()
 	if entriesPointer(parentHeld) != entriesPointer(childMemo) {
 		t.Error("the parent's scope holds a copy of the child's scope, not its memo")
 	}
@@ -88,7 +86,7 @@ func entriesPointer(m any) uintptr {
 
 // chainSchemaAndInstance builds L0 -> NEXT (one) L1 -> ... -> L<depth>, each
 // level with an invariant that reads its child, and one instance of it.
-func chainSchemaAndInstance(t *testing.T, depth int) (*schema.Schema, map[string]any) {
+func chainSchemaAndInstance(t *testing.T, depth int) (schema.Schema, map[string]any) {
 	t.Helper()
 	var sb strings.Builder
 	sb.WriteString("schema \"chain\"\n\n")
@@ -103,9 +101,9 @@ func chainSchemaAndInstance(t *testing.T, depth int) (*schema.Schema, map[string
 		}
 		sb.WriteString("}\n\n")
 	}
-	s, res := schema.LoadString(t.Context(), sb.String(), "chain.yammm")
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	s, err := schema.LoadString(t.Context(), sb.String(), "chain.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	var build func(i int) map[string]any
 	build = func(i int) map[string]any {

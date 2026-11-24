@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -40,16 +43,16 @@ type Sensor {
 }
 `
 
-func typeMismatchLoad(t *testing.T) *schema.Schema {
+func typeMismatchLoad(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), typeMismatchSchema, "tmis.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), typeMismatchSchema, "tmis.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
 
-func typeMismatchTypeID(t *testing.T, s *schema.Schema, n string) schema.TypeID {
+func typeMismatchTypeID(t *testing.T, s schema.Schema, n string) schema.TypeID {
 	t.Helper()
 	ty, ok := s.Type(n)
 	if !ok {
@@ -66,30 +69,36 @@ func TestLoad_RefusesEdgeTargetTypeMismatch(t *testing.T) {
 	s := typeMismatchLoad(t)
 	v := instance.NewValidator(s)
 
-	station, res := v.ValidateOne(ctx, "Station", instance.RawInstance{Properties: map[string]any{"id": "a"}})
-	if res.HasErrors() {
-		t.Fatalf("station: %s", res)
+	station, validateErr := v.ValidateOne(ctx, "Station", instance.RawInstance{Properties: map[string]any{"id": "a"}})
+	if validateErr != nil {
+		t.Fatalf("station: %s", validateErr)
 	}
-	sensor, res := v.ValidateOne(ctx, "Sensor", instance.RawInstance{
-		Properties: map[string]any{"id": "s1", "FEED": map[string]any{"_target_id": "a"}},
+	sensor, validateErr := v.ValidateOne(ctx, "Sensor", instance.RawInstance{
+		Properties: map[string]any{"id": "s1", "feed": map[string]any{"_target_id": "a"}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("sensor: %s", res)
+	if validateErr != nil {
+		t.Fatalf("sensor: %s", validateErr)
 	}
 	// A Sensor sharing the target's key, so re-pointing the edge finds a real
 	// instance and E_SNAPSHOT_DANGLING_REFERENCE cannot fire first.
-	decoy, res := v.ValidateOne(ctx, "Sensor", instance.RawInstance{Properties: map[string]any{"id": "a"}})
-	if res.HasErrors() {
-		t.Fatalf("decoy: %s", res)
+	decoy, validateErr := v.ValidateOne(ctx, "Sensor", instance.RawInstance{Properties: map[string]any{"id": "a"}})
+	if validateErr != nil {
+		t.Fatalf("decoy: %s", validateErr)
 	}
 
 	g := graph.New(s)
-	g.Add(ctx, station)
-	g.Add(ctx, sensor)
-	g.Add(ctx, decoy)
-	data, mres := snapshot.Marshal(ctx, g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	if err := g.Add(ctx, station); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	if err := g.Add(ctx, sensor); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	if err := g.Add(ctx, decoy); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	data, err := snapshot.Marshal(ctx, g.Snapshot())
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 
 	doc := string(data)
@@ -103,9 +112,9 @@ func TestLoad_RefusesEdgeTargetTypeMismatch(t *testing.T) {
 		t.Fatalf("no target_type edit possible in %s", doc)
 	}
 
-	_, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
-	if !lres.HasCode(diag.E_SNAPSHOT_TYPE_MISMATCH) {
-		t.Errorf("Load did not refuse an edge target contradicting the association: %s", lres)
+	_, readErr := snapshot.Unmarshal(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	if !errors.Is(readErr, diag.E_SNAPSHOT_TYPE_MISMATCH) {
+		t.Errorf("Load did not refuse an edge target contradicting the association: %s", readErr)
 	}
 }
 
@@ -116,14 +125,14 @@ func TestLoad_RefusesComposedChildTypeMismatch(t *testing.T) {
 	s := typeMismatchLoad(t)
 	sensor, card, tag := typeMismatchTypeID(t, s, "Sensor"), typeMismatchTypeID(t, s, "Card"), typeMismatchTypeID(t, s, "Tag")
 
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{sensor},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     sensor,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "s1"}),
-				Composed: map[string][]graph.InstanceParts{"CARDS": {{
+				Composed: map[string][]snapparts.Instance{"CARDS": {{
 					TypeID:     card,
 					PrimaryKey: immutable.WrapKey([]any{"4242"}),
 					Properties: immutable.WrapProperties(map[string]any{"last4": "4242"}),
@@ -134,7 +143,7 @@ func TestLoad_RefusesComposedChildTypeMismatch(t *testing.T) {
 				TypeID:     sensor,
 				PrimaryKey: immutable.WrapKey([]any{"s2"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "s2"}),
-				Composed: map[string][]graph.InstanceParts{"TAGS": {{
+				Composed: map[string][]snapparts.Instance{"TAGS": {{
 					TypeID:     tag,
 					PrimaryKey: immutable.WrapKey([]any{"t1"}),
 					Properties: immutable.WrapProperties(map[string]any{"label": "t1"}),
@@ -142,12 +151,9 @@ func TestLoad_RefusesComposedChildTypeMismatch(t *testing.T) {
 			},
 		},
 	})
-	if res.HasErrors() {
-		t.Fatalf("rebuild: %s", res)
-	}
-	data, mres := snapshot.Marshal(ctx, built)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	data, err := snapshot.Marshal(ctx, built)
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 
 	doc := string(data)
@@ -158,8 +164,8 @@ func TestLoad_RefusesComposedChildTypeMismatch(t *testing.T) {
 		t.Fatalf("no composed type edit possible in %s", doc)
 	}
 
-	_, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
-	if !lres.HasCode(diag.E_SNAPSHOT_TYPE_MISMATCH) {
-		t.Errorf("Load did not refuse a composed child contradicting the composition: %s", lres)
+	_, readErr := snapshot.Unmarshal(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	if !errors.Is(readErr, diag.E_SNAPSHOT_TYPE_MISMATCH) {
+		t.Errorf("Load did not refuse a composed child contradicting the composition: %s", readErr)
 	}
 }

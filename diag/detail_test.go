@@ -13,6 +13,7 @@ func TestDetailKeyConstants(t *testing.T) {
 		{"DetailKeyTypeName", DetailKeyTypeName},
 		{"DetailKeyPropertyName", DetailKeyPropertyName},
 		{"DetailKeyRelationName", DetailKeyRelationName},
+		{"DetailKeyInvariantName", DetailKeyInvariantName},
 		{"DetailKeyPrimaryKey", DetailKeyPrimaryKey},
 		{"DetailKeyReason", DetailKeyReason},
 		{"DetailKeyField", DetailKeyField},
@@ -23,9 +24,6 @@ func TestDetailKeyConstants(t *testing.T) {
 		{"DetailKeyTargetPK", DetailKeyTargetPK},
 		{"DetailKeyImportPath", DetailKeyImportPath},
 		{"DetailKeyAlias", DetailKeyAlias},
-		{"DetailKeyName", DetailKeyName},
-		{"DetailKeyContext", DetailKeyContext},
-		{"DetailKeyID", DetailKeyID},
 	}
 
 	for _, k := range keys {
@@ -51,6 +49,7 @@ func TestDetailKeyConstants_Uniqueness(t *testing.T) {
 		DetailKeyTypeName,
 		DetailKeyPropertyName,
 		DetailKeyRelationName,
+		DetailKeyInvariantName,
 		DetailKeyPrimaryKey,
 		DetailKeyReason,
 		DetailKeyField,
@@ -61,9 +60,6 @@ func TestDetailKeyConstants_Uniqueness(t *testing.T) {
 		DetailKeyTargetPK,
 		DetailKeyImportPath,
 		DetailKeyAlias,
-		DetailKeyName,
-		DetailKeyContext,
-		DetailKeyID,
 	}
 
 	seen := make(map[string]bool)
@@ -84,7 +80,7 @@ func TestDetailPairBuilders(t *testing.T) {
 		wantKey0, want0 string
 		wantKey1, want1 string
 	}{
-		{"ExpectedGot", ExpectedGot("string", "int"), DetailKeyExpected, "string", DetailKeyGot, "int"},
+		{"expectedGot", expectedGot("string", "int"), DetailKeyExpected, "string", DetailKeyGot, "int"},
 		{"TypeProp", TypeProp("Person", "name"), DetailKeyTypeName, "Person", DetailKeyPropertyName, "name"},
 		{"RelationField", RelationField("owns", "unknownField"), DetailKeyRelationName, "owns", DetailKeyField, "unknownField"},
 		{"TypeField", TypeField("Car", "invalidField"), DetailKeyTypeName, "Car", DetailKeyField, "invalidField"},

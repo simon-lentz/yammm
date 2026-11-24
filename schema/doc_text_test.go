@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // TestLoad_DocTextLosesTheIndentationItsContinuationLinesShare pins the text
@@ -37,9 +36,9 @@ func TestLoad_DocTextLosesTheIndentationItsContinuationLinesShare(t *testing.T) 
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			src := c.comment + "\nschema \"s\"\n\n" + c.comment + "\ntype T {\n    " + c.comment + "\n    id String primary\n}\n"
-			s, res := schema.LoadString(t.Context(), src, "s.yammm")
-			if res.HasErrors() {
-				t.Fatalf("load: %v", res.Err())
+			s, err := schema.LoadString(t.Context(), src, "s.yammm")
+			if err != nil {
+				t.Fatalf("load: %v", err)
 			}
 			typ, ok := s.Type("T")
 			if !ok {
@@ -55,45 +54,5 @@ func TestLoad_DocTextLosesTheIndentationItsContinuationLinesShare(t *testing.T) 
 				}
 			}
 		})
-	}
-}
-
-// TestBuilder_StoresDocumentationAsADocCommentCarriesIt pins that the Builder
-// holds a documentation string to the text a doc comment holding it gives, so
-// a built schema's documentation is what its DSL form loads with.
-func TestBuilder_StoresDocumentationAsADocCommentCarriesIt(t *testing.T) {
-	t.Parallel()
-
-	const doc = "  Summary.\n\n      Detail.\n        Deeper.  "
-	const want = "Summary.\n\nDetail.\n  Deeper."
-	b := schema.NewBuilder().WithName("s").WithDocumentation(doc)
-	b.AddType("T").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithTypeDocumentation(doc).
-		WithInvariant("m", expr.NewLiteral(true), doc).
-		Done()
-	s, res := b.Build()
-	if res.HasErrors() {
-		t.Fatalf("build: %v", res.Err())
-	}
-	typ, ok := s.Type("T")
-	if !ok {
-		t.Fatal("type T missing")
-	}
-	invs := typ.InvariantsSlice()
-	if len(invs) != 1 {
-		t.Fatalf("type T holds %d invariants, want 1", len(invs))
-	}
-	for what, got := range map[string]string{"schema": s.Documentation(), "type": typ.Documentation(), "invariant": invs[0].Documentation()} {
-		if got != want {
-			t.Errorf("%s doc = %q, want %q", what, got, want)
-		}
-	}
-	loaded, res := schema.LoadString(t.Context(), "/* "+doc+" */\nschema \"s\"\n", "s.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
-	}
-	if got := loaded.Documentation(); got != want {
-		t.Errorf("the DSL form loads with %q, want %q", got, want)
 	}
 }

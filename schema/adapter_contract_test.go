@@ -5,8 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -27,9 +29,9 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier(t *testing.T) {
 		"\taddress Email\n" +
 		"}\n"
 
-	s, res := schema.LoadString(context.Background(), src, "ref.yammm")
-	if s == nil {
-		t.Fatalf("fixture does not load: %v", res)
+	s, err := schema.LoadString(context.Background(), src, "ref.yammm")
+	if s.IsZero() {
+		t.Fatalf("fixture does not load: %v", err)
 	}
 
 	prop := findProperty(t, s, "Person", "address")
@@ -39,7 +41,7 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier(t *testing.T) {
 	}
 
 	span := ref.Span()
-	got := src[span.Start.Byte:span.End.Byte]
+	got := src[span.Start.Offset:span.End.Offset]
 	if got != "Email" {
 		t.Errorf("DataTypeRef span slices to %q, want the whole reference %q", got, "Email")
 	}
@@ -58,7 +60,7 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier_Qualified(t *testing.T) {
 		"\taddress types.Email\n" +
 		"}\n"
 
-	parser := schema.TestNewParser(location.MustNewSourceID("test://ref.yammm"), diag.NewCollector(0))
+	parser := schema.TestNewParser(sourcetest.ID("test://ref.yammm"), diag.NewCollector(0))
 	model := parser.Parse([]byte(src))
 	if model == nil || len(model.Types) != 1 || len(model.Types[0].Properties) != 2 {
 		t.Fatalf("fixture did not parse into one type with two properties: %+v", model)
@@ -69,7 +71,7 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier_Qualified(t *testing.T) {
 		t.Fatal("the qualified reference recorded no DataTypeRef")
 	}
 	span := ref.Span()
-	if got := src[span.Start.Byte:span.End.Byte]; got != "types.Email" {
+	if got := src[span.Start.Offset:span.End.Offset]; got != "types.Email" {
 		t.Errorf("DataTypeRef span slices to %q, want the whole reference %q", got, "types.Email")
 	}
 }
@@ -86,8 +88,10 @@ func TestAdapter_NoSchemaNameStopsBeforeCompletion(t *testing.T) {
 
 	const src = "type Alpha {\n\tid Missing\n\tname String required\n}\n"
 
-	s, res := schema.LoadString(context.Background(), src, "headerless.yammm")
-	if s != nil {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(context.Background(), src, "headerless.yammm", schema.WithWarnings(warn))
+	})
+	if !s.IsZero() {
 		t.Fatal("a source with no schema name must not produce a schema")
 	}
 
@@ -106,18 +110,18 @@ func TestAdapter_NoSchemaNameStopsBeforeCompletion(t *testing.T) {
 	}
 }
 
-func findProperty(t *testing.T, s *schema.Schema, typeName, propName string) *schema.Property {
+func findProperty(t *testing.T, s schema.Schema, typeName, propName string) schema.Property {
 	t.Helper()
-	for _, typ := range s.TypesSlice() {
+	for typ := range s.Types() {
 		if typ.Name() != typeName {
 			continue
 		}
-		for _, p := range typ.PropertiesSlice() {
+		for p := range typ.Properties() {
 			if p.Name() == propName {
 				return p
 			}
 		}
 	}
 	t.Fatalf("property %s.%s not found", typeName, propName)
-	return nil
+	return schema.Property{}
 }

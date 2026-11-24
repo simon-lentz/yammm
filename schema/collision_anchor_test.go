@@ -13,7 +13,7 @@ func anchorLine(t *testing.T, src string, res diag.Result, code diag.Code, fragm
 	t.Helper()
 	is, ok := issueWith(res, code, fragment)
 	if !ok {
-		t.Fatalf("want %s mentioning %q; got %v", code, fragment, res.Err())
+		t.Fatalf("want %s mentioning %q; got %v", code, fragment, res)
 	}
 	return strings.TrimSpace(strings.Split(src, "\n")[is.Span().Start.Line-1])
 }
@@ -144,7 +144,7 @@ type T {
 `
 	res := loadRules(t, src)
 	if n := countCode(res, diag.E_CASE_COLLISION); n != 1 {
-		t.Fatalf("want one E_CASE_COLLISION; got %d: %v", n, res.Err())
+		t.Fatalf("want one E_CASE_COLLISION; got %d: %v", n, res)
 	}
 	if got := anchorLine(t, src, res, diag.E_CASE_COLLISION, "firstname"); got != "firstname String" {
 		t.Errorf("anchors at %q, want the second declaration", got)

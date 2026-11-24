@@ -1,10 +1,8 @@
 package schema_test
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,9 +15,9 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/internal/source"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -27,31 +25,35 @@ import (
 // collected issue first so load failures are diagnosable.
 func requireOK(t *testing.T, result diag.Result) {
 	t.Helper()
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Unexpected issue: %v", issue)
 		}
 	}
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	assert.NoError(t, diagtest.Err(result), "Unexpected errors: %v", result)
 }
 
 // loadOK loads source from a string and requires success: a non-nil
 // schema with no error diagnostics (each issue logged on failure).
-func loadOK(t *testing.T, source string) *schema.Schema {
+func loadOK(t *testing.T, source string) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), source, "test.yammm")
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), source, "test.yammm", schema.WithWarnings(warn))
+	})
 	requireOK(t, result)
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	return s
 }
 
-// loadErr loads source from a string and requires failure: a nil schema
+// loadErr loads source from a string and requires failure: a zero schema
 // with error diagnostics. Returns the result for code-level assertions.
 func loadErr(t *testing.T, source string) diag.Result {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), source, "test.yammm")
-	require.Nil(t, s, "load should fail")
-	require.True(t, result.HasErrors(), "load should produce error diagnostics")
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), source, "test.yammm", schema.WithWarnings(warn))
+	})
+	require.True(t, s.IsZero(), "load should fail")
+	require.Error(t, diagtest.Err(result), "load should produce error diagnostics")
 	return result
 }
 
@@ -78,27 +80,9 @@ func TestString_SyntaxError(t *testing.T) {
 	loadErr(t, source)
 }
 
-func TestString_NilContextPanics(t *testing.T) {
-	source := `schema "test"`
-
-	assert.Panics(t, func() {
-		_, _ = schema.LoadString(nil, source, "test.yammm") //nolint:staticcheck // intentional nil
-	})
-}
-
 func TestString_DisallowsImports(t *testing.T) {
 	source := `schema "test" import "./other"`
 	loadErr(t, source)
-}
-
-// TestString_DisallowsImportsEvenWhenAllowed pins that LoadString rejects
-// imports whatever the caller passes: a string has no directory to resolve
-// against, so WithImportsAllowed(true) cannot turn the rejection off.
-func TestString_DisallowsImportsEvenWhenAllowed(t *testing.T) {
-	t.Parallel()
-	_, res := schema.LoadString(t.Context(), `schema "test" import "./other"`, "test.yammm",
-		schema.WithImportsAllowed(true))
-	assert.True(t, res.HasCode(diag.E_IMPORT_NOT_ALLOWED), "expected E_IMPORT_NOT_ALLOWED, got %s", res)
 }
 
 // TestWithImportsAllowed_TrueIsTheDefault is the control for the false arm
@@ -120,12 +104,12 @@ type Bar {
 		filepath.Join(tmpDir, "test.yammm"): []byte(source),
 	}
 
-	_, result := schema.LoadSourcesWithEntry(
-		ctx, sources, filepath.Join(tmpDir, "test.yammm"), tmpDir,
-		schema.WithImportsAllowed(true),
+	_, err := schema.LoadSourcesWithEntry(
+		ctx, sources, filepath.Join(tmpDir, "test.yammm"),
+		schema.WithImportsAllowed(true), schema.WithModuleRoot(tmpDir),
 	)
-	assert.False(t, result.HasCode(diag.E_IMPORT_NOT_ALLOWED), "imports were refused under WithImportsAllowed(true): %s", result)
-	assert.True(t, result.HasCode(diag.E_IMPORT_RESOLVE), "expected the module-style import to be processed and miss under the root: %s", result)
+	require.NotErrorIs(t, err, diag.E_IMPORT_NOT_ALLOWED, "imports were refused under WithImportsAllowed(true): %s", err)
+	require.ErrorIs(t, err, diag.E_IMPORT_RESOLVE, "expected the module-style import to be processed and miss under the root: %s", err)
 }
 
 func TestWithImportsAllowed_FalseRejectsImports(t *testing.T) {
@@ -146,13 +130,15 @@ type Bar {
 		filepath.Join(tmpDir, "test.yammm"): []byte(source),
 	}
 
-	s, result := schema.LoadSourcesWithEntry(
-		ctx, sources, filepath.Join(tmpDir, "test.yammm"), tmpDir,
-		schema.WithImportsAllowed(false),
-	)
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(
+			ctx, sources, filepath.Join(tmpDir, "test.yammm"),
+			schema.WithImportsAllowed(false), schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn),
+		)
+	})
 
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	assert.True(t, s.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	// Verify the specific diagnostic code
 	var foundCode bool
@@ -179,10 +165,10 @@ type Person {
 }`
 
 	ctx := t.Context()
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, err := schema.LoadString(ctx, source, "test.yammm")
 
-	require.False(t, result.HasErrors(), "result: %v", result)
-	require.NotNil(t, s)
+	require.NoError(t, err, "result: %v", err)
+	require.False(t, s.IsZero())
 
 	// Verify datatypes are indexed with preserved case
 	nameType, ok := s.DataType("Name")
@@ -215,31 +201,23 @@ func TestSources_SimpleSchema(t *testing.T) {
 	}
 	ctx := t.Context()
 
-	s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/project")
+	s, err := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", schema.WithModuleRoot("/project"))
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.Equal(t, "main", s.Name())
-	assert.False(t, result.HasErrors())
+	require.NoError(t, err)
 }
 
 func TestSources_EmptySources(t *testing.T) {
 	sources := map[string][]byte{}
 	ctx := t.Context()
 
-	_, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/project")
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", schema.WithModuleRoot("/project"), schema.WithWarnings(warn))
+	})
 
 	require.True(t, result.HasFatal())
 	assert.Contains(t, result.String(), "no sources provided")
-}
-
-func TestSources_NilContextPanics(t *testing.T) {
-	sources := map[string][]byte{
-		"main.yammm": []byte(`schema "main"`),
-	}
-
-	assert.Panics(t, func() {
-		_, _ = schema.LoadSourcesWithEntry(nil, sources, "main.yammm", "/project") //nolint:staticcheck // intentional nil
-	})
 }
 
 func TestSourcesWithEntry_ExplicitEntry(t *testing.T) {
@@ -252,11 +230,11 @@ func TestSourcesWithEntry_ExplicitEntry(t *testing.T) {
 	ctx := t.Context()
 
 	// Explicitly select gamma.yammm as entry (not beta which comes first lexicographically)
-	s, result := schema.LoadSourcesWithEntry(ctx, sources, "gamma.yammm", "/project")
+	s, err := schema.LoadSourcesWithEntry(ctx, sources, "gamma.yammm", schema.WithModuleRoot("/project"))
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.Equal(t, "gamma", s.Name(), "should load gamma schema, not beta")
-	assert.False(t, result.HasErrors())
+	require.NoError(t, err)
 
 	// Verify gamma's type is present
 	_, ok := s.Type("GammaType")
@@ -271,11 +249,11 @@ func TestSourcesWithEntry_FallbackToLexicographic(t *testing.T) {
 	ctx := t.Context()
 
 	// Empty entry path should fall back to lexicographic order (alpha comes first)
-	s, result := schema.LoadSourcesWithEntry(ctx, sources, "", "/project")
+	s, err := schema.LoadSourcesWithEntry(ctx, sources, "", schema.WithModuleRoot("/project"))
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.Equal(t, "alpha", s.Name(), "should load alpha schema (lexicographically first)")
-	assert.False(t, result.HasErrors())
+	require.NoError(t, err)
 }
 
 func TestSourcesWithEntry_EntryNotInSources(t *testing.T) {
@@ -285,27 +263,21 @@ func TestSourcesWithEntry_EntryNotInSources(t *testing.T) {
 	ctx := t.Context()
 
 	// Request an entry that doesn't exist
-	_, result := schema.LoadSourcesWithEntry(ctx, sources, "nonexistent.yammm", "/project")
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(ctx, sources, "nonexistent.yammm", schema.WithModuleRoot("/project"), schema.WithWarnings(warn))
+	})
 
 	require.True(t, result.HasFatal())
 	assert.Contains(t, result.String(), "not found in sources")
-}
-
-func TestSourcesWithEntry_NilContextPanics(t *testing.T) {
-	sources := map[string][]byte{
-		"main.yammm": []byte(`schema "main"`),
-	}
-
-	assert.Panics(t, func() {
-		_, _ = schema.LoadSourcesWithEntry(nil, sources, "main.yammm", "/project") //nolint:staticcheck // intentional nil
-	})
 }
 
 func TestSourcesWithEntry_EmptySources(t *testing.T) {
 	sources := map[string][]byte{}
 	ctx := t.Context()
 
-	_, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/project")
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", schema.WithModuleRoot("/project"), schema.WithWarnings(warn))
+	})
 
 	require.True(t, result.HasFatal())
 	assert.Contains(t, result.String(), "no sources provided")
@@ -314,15 +286,28 @@ func TestSourcesWithEntry_EmptySources(t *testing.T) {
 func TestLoad_FileNotFound(t *testing.T) {
 	ctx := t.Context()
 
-	_, result := schema.Load(ctx, "/nonexistent/path/schema.yammm")
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, "/nonexistent/path/schema.yammm", schema.WithWarnings(warn))
+	})
 
 	require.True(t, result.HasFatal())
 }
 
-func TestLoad_NilContextPanics(t *testing.T) {
-	assert.Panics(t, func() {
-		_, _ = schema.Load(nil, "/some/path.yammm") //nolint:staticcheck // intentional nil
-	})
+func TestLoad_NilContextPanicNamesTheCall(t *testing.T) {
+	sources := map[string][]byte{"main.yammm": []byte(`schema "main"`)}
+	for want, call := range map[string]func(){
+		"schema.Load: nil context": func() {
+			_, _ = schema.Load(nil, "/some/path.yammm") //nolint:staticcheck // intentional nil
+		},
+		"schema.LoadString: nil context": func() {
+			_, _ = schema.LoadString(nil, `schema "test"`, "test.yammm") //nolint:staticcheck // intentional nil
+		},
+		"schema.LoadSourcesWithEntry: nil context": func() {
+			_, _ = schema.LoadSourcesWithEntry(nil, sources, "main.yammm", schema.WithModuleRoot("/project")) //nolint:staticcheck // intentional nil
+		},
+	} {
+		assert.PanicsWithValue(t, want, call)
+	}
 }
 
 func TestLoad_RealFile(t *testing.T) {
@@ -336,9 +321,9 @@ func TestLoad_RealFile(t *testing.T) {
 	ctx := t.Context()
 	s, result := schema.Load(ctx, schemaPath)
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.Equal(t, "test", s.Name())
-	assert.False(t, result.HasErrors())
+	require.NoError(t, result)
 
 	typ, ok := s.Type("User")
 	require.True(t, ok)
@@ -362,16 +347,18 @@ func TestLoad_WithImport(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	require.NotNil(t, s, "Schema should not be nil. Errors: %v", result)
+	require.False(t, s.IsZero(), "Schema should not be nil. Errors: %v", result)
 	assert.Equal(t, "main", s.Name())
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	require.NoError(t, diagtest.Err(result), "Unexpected errors: %v", result)
 
 	typ, ok := s.Type("User")
 	require.True(t, ok)
@@ -397,8 +384,8 @@ func TestLoad_ImportCycle(t *testing.T) {
 	ctx := t.Context()
 	s, result := schema.Load(ctx, aPath, schema.WithModuleRoot(tmpDir))
 
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	assert.True(t, s.IsZero())
+	require.Error(t, result)
 }
 
 func TestLoad_DuplicateImport(t *testing.T) {
@@ -420,36 +407,8 @@ func TestLoad_DuplicateImport(t *testing.T) {
 	ctx := t.Context()
 	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir))
 
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
-}
-
-func TestWithRegistry(t *testing.T) {
-	source := `schema "test" type Person { name String primary }`
-	ctx := t.Context()
-	registry := schema.NewRegistry()
-
-	s, result := schema.LoadString(ctx, source, "test.yammm", schema.WithRegistry(registry))
-
-	require.NotNil(t, s)
-	assert.False(t, result.HasErrors())
-
-	// The schema should be in the provided registry
-	found, ok := registry.LookupByName("test")
-	assert.True(t, ok)
-	assert.Same(t, s, found)
-}
-
-func TestWithIssueLimit(t *testing.T) {
-	// Test that issue limit option is respected
-	source := `schema "test" type Person { name String primary }`
-	ctx := t.Context()
-
-	// Test with issue limit (should still work for valid schema)
-	s, result := schema.LoadString(ctx, source, "test.yammm", schema.WithIssueLimit(1))
-
-	assert.NotNil(t, s)
-	assert.False(t, result.HasErrors())
+	assert.True(t, s.IsZero())
+	require.Error(t, result)
 }
 
 func TestLoad_ReservedKeywordAlias(t *testing.T) {
@@ -470,8 +429,8 @@ func TestLoad_ReservedKeywordAlias(t *testing.T) {
 	ctx := t.Context()
 	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir))
 
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	assert.True(t, s.IsZero())
+	require.Error(t, result)
 }
 
 func TestLoad_PathEscape(t *testing.T) {
@@ -493,10 +452,12 @@ func TestLoad_PathEscape(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(moduleRoot))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, mainPath, schema.WithModuleRoot(moduleRoot), schema.WithWarnings(warn))
+	})
 
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	assert.True(t, s.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	// Verify the error is about path escape
 	found := false
@@ -530,13 +491,13 @@ func TestLoad_SymlinkCanonicalization(t *testing.T) {
 
 	// Load via symlink
 	s1, result1 := schema.Load(ctx, linkPath)
-	require.NotNil(t, s1)
-	assert.False(t, result1.HasErrors())
+	require.False(t, s1.IsZero())
+	require.NoError(t, result1)
 
 	// Load directly
 	s2, result2 := schema.Load(ctx, schemaPath)
-	require.NotNil(t, s2)
-	assert.False(t, result2.HasErrors())
+	require.False(t, s2.IsZero())
+	require.NoError(t, result2)
 
 	// Both should resolve to the same SourceID
 	assert.Equal(t, s1.SourceID(), s2.SourceID(), "Symlink and direct path should resolve to same SourceID")
@@ -552,22 +513,24 @@ type Item {
 }`
 	ctx := t.Context()
 
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, err := schema.LoadString(ctx, source, "test.yammm")
 
-	require.NotNil(t, s)
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	require.False(t, s.IsZero())
+	require.NoError(t, err, "Unexpected errors: %v", err)
 
 	itemType, ok := s.Type("Item")
 	require.True(t, ok)
 
-	invs := itemType.InvariantsSlice()
+	invs := slices.Collect(itemType.Invariants())
 	require.Len(t, invs, 1)
 
-	e := invs[0].Expression()
+	e := expr.InvariantExpression(invs[0])
 	require.NotNil(t, e, "invariant expression should survive load pipeline")
 
-	// Verify the expression operator (Expression() now returns expr.Expression directly)
-	assert.Equal(t, ">=", e.Op(), "expression should be a >= comparison")
+	// Verify the expression operator (the hook returns expr.Expression directly)
+	sexpr, ok := e.(expr.SExpr)
+	require.True(t, ok, "the expression is %T; want an expr.SExpr", e)
+	assert.Equal(t, ">=", sexpr.Op(), "expression should be a >= comparison")
 }
 
 func TestString_RelationTargetIDResolved(t *testing.T) {
@@ -581,15 +544,15 @@ type Owner {
 }`
 	ctx := t.Context()
 
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, err := schema.LoadString(ctx, source, "test.yammm")
 
-	require.NotNil(t, s)
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	require.False(t, s.IsZero())
+	require.NoError(t, err, "Unexpected errors: %v", err)
 
 	ownerType, ok := s.Type("Owner")
 	require.True(t, ok)
 
-	assocs := ownerType.AssociationsSlice()
+	assocs := slices.Collect(ownerType.Associations())
 	require.Len(t, assocs, 1)
 
 	rel := assocs[0]
@@ -609,15 +572,15 @@ type Container {
 }`
 	ctx := t.Context()
 
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, err := schema.LoadString(ctx, source, "test.yammm")
 
-	require.NotNil(t, s)
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	require.False(t, s.IsZero())
+	require.NoError(t, err, "Unexpected errors: %v", err)
 
 	containerType, ok := s.Type("Container")
 	require.True(t, ok)
 
-	comps := containerType.CompositionsSlice()
+	comps := slices.Collect(containerType.Compositions())
 	require.Len(t, comps, 1)
 
 	rel := comps[0]
@@ -642,20 +605,22 @@ type Owner { id String primary --> REL t.Entity }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	require.NotNil(t, s, "Schema should not be nil. Errors: %v", result)
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	require.False(t, s.IsZero(), "Schema should not be nil. Errors: %v", result)
+	require.NoError(t, diagtest.Err(result), "Unexpected errors: %v", result)
 
 	ownerType, ok := s.Type("Owner")
 	require.True(t, ok)
 
-	assocs := ownerType.AssociationsSlice()
+	assocs := slices.Collect(ownerType.Associations())
 	require.Len(t, assocs, 1)
 
 	rel := assocs[0]
@@ -682,20 +647,22 @@ type Container { id String primary *-> WIDGETS c.Widget }`
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	require.NotNil(t, s, "Schema should not be nil. Errors: %v", result)
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	require.False(t, s.IsZero(), "Schema should not be nil. Errors: %v", result)
+	require.NoError(t, diagtest.Err(result), "Unexpected errors: %v", result)
 
 	containerType, ok := s.Type("Container")
 	require.True(t, ok)
 
-	comps := containerType.CompositionsSlice()
+	comps := slices.Collect(containerType.Compositions())
 	require.Len(t, comps, 1)
 
 	rel := comps[0]
@@ -707,7 +674,7 @@ type Container { id String primary *-> WIDGETS c.Widget }`
 }
 
 // TestString_Contract19_SchemaNilWhenErrorsExist verifies:
-// Schema must be nil whenever Result.HasErrors() is true.
+// the Schema is zero whenever the load returns an error.
 // This test uses a validation error (undefined type reference) rather than a parse error
 // to ensure the invariant holds through the completion phase.
 func TestString_Contract19_SchemaNilWhenErrorsExist(t *testing.T) {
@@ -719,11 +686,11 @@ type Person {
 }`
 	ctx := t.Context()
 
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, err := schema.LoadString(ctx, source, "test.yammm")
 
 	// schema must be nil when errors exist
-	require.True(t, result.HasErrors(), "should have validation errors for undefined type")
-	require.Nil(t, s, "schema must be nil when Result.HasErrors() is true")
+	require.Error(t, err, "should have validation errors for undefined type")
+	require.True(t, s.IsZero(), "the schema must be zero beside an error")
 }
 
 // TestSources_RecoveryAfterParseFailure verifies that the loader properly cleans up
@@ -742,9 +709,9 @@ type Person {
 }`),
 	}
 
-	s1, result1 := schema.LoadSourcesWithEntry(ctx, brokenSources, "main.yammm", tmpDir)
-	require.True(t, result1.HasErrors(), "should have parse errors")
-	require.Nil(t, s1, "schema should be nil on errors")
+	s1, err := schema.LoadSourcesWithEntry(ctx, brokenSources, "main.yammm", schema.WithModuleRoot(tmpDir))
+	require.Error(t, err, "should have parse errors")
+	require.True(t, s1.IsZero(), "schema should be nil on errors")
 
 	// Step 2: Fix the schema and reload (simulating user fixing the file)
 	// This MUST succeed - if loadingSchemas was not cleaned up properly,
@@ -756,9 +723,9 @@ type Person {
 }`),
 	}
 
-	s2, result2 := schema.LoadSourcesWithEntry(ctx, fixedSources, "main.yammm", tmpDir)
-	require.False(t, result2.HasErrors(), "fixed schema should have no errors: %v", result2)
-	require.NotNil(t, s2, "fixed schema should load successfully")
+	s2, err := schema.LoadSourcesWithEntry(ctx, fixedSources, "main.yammm", schema.WithModuleRoot(tmpDir))
+	require.NoError(t, err, "fixed schema should have no errors: %v", err)
+	require.False(t, s2.IsZero(), "fixed schema should load successfully")
 }
 
 // TestLoad_CrossSchemaInheritance_AllProperties verifies that cross-schema
@@ -785,21 +752,23 @@ type Child extends b.Base {
 	require.NoError(t, os.WriteFile(derivedPath, []byte(derivedContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, derivedPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, derivedPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	require.NotNil(t, s, "Schema should not be nil. Errors: %v", result)
-	assert.False(t, result.HasErrors())
+	require.False(t, s.IsZero(), "Schema should not be nil. Errors: %v", result)
+	require.NoError(t, diagtest.Err(result))
 
 	child, ok := s.Type("Child")
 	require.True(t, ok)
 
 	// Verify inherited properties are visible
-	allProps := child.AllPropertiesSlice()
+	allProps := slices.Collect(child.AllProperties())
 	propNames := make([]string, len(allProps))
 	for i, p := range allProps {
 		propNames[i] = p.Name()
@@ -811,12 +780,12 @@ type Child extends b.Base {
 	assert.Len(t, allProps, 3, "should have exactly 3 properties (2 inherited + 1 own)")
 
 	// Verify own properties are accessible
-	props := child.PropertiesSlice()
+	props := slices.Collect(child.Properties())
 	assert.Len(t, props, 1, "should have 1 own property")
 	assert.Equal(t, "age", props[0].Name())
 
 	// Verify supertype relationship
-	superTypes := child.SuperTypesSlice()
+	superTypes := slices.Collect(child.SuperTypes())
 	require.Len(t, superTypes, 1)
 	assert.Equal(t, "Base", superTypes[0].Name())
 }
@@ -838,9 +807,9 @@ type Person {
 		"helper.yammm": []byte(`INVALID`),
 	}
 
-	s1, result1 := schema.LoadSourcesWithEntry(ctx, brokenSources, "main.yammm", tmpDir)
-	require.True(t, result1.HasErrors())
-	require.Nil(t, s1)
+	s1, err := schema.LoadSourcesWithEntry(ctx, brokenSources, "main.yammm", schema.WithModuleRoot(tmpDir))
+	require.Error(t, err)
+	require.True(t, s1.IsZero())
 
 	// Step 2: Fix the helper and reload
 	// Both main.yammm AND helper.yammm markers must have been cleaned up
@@ -856,9 +825,9 @@ type Base {
 }`),
 	}
 
-	s2, result2 := schema.LoadSourcesWithEntry(ctx, fixedSources, "main.yammm", tmpDir)
-	require.False(t, result2.HasErrors(), "should not report false import cycle: %v", result2)
-	require.NotNil(t, s2)
+	s2, err := schema.LoadSourcesWithEntry(ctx, fixedSources, "main.yammm", schema.WithModuleRoot(tmpDir))
+	require.NoError(t, err, "should not report false import cycle: %v", err)
+	require.False(t, s2.IsZero())
 }
 
 // TestLoad_MultiImportSameLevel verifies that a schema importing multiple other
@@ -889,20 +858,22 @@ type Connector {
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, aPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, aPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	require.NotNil(t, s, "Schema should not be nil. Errors: %v", result)
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	require.False(t, s.IsZero(), "Schema should not be nil. Errors: %v", result)
+	require.NoError(t, diagtest.Err(result), "Unexpected errors: %v", result)
 
 	conn, ok := s.Type("Connector")
 	require.True(t, ok)
 
-	assocs := conn.AssociationsSlice()
+	assocs := slices.Collect(conn.Associations())
 	require.Len(t, assocs, 2)
 
 	// Verify both cross-schema relations are properly resolved
@@ -912,7 +883,7 @@ type Connector {
 	}
 
 	// Verify imports are present
-	imports := s.ImportsSlice()
+	imports := slices.Collect(s.Imports())
 	require.Len(t, imports, 2, "should have 2 imports")
 
 	aliases := make([]string, len(imports))
@@ -948,18 +919,20 @@ type Top extends b.Middle { age Integer }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, aPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, aPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	require.NotNil(t, s, "Schema should not be nil. Errors: %v", result)
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	require.False(t, s.IsZero(), "Schema should not be nil. Errors: %v", result)
+	require.NoError(t, diagtest.Err(result), "Unexpected errors: %v", result)
 
 	// Verify A only has import for B, not D (D is B's transitive dependency)
-	imports := s.ImportsSlice()
+	imports := slices.Collect(s.Imports())
 	require.Len(t, imports, 1, "A should only have 1 import (b), not transitive (d)")
 	assert.Equal(t, "b", imports[0].Alias())
 
@@ -967,7 +940,7 @@ type Top extends b.Middle { age Integer }`
 	top, ok := s.Type("Top")
 	require.True(t, ok)
 
-	allProps := top.AllPropertiesSlice()
+	allProps := slices.Collect(top.AllProperties())
 	propNames := make([]string, len(allProps))
 	for i, p := range allProps {
 		propNames[i] = p.Name()
@@ -1014,20 +987,22 @@ type AType {
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, aPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, aPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	require.NotNil(t, s, "Schema should not be nil. Errors: %v", result)
-	assert.False(t, result.HasErrors(), "Unexpected errors: %v", result)
+	require.False(t, s.IsZero(), "Schema should not be nil. Errors: %v", result)
+	require.NoError(t, diagtest.Err(result), "Unexpected errors: %v", result)
 
 	atype, ok := s.Type("AType")
 	require.True(t, ok)
 
-	assocs := atype.AssociationsSlice()
+	assocs := slices.Collect(atype.Associations())
 	require.Len(t, assocs, 2)
 
 	// Both relations should be resolved
@@ -1037,7 +1012,7 @@ type AType {
 	}
 
 	// Verify A has 2 imports (b and c)
-	imports := s.ImportsSlice()
+	imports := slices.Collect(s.Imports())
 	require.Len(t, imports, 2, "A should have 2 imports (b and c)")
 }
 
@@ -1060,10 +1035,12 @@ func TestLoad_PathEscape_MultiLevel(t *testing.T) {
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(moduleRoot))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, mainPath, schema.WithModuleRoot(moduleRoot), schema.WithWarnings(warn))
+	})
 
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	assert.True(t, s.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	// Verify the error is about path escape
 	found := false
@@ -1103,10 +1080,12 @@ func TestLoad_SymlinkEscape(t *testing.T) {
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(moduleRoot))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, mainPath, schema.WithModuleRoot(moduleRoot), schema.WithWarnings(warn))
+	})
 
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	assert.True(t, s.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	// Should fail due to symlink escape - os.Root blocks symlink escapes
 	found := false
@@ -1135,20 +1114,22 @@ func TestLoad_BoundaryPath_AtRoot(t *testing.T) {
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	require.NotNil(t, s, "Schema should load: %v", result)
-	assert.False(t, result.HasErrors())
+	require.False(t, s.IsZero(), "Schema should load: %v", result)
+	require.NoError(t, diagtest.Err(result))
 
 	// Verify the import worked
 	user, ok := s.Type("User")
 	require.True(t, ok)
-	allProps := user.AllPropertiesSlice()
+	allProps := slices.Collect(user.AllProperties())
 	assert.Len(t, allProps, 2) // id from Base + name from User
 }
 
@@ -1178,11 +1159,13 @@ func TestLoad_SymlinkWithinModuleRoot_Blocked(t *testing.T) {
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
 	// os.Root blocks ALL symlinks, even internal ones - this is security-correct
-	assert.Nil(t, s, "symlink imports should be blocked by os.Root")
-	assert.True(t, result.HasErrors())
+	assert.True(t, s.IsZero(), "symlink imports should be blocked by os.Root")
+	require.Error(t, diagtest.Err(result))
 
 	// Verify the error mentions escape (os.Root treats symlinks as escapes)
 	found := false
@@ -1212,16 +1195,18 @@ func TestLoad_DotDotInMiddleOfPath(t *testing.T) {
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, mainPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
 	// This should work because "../helper" from subdir/ stays within module root
-	require.NotNil(t, s, "Relative import staying within root should work: %v", result)
-	assert.False(t, result.HasErrors())
+	require.False(t, s.IsZero(), "Relative import staying within root should work: %v", result)
+	assert.NoError(t, diagtest.Err(result))
 }
 
 func TestString_CancellationReturnsError(t *testing.T) {
@@ -1231,10 +1216,12 @@ func TestString_CancellationReturnsError(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(ctx, source, "test.yammm", schema.WithWarnings(warn))
+	})
 
 	// Cancellation produces a fatal diagnostic with E_CONTEXT_CANCELLED
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 	require.True(t, result.HasFatal(), "cancellation should produce fatal diagnostic")
 
 	// Verify the diagnostic uses E_CONTEXT_CANCELLED, not E_INTERNAL
@@ -1255,9 +1242,11 @@ func TestString_DeadlineExceededReturnsError(t *testing.T) {
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-1*time.Second))
 	defer cancel()
 
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(ctx, source, "test.yammm", schema.WithWarnings(warn))
+	})
 
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 	require.True(t, result.HasFatal(), "deadline exceeded should produce fatal diagnostic")
 
 	var foundCancelled bool
@@ -1283,9 +1272,11 @@ func TestLoad_CancellationDuringImport(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	s, result := schema.Load(ctx, aPath, schema.WithModuleRoot(tmpDir))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, aPath, schema.WithModuleRoot(tmpDir), schema.WithWarnings(warn))
+	})
 
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 	require.True(t, result.HasFatal(), "cancellation should produce fatal diagnostic")
 }
 
@@ -1312,15 +1303,17 @@ type Top { id String primary --> MIDDLE (one) b.Middle }`
 	require.NoError(t, os.WriteFile(aPath, []byte(aContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, aPath, schema.WithModuleRoot(moduleRoot))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, aPath, schema.WithModuleRoot(moduleRoot), schema.WithWarnings(warn))
+	})
 
-	require.NotNil(t, s)
-	if result.HasErrors() {
+	require.False(t, s.IsZero())
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	assert.False(t, result.HasErrors())
+	assert.NoError(t, diagtest.Err(result))
 }
 
 func TestLoad_CycleDetection(t *testing.T) {
@@ -1342,11 +1335,13 @@ type TypeB { ref a.TypeA }`
 	require.NoError(t, os.WriteFile(bPath, []byte(bContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, aPath, schema.WithModuleRoot(moduleRoot))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, aPath, schema.WithModuleRoot(moduleRoot), schema.WithWarnings(warn))
+	})
 
 	// Cycle should be detected
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	assert.True(t, s.IsZero())
+	require.Error(t, diagtest.Err(result))
 	// Check for cycle error
 	hasImportCycle := false
 	for _, issue := range slices.Collect(result.Issues()) {
@@ -1362,10 +1357,12 @@ func TestLoad_NonExistentPath(t *testing.T) {
 	// Test loading from a path that doesn't exist
 	ctx := t.Context()
 
-	s, result := schema.Load(ctx, "/nonexistent/path/to/schema.yammm")
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, "/nonexistent/path/to/schema.yammm", schema.WithWarnings(warn))
+	})
 
 	require.True(t, result.HasFatal())
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 }
 
 func TestSources_ImportBetweenSources(t *testing.T) {
@@ -1392,14 +1389,16 @@ type Derived extends b.BaseEntity {
 		derivedPath: derivedContent,
 	}
 
-	s, result := schema.LoadSourcesWithEntry(ctx, sources, derivedPath, moduleRoot)
-	if result.HasErrors() {
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(ctx, sources, derivedPath, schema.WithModuleRoot(moduleRoot), schema.WithWarnings(warn))
+	})
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 		t.FailNow()
 	}
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 }
 
 func TestSources_ContextCancellation(t *testing.T) {
@@ -1417,30 +1416,12 @@ func TestSources_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	s, result := schema.LoadSourcesWithEntry(ctx, sources, mainPath, moduleRoot)
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(ctx, sources, mainPath, schema.WithModuleRoot(moduleRoot), schema.WithWarnings(warn))
+	})
 
 	require.True(t, result.HasFatal(), "cancellation should produce fatal diagnostic")
-	assert.Nil(t, s)
-}
-
-func TestLoad_WithLogger(t *testing.T) {
-	// Test that WithLogger option works
-	moduleRoot := t.TempDir()
-
-	mainPath := filepath.Join(moduleRoot, "main.yammm")
-	mainContent := `schema "main" type Person { name String primary }`
-	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
-
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-
-	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath,
-		schema.WithModuleRoot(moduleRoot),
-		schema.WithLogger(logger))
-
-	require.NotNil(t, s)
-	assert.False(t, result.HasErrors())
+	assert.True(t, s.IsZero())
 }
 
 func TestLoad_MultipleImports(t *testing.T) {
@@ -1472,10 +1453,10 @@ type Combined {
 	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath, schema.WithModuleRoot(moduleRoot))
+	s, err := schema.Load(ctx, mainPath, schema.WithModuleRoot(moduleRoot))
 
-	require.NotNil(t, s)
-	assert.False(t, result.HasErrors())
+	require.False(t, s.IsZero())
+	require.NoError(t, err)
 }
 
 func TestString_InvalidSyntax(t *testing.T) {
@@ -1487,10 +1468,10 @@ type Entity {
 	name String
 	// missing closing brace`
 
-	s, result := schema.LoadString(ctx, source, "test://broken.yammm")
+	s, err := schema.LoadString(ctx, source, "test://broken.yammm")
 
-	assert.Nil(t, s)
-	assert.True(t, result.HasErrors())
+	assert.True(t, s.IsZero())
+	require.Error(t, err)
 }
 
 func TestString_ContextCancellation(t *testing.T) {
@@ -1499,33 +1480,12 @@ func TestString_ContextCancellation(t *testing.T) {
 	cancel()
 
 	source := `schema "test" type Test { name String }`
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(ctx, source, "test.yammm", schema.WithWarnings(warn))
+	})
 
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 	require.True(t, result.HasFatal(), "cancellation should produce fatal diagnostic")
-}
-
-func TestLoad_WithSchemaRegistry(t *testing.T) {
-	// Test loading with a pre-populated schema registry
-	tmpDir := t.TempDir()
-
-	schemaPath := filepath.Join(tmpDir, "test.yammm")
-	content := `schema "test" type Test { name String primary }`
-	require.NoError(t, os.WriteFile(schemaPath, []byte(content), 0o600))
-
-	// Create a registry
-	reg := schema.NewRegistry()
-
-	ctx := t.Context()
-	s, result := schema.Load(ctx, schemaPath, schema.WithRegistry(reg))
-
-	require.NotNil(t, s)
-	assert.False(t, result.HasErrors())
-
-	// Verify schema was registered
-	found, ok := reg.LookupBySourceID(s.SourceID())
-	assert.NotNil(t, found)
-	assert.True(t, ok)
 }
 
 func TestLoad_DiamondImport(t *testing.T) {
@@ -1561,15 +1521,17 @@ type TypeA {
 }`), 0o600))
 
 	ctx := t.Context()
-	s, result := schema.Load(ctx, aPath, schema.WithModuleRoot(moduleRoot))
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(ctx, aPath, schema.WithModuleRoot(moduleRoot), schema.WithWarnings(warn))
+	})
 
-	require.NotNil(t, s)
-	if result.HasErrors() {
+	require.False(t, s.IsZero())
+	if diagtest.Err(result) != nil {
 		for _, issue := range slices.Collect(result.Issues()) {
 			t.Logf("Error: %v", issue)
 		}
 	}
-	assert.False(t, result.HasErrors())
+	assert.NoError(t, diagtest.Err(result))
 }
 
 // TestString_InvariantUnknownProperty verifies that an invariant referencing
@@ -1586,10 +1548,12 @@ type Person {
 }`
 	ctx := t.Context()
 
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(ctx, source, "test.yammm", schema.WithWarnings(warn))
+	})
 
-	require.True(t, result.HasErrors(), "should have validation errors for unknown property")
-	require.Nil(t, s, "schema must be nil when Result.HasErrors() is true")
+	require.Error(t, diagtest.Err(result), "should have validation errors for unknown property")
+	require.True(t, s.IsZero(), "the schema must be zero beside an error")
 
 	found := false
 	for _, issue := range slices.Collect(result.Issues()) {
@@ -1618,20 +1582,20 @@ type Person {
 }`
 	ctx := t.Context()
 
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, err := schema.LoadString(ctx, source, "test.yammm")
 
-	require.NotNil(t, s, "schema should compile successfully")
-	assert.False(t, result.HasErrors(), "unexpected errors: %v", result)
+	require.False(t, s.IsZero(), "schema should compile successfully")
+	require.NoError(t, err, "unexpected errors: %v", err)
 
 	personType, ok := s.Type("Person")
 	require.True(t, ok, "Person type should exist")
 
-	invs := personType.InvariantsSlice()
+	invs := slices.Collect(personType.Invariants())
 	require.Len(t, invs, 2, "should have two invariants")
 
 	// Verify both invariant expressions survived the pipeline
 	for _, inv := range invs {
-		require.NotNil(t, inv.Expression(),
+		require.NotNil(t, expr.InvariantExpression(inv),
 			"invariant %q expression should survive load pipeline", inv.Name())
 	}
 }
@@ -1658,10 +1622,12 @@ type Order {
 }`
 	ctx := t.Context()
 
-	s, result := schema.LoadString(ctx, source, "test.yammm")
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(ctx, source, "test.yammm", schema.WithWarnings(warn))
+	})
 
-	require.True(t, result.HasErrors(), "should have validation errors for unknown property on LineItem")
-	require.Nil(t, s, "schema must be nil when Result.HasErrors() is true")
+	require.Error(t, diagtest.Err(result), "should have validation errors for unknown property on LineItem")
+	require.True(t, s.IsZero(), "the schema must be zero beside an error")
 
 	found := false
 	for _, issue := range slices.Collect(result.Issues()) {
@@ -1676,14 +1642,12 @@ type Order {
 	assert.True(t, found, "expected E_UNKNOWN_PROPERTY for nonexistent on LineItem")
 }
 
-// --- Shared-Registry cross-Load tests ---
-
-// writeSharedRegistryFixtures sets up a tempdir with:
+// writeTwoRootsOverACommonImport sets up a tempdir with:
 //   - common.yammm — a leaf schema shared as a transitive import
 //   - root_a.yammm, root_b.yammm — two independent roots both importing common
 //
 // Returns the tempdir path. Fixtures live only for the test's duration via t.TempDir().
-func writeSharedRegistryFixtures(t *testing.T) string {
+func writeTwoRootsOverACommonImport(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -1710,182 +1674,36 @@ type HolderB { id String primary --> REF (one) c.BaseCommon }`),
 	return dir
 }
 
-// resolveImportSchema returns the resolved *Schema for the import with the
-// given alias on s. Fails the test if no such import is present. Reusable
-// helper — kept general rather than hard-coding the "c" alias so future
-// shared-Registry tests with different alias conventions can use it.
-//
-//nolint:unparam // kept general for future callers
-func resolveImportSchema(t *testing.T, s *schema.Schema, alias string) *schema.Schema {
+// resolveImportSchema returns the resolved Schema for the import with the
+// given alias on s. Fails the test if no such import is present.
+func resolveImportSchema(t *testing.T, s schema.Schema, alias string) schema.Schema {
 	t.Helper()
 	imp, ok := s.ImportByAlias(alias)
 	require.True(t, ok, "import alias %q not found on schema %q", alias, s.Name())
 	resolved := imp.Schema()
-	require.NotNil(t, resolved, "import %q on schema %q has no resolved schema", alias, s.Name())
+	require.False(t, resolved.IsZero(), "import %q on schema %q has no resolved schema", alias, s.Name())
 	return resolved
 }
 
-func TestLoad_SharedRegistry_NonOverlapping(t *testing.T) {
-	// Two independent schemas with no shared imports, one shared Registry.
-	// Both Load calls must succeed; registry must end with exactly 2 schemas.
-	dir := t.TempDir()
-
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "alpha.yammm"),
-		[]byte(`schema "alpha" type Alpha { id String primary }`),
-		0o600,
-	))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "beta.yammm"),
-		[]byte(`schema "beta" type Beta { id String primary }`),
-		0o600,
-	))
-
-	ctx := t.Context()
-	reg := schema.NewRegistry()
-
-	sA, resA := schema.Load(ctx, filepath.Join(dir, "alpha.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.NotNil(t, sA)
-	require.False(t, resA.HasErrors(), "errors: %v", resA)
-
-	sB, resB := schema.Load(ctx, filepath.Join(dir, "beta.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.NotNil(t, sB)
-	require.False(t, resB.HasErrors(), "errors: %v", resB)
-
-	assert.Equal(t, 2, reg.Len(), "non-overlapping loads: registry holds exactly both roots")
-}
-
-func TestLoad_SharedRegistry_OverlappingImports(t *testing.T) {
-	// The core cross-Load short-circuit test. Two roots both importing
-	// common.yammm against a shared Registry: each root registers once,
-	// common.yammm registers once, reg.Len() == 3.
-	dir := writeSharedRegistryFixtures(t)
-
-	ctx := t.Context()
-	reg := schema.NewRegistry()
-
-	sA, resA := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.NotNil(t, sA)
-	require.False(t, resA.HasErrors(), "errors: %v", resA)
-
-	sB, resB := schema.Load(ctx, filepath.Join(dir, "root_b.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.NotNil(t, sB)
-	require.False(t, resB.HasErrors(), "errors: %v", resB)
-
-	assert.Equal(t, 3, reg.Len(), "expected registry: [common, root_a, root_b]")
-
-	// The common-schema pointer must be identical across both root schemas.
-	// This is the direct observation of the cross-Load short-circuit: both
-	// Loads resolved the import to the same *Schema pointer.
-	commonFromA := resolveImportSchema(t, sA, "c")
-	commonFromB := resolveImportSchema(t, sB, "c")
-	assert.Same(t, commonFromA, commonFromB,
-		"cross-Load short-circuit must resolve overlapping imports to the same *Schema pointer")
-
-	// And the registry's stored pointer must match both.
-	regCommon, ok := reg.LookupBySourceID(commonFromA.SourceID())
-	require.True(t, ok, "common schema must be in the registry")
-	assert.Same(t, commonFromA, regCommon,
-		"registry-stored pointer must match the pointer resolved through Import.Schema()")
-}
-
-func TestLoad_SharedRegistry_ObservesCrossLoadShortCircuit(t *testing.T) {
-	// Stronger observation: delete the common-schema source file after the
-	// first Load. The second Load must still succeed — which is only possible
-	// if the cross-Load short-circuit fired before the parse path (which
-	// would have tried to read the deleted file).
-	dir := writeSharedRegistryFixtures(t)
-
-	ctx := t.Context()
-	reg := schema.NewRegistry()
-
-	sA, resA := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.NotNil(t, sA)
-	require.False(t, resA.HasErrors(), "first load unexpectedly failed: %v", resA)
-
-	// Remove the shared import source. A naive second Load that re-parses
-	// the transitive import would fail with a file-not-found style error.
-	require.NoError(t, os.Remove(filepath.Join(dir, "common.yammm")))
-
-	sB, resB := schema.Load(ctx, filepath.Join(dir, "root_b.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.NotNil(t, sB,
-		"second Load must succeed via the cross-Load short-circuit; common.yammm was deleted")
-	require.False(t, resB.HasErrors(),
-		"no parse of common.yammm should occur on the second Load — errors: %v",
-		resB)
-
-	// Sanity: the second Load's resolved common pointer must equal the first's.
-	assert.Same(t,
-		resolveImportSchema(t, sA, "c"),
-		resolveImportSchema(t, sB, "c"),
-		"cross-Load short-circuit must reuse the first Load's common *Schema")
-}
-
-func TestLoad_DefaultFreshRegistryPerCall(t *testing.T) {
-	// Pin the default: when WithRegistry is absent, each Load constructs its
-	// own Registry, so two independent Loads do not share state. Guards against
-	// an accidental future change that would flip the default to shared.
-	dir := writeSharedRegistryFixtures(t)
+func TestLoad_EachCallCompilesItsOwnSchemas(t *testing.T) {
+	// Two independent Loads share no state.
+	dir := writeTwoRootsOverACommonImport(t)
 	ctx := t.Context()
 
-	sA, resA := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
+	sA, err := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
 		schema.WithModuleRoot(dir))
-	require.NotNil(t, sA)
-	require.False(t, resA.HasErrors())
+	require.False(t, sA.IsZero())
+	require.NoError(t, err)
 
-	sB, resB := schema.Load(ctx, filepath.Join(dir, "root_b.yammm"),
+	sB, err := schema.Load(ctx, filepath.Join(dir, "root_b.yammm"),
 		schema.WithModuleRoot(dir))
-	require.NotNil(t, sB)
-	require.False(t, resB.HasErrors())
+	require.False(t, sB.IsZero())
+	require.NoError(t, err)
 
-	// Each Load materialized its own common-schema instance (no Registry was
-	// shared). Different pointers prove the per-Load default is intact.
-	assert.NotSame(t,
-		resolveImportSchema(t, sA, "c"),
-		resolveImportSchema(t, sB, "c"),
-		"fresh-Registry default: independent Loads must produce independent *Schema pointers for shared imports")
-}
-
-func TestLoad_SharedRegistry_TopLevelReparse(t *testing.T) {
-	// One object per SourceID for everyone reading a registry: Load(A) twice
-	// against one Registry compiles A twice, Register keeps the first, and
-	// the second Load returns that same registered object rather than its
-	// own discarded compile — exactly as an import re-loaded by two loads
-	// does.
-	dir := t.TempDir()
-	aPath := filepath.Join(dir, "a.yammm")
-	require.NoError(t, os.WriteFile(aPath,
-		[]byte(`schema "root" type Root { id String primary }`), 0o600))
-
-	ctx := t.Context()
-	reg := schema.NewRegistry()
-
-	s1, res1 := schema.Load(ctx, aPath,
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.NotNil(t, s1)
-	require.False(t, res1.HasErrors())
-
-	s2, res2 := schema.Load(ctx, aPath,
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.NotNil(t, s2)
-	require.False(t, res2.HasErrors(),
-		"second Load must succeed — Register hits the idempotence path, not the error path: %v",
-		res2)
-
-	assert.Same(t, s1, s2,
-		"a root re-loaded against a registry that holds it returns the registered object")
-
-	// The registry retained the first pointer (idempotent Register is a no-op).
-	regStored, ok := reg.LookupBySourceID(s1.SourceID())
-	require.True(t, ok)
-	assert.Same(t, s1, regStored,
-		"registry must retain the first Load's pointer; idempotent Register must not overwrite")
+	// Each Load materialized its own common-schema instance.
+	if resolveImportSchema(t, sA, "c") == resolveImportSchema(t, sB, "c") {
+		t.Error("independent Loads must produce independent Schema records for shared imports")
+	}
 }
 
 // canonicalPath is the existing path as its directories list it, read by
@@ -1938,7 +1756,9 @@ func TestModuleRoot_Recorded(t *testing.T) {
 		// independent of whatever sits above the temp root, and the nearest-
 		// ancestor rule means it names exactly the directory asserted below.
 		require.NoError(t, os.WriteFile(filepath.Join(dir, schema.ModuleRootMarker), nil, 0o600))
-		s, res := schema.Load(ctx, path)
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(ctx, path, schema.WithWarnings(warn))
+		})
 		requireOK(t, res)
 		assert.Equal(t, canonicalPath(t, dir), s.ModuleRoot())
 	})
@@ -1946,59 +1766,37 @@ func TestModuleRoot_Recorded(t *testing.T) {
 	t.Run("with module root, entry and import record it", func(t *testing.T) {
 		t.Parallel()
 		root, entry := writeModuleTree(t)
-		s, res := schema.Load(ctx, entry, schema.WithModuleRoot(root))
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(ctx, entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+		})
 		requireOK(t, res)
 		want := canonicalPath(t, root)
 		assert.Equal(t, want, s.ModuleRoot())
-		require.Len(t, s.ImportsSlice(), 1)
-		sub := s.ImportsSlice()[0].Schema()
-		require.NotNil(t, sub)
+		require.Len(t, slices.Collect(s.Imports()), 1)
+		sub := slices.Collect(s.Imports())[0].Schema()
+		require.False(t, sub.IsZero())
 		assert.Equal(t, want, sub.ModuleRoot(), "imported sub-schema records the same root")
 	})
 
 	t.Run("load string records none", func(t *testing.T) {
 		t.Parallel()
-		s, res := schema.LoadString(ctx, "schema \"s\"\n\ntype T {\n\tid String primary\n}\n", "inline.yammm")
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadString(ctx, "schema \"s\"\n\ntype T {\n\tid String primary\n}\n", "inline.yammm", schema.WithWarnings(warn))
+		})
 		requireOK(t, res)
 		assert.Empty(t, s.ModuleRoot())
 	})
 
 	t.Run("sources with entry records canonicalized dot", func(t *testing.T) {
-		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
-			"x.yammm": []byte("schema \"x\"\n\ntype T {\n\tid String primary\n}\n"),
-		}, "x.yammm", ".")
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+				"x.yammm": []byte("schema \"x\"\n\ntype T {\n\tid String primary\n}\n"),
+			}, "x.yammm", schema.WithModuleRoot("."), schema.WithWarnings(warn))
+		})
 		requireOK(t, res)
 		cwd, err := os.Getwd()
 		require.NoError(t, err)
 		assert.Equal(t, canonicalPath(t, cwd), s.ModuleRoot())
-	})
-
-	t.Run("registry cache hit retains producing load's root", func(t *testing.T) {
-		t.Parallel()
-		reg := schema.NewRegistry()
-		root := t.TempDir()
-		sub := filepath.Join(root, "sub")
-		require.NoError(t, os.MkdirAll(sub, 0o750))
-		shared := []byte("schema \"shared\"\n\ntype Part {\n\tpart_id String primary\n}\n")
-		require.NoError(t, os.WriteFile(filepath.Join(sub, "shared.yammm"), shared, 0o600))
-		entryA := filepath.Join(root, "a.yammm")
-		require.NoError(t, os.WriteFile(entryA, []byte("schema \"a\"\n\nimport \"sub/shared\" as sh\n\ntype Thing {\n\tid String primary\n\t--> USES (one) sh.Part\n}\n"), 0o600))
-		entryB := filepath.Join(sub, "b.yammm")
-		require.NoError(t, os.WriteFile(entryB, []byte("schema \"b\"\n\nimport \"shared\" as sh\n\ntype Thing {\n\tid String primary\n\t--> USES (one) sh.Part\n}\n"), 0o600))
-
-		a, res := schema.Load(ctx, entryA, schema.WithModuleRoot(root), schema.WithRegistry(reg))
-		requireOK(t, res)
-		b, res := schema.Load(ctx, entryB, schema.WithModuleRoot(sub), schema.WithRegistry(reg))
-		requireOK(t, res)
-
-		require.Len(t, b.ImportsSlice(), 1)
-		imp := b.ImportsSlice()[0].Schema()
-		require.NotNil(t, imp)
-		assert.Same(t, a.ImportsSlice()[0].Schema(), imp,
-			"nested roots reaching the same canonical file share via the registry")
-		assert.Equal(t, canonicalPath(t, sub), b.ModuleRoot())
-		assert.Equal(t, canonicalPath(t, root), imp.ModuleRoot(),
-			"a cache-reused import keeps the root of the load that compiled it")
 	})
 }
 
@@ -2016,8 +1814,8 @@ func TestLoad_MalformedNumericLiterals(t *testing.T) {
 	for name, src := range tests {
 		t.Run(name, func(t *testing.T) {
 			res := loadErr(t, src)
-			require.True(t, res.HasCode(diag.E_SYNTAX), "want E_SYNTAX, got: %v", res.Err())
-			assert.Contains(t, res.Err().Error(), "malformed numeric literal")
+			require.True(t, res.HasCode(diag.E_SYNTAX), "want E_SYNTAX, got: %v", diagtest.Err(res))
+			assert.Contains(t, diagtest.Err(res).Error(), "malformed numeric literal")
 		})
 	}
 }
@@ -2054,19 +1852,21 @@ func TestWithSourcesOnly(t *testing.T) {
 	t.Run("miss fails instead of reading disk", func(t *testing.T) {
 		t.Parallel()
 		root, _ := writeModuleTree(t) // dep exists ON DISK under root
-		_, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+		_, err := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
 			"sub/entry.yammm": entrySrc,
-		}, "sub/entry.yammm", root, schema.WithSourcesOnly(true))
-		require.True(t, res.HasErrors(), "expected the import miss to fail under WithSourcesOnly")
-		assert.Contains(t, res.Err().Error(), "not among the pre-registered sources")
+		}, "sub/entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot(root))
+		require.Error(t, err, "expected the import miss to fail under WithSourcesOnly")
+		assert.Contains(t, err.Error(), "not among the pre-registered sources")
 	})
 
 	t.Run("same layout loads via disk without the option", func(t *testing.T) {
 		t.Parallel()
 		root, _ := writeModuleTree(t)
-		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
-			"sub/entry.yammm": entrySrc,
-		}, "sub/entry.yammm", root)
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+				"sub/entry.yammm": entrySrc,
+			}, "sub/entry.yammm", schema.WithModuleRoot(root), schema.WithWarnings(warn))
+		})
 		requireOK(t, res)
 		assert.Equal(t, "entry", s.Name())
 	})
@@ -2074,19 +1874,23 @@ func TestWithSourcesOnly(t *testing.T) {
 	t.Run("false is the default and keeps the disk fallback", func(t *testing.T) {
 		t.Parallel()
 		root, _ := writeModuleTree(t)
-		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
-			"sub/entry.yammm": entrySrc,
-		}, "sub/entry.yammm", root, schema.WithSourcesOnly(false))
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+				"sub/entry.yammm": entrySrc,
+			}, "sub/entry.yammm", schema.WithSourcesOnly(false), schema.WithModuleRoot(root), schema.WithWarnings(warn))
+		})
 		requireOK(t, res)
 		assert.Equal(t, "entry", s.Name())
 	})
 
 	t.Run("complete in-memory set satisfies the option", func(t *testing.T) {
 		t.Parallel()
-		s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
-			"sub/entry.yammm": entrySrc,
-			"lib/dep.yammm":   depSrc,
-		}, "sub/entry.yammm", t.TempDir(), schema.WithSourcesOnly(true))
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+				"sub/entry.yammm": entrySrc,
+				"lib/dep.yammm":   depSrc,
+			}, "sub/entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+		})
 		requireOK(t, res)
 		assert.Equal(t, "entry", s.Name())
 	})
@@ -2123,81 +1927,17 @@ func TestWithSourcesOnly_SymlinkedImportDir(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			entrySrc := []byte("schema \"entry\"\n\n" + importDecl + "\n\ntype Thing {\n\tid String primary\n\t--> USES (one) dep.Part\n}\n")
-			s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
-				"lib/entry.yammm": entrySrc,
-				"lib/dep.yammm":   depSrc,
-			}, "lib/entry.yammm", root, schema.WithSourcesOnly(true))
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+					"lib/entry.yammm": entrySrc,
+					"lib/dep.yammm":   depSrc,
+				}, "lib/entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot(root), schema.WithWarnings(warn))
+			})
 			requireOK(t, res)
-			require.NotNil(t, s)
+			require.False(t, s.IsZero())
 			assert.Equal(t, "entry", s.Name())
 		})
 	}
-}
-
-// TestSharedRegistry_CacheHitSourcesComplete pins that a cross-Load
-// registry cache hit still yields a complete Sources() on the new load:
-// the cached import's content is copied into the load's source registry,
-// so closure-content consumers (diagnostics rendering, gogen's embedded
-// embedded source store) see every source even when the read+parse pipeline was
-// short-circuited.
-func TestSharedRegistry_CacheHitSourcesComplete(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	root, entry := writeModuleTree(t)
-	registry := schema.NewRegistry()
-
-	first, res := schema.Load(ctx, entry, schema.WithModuleRoot(root), schema.WithRegistry(registry))
-	requireOK(t, res)
-	second, res := schema.Load(ctx, entry, schema.WithModuleRoot(root), schema.WithRegistry(registry))
-	requireOK(t, res)
-
-	require.Len(t, second.ImportsSlice(), 1)
-	imp := second.ImportsSlice()[0]
-	assert.Same(t, first.ImportsSlice()[0].Schema(), imp.Schema(), "second load should cache-hit the import")
-
-	srcs := second.Sources()
-	require.NotNil(t, srcs)
-	if _, ok := srcs.ContentBySource(imp.ResolvedSourceID()); !ok {
-		t.Error("cache-hit import content missing from the new load's Sources()")
-	}
-}
-
-// TestSharedRegistry_CacheHitDivergentSourceConflict pins that a cross-Load
-// registry cache hit cannot silently mix a cached compiled import with
-// conflicting pre-registered source bytes: copying the cached closure's
-// content into a source registry that already holds different bytes for the
-// same SourceID must surface a diagnostic, not succeed with a Sources() view
-// that disagrees with the schema the import was compiled from.
-func TestSharedRegistry_CacheHitDivergentSourceConflict(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	root := t.TempDir()
-	reg := schema.NewRegistry()
-
-	depSrc := []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n}\n")
-	entrySrc := func(name string) []byte {
-		return []byte("schema \"" + name + "\"\n\nimport \"dep\" as dep\n\ntype Thing {\n\tid String primary\n\t--> USES (one) dep.Part\n}\n")
-	}
-
-	_, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
-		"entry.yammm": entrySrc("entry"),
-		"dep.yammm":   depSrc,
-	}, "entry.yammm", root, schema.WithRegistry(reg))
-	requireOK(t, res)
-
-	// The second load shares the schema registry but its source registry
-	// already holds DIFFERENT bytes under dep's SourceID; the import of dep
-	// cache-hits the first load's schema, whose closure content collides.
-	depID, err := location.SourceIDFromPath(filepath.Join(canonicalPath(t, root), "dep.yammm"))
-	require.NoError(t, err)
-	srcReg := source.NewRegistry()
-	require.NoError(t, srcReg.Register(depID, []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n\tname String required\n}\n")))
-
-	_, res = schema.LoadSourcesWithEntry(ctx, map[string][]byte{
-		"entry2.yammm": entrySrc("entry2"),
-	}, "entry2.yammm", root, schema.WithRegistry(reg), schema.TestWithSourceRegistry(srcReg))
-	require.True(t, res.HasErrors(), "conflicting cached-closure content must surface a diagnostic")
-	assert.Contains(t, res.Err().Error(), "dep.yammm")
 }
 
 // diamondSources returns a diamond-shaped import graph of the given depth.
@@ -2235,10 +1975,12 @@ func TestLoadSources_DiamondClosureRegistrationLinear(t *testing.T) {
 		sources := diamondSources(depth)
 		entry := fmt.Sprintf("l_%02d.yammm", 0)
 		start := time.Now()
-		s, res := schema.LoadSourcesWithEntry(ctx, sources, entry, t.TempDir())
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(ctx, sources, entry, schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+		})
 		elapsed := time.Since(start)
 		requireOK(t, res)
-		require.NotNil(t, s)
+		require.False(t, s.IsZero())
 		return elapsed
 	}
 

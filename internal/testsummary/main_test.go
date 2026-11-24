@@ -16,7 +16,7 @@ import (
 
 func ev(t *testing.T, action, pkg, test, output string) string {
 	t.Helper()
-	b, err := json.Marshal(event{Action: action, Package: pkg, Test: test, Output: output})
+	b, err := json.Marshal(map[string]string{"Action": action, "Package": pkg, "Test": test, "Output": output})
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestRun_PassesPlainTextThrough(t *testing.T) {
 	assertContains(t, "stdout", stdout, "go: cannot find main module\n")
 }
 
-func TestRun_WritesRaceSkipsByPackage(t *testing.T) {
+func TestRun_WritesEachRaceSkippedTestByPackage(t *testing.T) {
 	skip := func(pkg, test string) []string {
 		return []string{
 			ev(t, "run", pkg, test, ""),
@@ -174,7 +174,7 @@ func TestRun_WritesRaceSkipsByPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read race skips: %v", err)
 	}
-	if want := "a\tTestQ,TestR\nb\tTestOther\n"; string(got) != want {
+	if want := "a\tTestQ/other\na\tTestQ/sub\na\tTestR\nb\tTestOther\n"; string(got) != want {
 		t.Errorf("race skips = %q, want %q", got, want)
 	}
 }

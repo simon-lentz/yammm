@@ -5,23 +5,20 @@ import (
 	"fmt"
 
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func ExampleValidator_ValidateOne() {
 	// Build a simple schema
-	s, result := schema.NewBuilder().
-		WithName("example").
-		WithSourceID(location.MustNewSourceID("test://example.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithOptionalProperty("age", schema.IntegerConstraint{}).
-		Done().
-		Build()
+	s, err := schema.LoadString(context.Background(), `schema "example"
 
-	if result.HasErrors() {
+type Person {
+	id String primary
+	name String required
+	age Integer
+}
+`, "example.yammm")
+	if err != nil {
 		fmt.Println("Schema build failed")
 		return
 	}
@@ -39,8 +36,8 @@ func ExampleValidator_ValidateOne() {
 		},
 	}
 
-	valid, result := validator.ValidateOne(ctx, "Person", raw)
-	if !result.OK() {
+	valid, validateErr := validator.ValidateOne(ctx, "Person", raw)
+	if validateErr != nil {
 		fmt.Println("Validation failed")
 		return
 	}
@@ -55,14 +52,13 @@ func ExampleValidator_ValidateOne() {
 
 func ExampleValidator_Validate() {
 	// Build schema
-	s, _ := schema.NewBuilder().
-		WithName("example").
-		WithSourceID(location.MustNewSourceID("test://example.yammm")).
-		AddType("Product").
-		WithPrimaryKey("sku", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		Build()
+	s, _ := schema.LoadString(context.Background(), `schema "example"
+
+type Product {
+	sku String primary
+	name String required
+}
+`, "example.yammm")
 
 	validator := instance.NewValidator(s)
 	ctx := context.Background()
@@ -74,8 +70,8 @@ func ExampleValidator_Validate() {
 		{Properties: map[string]any{"sku": "PROD-003", "name": "Sprocket"}},
 	}
 
-	valid, result := validator.Validate(ctx, "Product", raws)
-	if !result.OK() {
+	valid, err := validator.Validate(ctx, "Product", raws)
+	if err != nil {
 		fmt.Println("Validation failed")
 		return
 	}

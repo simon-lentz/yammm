@@ -6,6 +6,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -39,8 +41,10 @@ func wantExcerpt(num, text, marks string) string {
 func TestExcerpt_MarksSitUnderTheText(t *testing.T) {
 	t.Parallel()
 
-	src := location.MustNewSourceID("test://excerpt.yammm")
-	point := func(line, col int) location.Span { return location.Point(src, line, col) }
+	src := sourcetest.ID("test://excerpt.yammm")
+	point := func(line, col int) location.Span {
+		return location.Span{Source: src, Start: location.Position{Line: line, Column: col}, End: location.Position{Line: line, Column: col}}
+	}
 	span := func(startLine, startCol, endLine, endCol int) location.Span {
 		return location.Span{
 			Source: src,
@@ -107,7 +111,7 @@ func TestExcerpt_MarksSitUnderTheText(t *testing.T) {
 func TestExcerpt_LongLineShowsTheSpan(t *testing.T) {
 	t.Parallel()
 
-	src := location.MustNewSourceID("test://long.yammm")
+	src := sourcetest.ID("test://long.yammm")
 	rows := []struct {
 		name                string
 		length, col, marked int
@@ -123,9 +127,9 @@ func TestExcerpt_LongLineShowsTheSpan(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			line := strings.Repeat("a", row.col-1) + strings.Repeat("X", row.marked) + strings.Repeat("b", row.length-row.col-row.marked+1)
-			span := location.Point(src, 1, row.col)
+			span := location.Span{Source: src, Start: location.Position{Line: 1, Column: row.col}, End: location.Position{Line: 1, Column: row.col}}
 			if row.marked > 1 {
-				span = location.Range(src, 1, row.col, 1, row.col+row.marked)
+				span = location.Span{Source: src, Start: location.Position{Line: 1, Column: row.col}, End: location.Position{Line: 1, Column: row.col + row.marked}}
 			}
 			if ok, detail := windowMarksTheSpan(line, excerptBlock(line+"\n", span)); !ok {
 				t.Error(detail)

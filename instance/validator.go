@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"slices"
 	"strconv"
@@ -12,9 +11,10 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/internal/trace"
+	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/expr"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -23,43 +23,41 @@ import (
 // Validator is stateless and safe for concurrent use. Multiple goroutines
 // may call Validate simultaneously with different inputs.
 //
-// All validation methods (Validate, ValidateOne, ValidateForComposition) require
-// a non-nil context and will panic if passed nil. Use context.Background() for
-// non-cancellable operations.
+// All validation methods (Validate, ValidateOne) require a non-nil context and
+// will panic if passed nil. Use context.Background() for non-cancellable
+// operations.
 type Validator struct {
-	schema    *schema.Schema
+	schema    schema.Schema
 	cfg       *validatorConfig
 	evaluator *eval.Evaluator
 }
 
 // NewValidator creates a new Validator for the given schema.
-// Panics if schema is nil.
-func NewValidator(s *schema.Schema, opts ...Option) *Validator {
-	if s == nil {
-		panic("instance.NewValidator: nil schema")
+// Panics if schema is zero.
+func NewValidator(s schema.Schema, opts ...Option) *Validator {
+	if s.IsZero() {
+		panic("instance.NewValidator: zero Schema")
 	}
 	cfg := applyOptions(opts)
 	return &Validator{
 		schema:    s,
 		cfg:       cfg,
-		evaluator: eval.NewEvaluator(eval.WithLogger(cfg.logger)),
+		evaluator: eval.NewEvaluator(),
 	}
 }
 
-// Validate validates a batch of raw instances of the given type.
-//
-// Returns:
-//   - valids: one entry per input instance; non-nil for successes, nil for failures
-//   - result: merged diagnostics for the entire batch (OK when all instances pass)
-//
-// A diagnostic about one element of raws carries one
-// [diag.DetailKeyInstanceIndex] detail naming it; one about typeName itself —
-// a name that does not resolve, or an abstract or part type named by an empty
-// batch — carries none. The batch result carries each instance's truncation
-// facts ([diag.Result.LimitReached], [diag.Result.DroppedCount]).
-//
-// Panics if the receiver is nil or if ctx is nil.
-func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance) ([]*ValidInstance, diag.Result) {
+// Validate validates a batch of raw instances of typeName. A batch that runs
+// returns one entry per raw, the zero instance where the validator refused it,
+// beside a *[diag.ResultError] holding every refusal, or nil when it refused
+// none; a batch that does not run (a type name that does not resolve, an
+// abstract or part type named by an empty batch, a cancellation) returns a nil
+// slice beside its error. An issue about one element of raws carries one
+// [diag.DetailKeyInstanceIndex] detail naming it, and one about typeName itself
+// carries none. The error carries each instance's truncation facts
+// ([diag.Result.LimitReached], [diag.Result.DroppedCount]), save a cancelled
+// row's, whose issues other than E_INTERNAL it drops, and Validate panics if
+// the receiver or ctx is nil.
+func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance) ([]ValidInstance, error) {
 	if v == nil {
 		panic("instance.Validate: nil validator receiver")
 	}
@@ -67,29 +65,29 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 		panic("instance.Validate: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, cancelledResult(err, batchProvenance(raws))
+		return nil, resultErr(cancelledResult(err, batchProvenance(raws)))
 	}
 
-	// The type resolves before the empty-batch answer, as it does in
-	// ValidateForComposition: an unknown name is a failure whatever the batch.
-	typ, err := v.resolveType(typeName)
-	if err != nil {
-		return nil, typeResolutionResultForBatch(err, raws)
+	// The type resolves before the empty-batch answer: an unknown name is a
+	// failure whatever the batch.
+	typ, found := v.schema.ResolveTypeName(typeName)
+	if !found {
+		return nil, resultErr(typeResolutionResultForBatch(typeName, raws))
 	}
 	if len(raws) == 0 {
 		// An empty batch names a type that must be able to hold a root, as a
 		// row of it must: an abstract or part type name is refused either way.
-		if res, refused := instantiationRefusal(typ, typeName, false, nil); refused {
-			return nil, res
+		if res, refused := instantiationRefusal(typ, typeName, false, Provenance{}); refused {
+			return nil, resultErr(res)
 		}
 		if raws == nil {
-			return nil, diag.OK()
+			return nil, nil
 		}
-		return []*ValidInstance{}, diag.OK()
+		return []ValidInstance{}, nil
 	}
 
-	batchCollector := diag.NewCollectorUnlimited()
-	valids := make([]*ValidInstance, 0, len(raws))
+	batchCollector := diag.NewCollector(diag.NoLimit)
+	valids := make([]ValidInstance, 0, len(raws))
 
 	for i := range raws {
 		// One cancellation rule: a batch that did not complete returns nil and
@@ -99,29 +97,25 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 		// caller is told the batch did not run.
 		if err := ctx.Err(); err != nil {
 			batchCollector.MergeFunc(cancelledResult(err, raws[i].Provenance), stampIndex(i))
-			return nil, batchCollector.Result()
+			return nil, batchCollector.Err()
 		}
-		inst, result := v.validateComposedInstance(ctx, typeName, typ, raws[i], provenancePathBuilder(raws[i].Provenance), false, 0)
+		inst, result := v.validateComposedInstance(ctx, typeName, typ, raws[i], basePath(raws[i].Provenance), false, 0)
 		if err := ctx.Err(); err != nil {
 			batchCollector.MergeFunc(keepInternalErrors(result), stampIndex(i))
 			batchCollector.MergeFunc(cancelledResult(err, raws[i].Provenance), stampIndex(i))
-			return nil, batchCollector.Result()
+			return nil, batchCollector.Err()
 		}
 		batchCollector.MergeFunc(result, stampIndex(i))
 		valids = append(valids, inst)
 	}
 
-	return valids, batchCollector.Result()
+	return valids, batchCollector.Err()
 }
 
-// ValidateOne validates a single raw instance.
-//
-// Returns:
-//   - valid: the validated instance, or nil on failure
-//   - result: diagnostics for this instance (OK on success, may contain warnings)
-//
-// Panics if the receiver is nil or if ctx is nil.
-func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance) (*ValidInstance, diag.Result) {
+// ValidateOne validates a single raw instance of typeName. It returns the valid
+// instance, or the zero instance beside a *[diag.ResultError] holding its
+// refusals. It panics if the receiver or ctx is nil.
+func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance) (ValidInstance, error) {
 	if v == nil {
 		panic("instance.ValidateOne: nil validator receiver")
 	}
@@ -129,83 +123,35 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 		panic("instance.ValidateOne: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, cancelledResult(err, raw.Provenance)
+		return ValidInstance{}, resultErr(cancelledResult(err, raw.Provenance))
 	}
 
-	typ, err := v.resolveType(typeName)
-	if err != nil {
-		return nil, createErrorResult(ErrTypeNotFound, err.Error(), raw.Provenance)
+	typ, found := v.schema.ResolveTypeName(typeName)
+	if !found {
+		return ValidInstance{}, resultErr(createErrorResult(diag.E_INSTANCE_TYPE_NOT_FOUND, typeNotFound(typeName), raw.Provenance))
 	}
-	inst, res := v.validateComposedInstance(ctx, typeName, typ, raw, provenancePathBuilder(raw.Provenance), false, 0)
-	// The batch rule, at the entry BatchAssembler.addSerial and the snapshot
-	// revalidator use: a row the caller is told did not run reports the
-	// cancellation and no partial finding, so a timeout's leftovers are never
-	// read as findings about the data.
+	inst, res := v.validateComposedInstance(ctx, typeName, typ, raw, basePath(raw.Provenance), false, 0)
+	// The batch rule holds at this entry too, which the snapshot revalidator
+	// uses: a row the caller is told did not run reports the cancellation and no
+	// partial finding, so a timeout's leftovers are never read as findings about
+	// the data.
 	if err := ctx.Err(); err != nil {
-		out := diag.NewCollectorUnlimited()
+		out := diag.NewCollector(diag.NoLimit)
 		out.Merge(keepInternalErrors(res))
 		out.Merge(cancelledResult(err, raw.Provenance))
-		return nil, out.Result()
+		return ValidInstance{}, out.Err()
 	}
-	return inst, res
+	return inst, resultErr(res)
 }
 
-// ValidateForComposition validates instances as composed children of the
-// named composition on parentType. Part types are allowed here, where direct
-// validation refuses them.
-//
-// relationName is the composition's DSL name ("LINES") or its field name
-// ("lines"); an association's name is refused with E_COMPOSITION_NOT_FOUND,
-// as is a name the parent does not declare. The parent and the relation are
-// resolved before the batch is inspected, so an empty or nil batch reports
-// the same misconfiguration a full one does.
-//
-// Returns:
-//   - valids: one entry per input instance; non-nil for successes, nil for failures
-//   - result: merged diagnostics for the batch (OK when all instances pass)
-//
-// Every diagnostic carries one [diag.DetailKeyInstanceIndex] detail naming
-// the element of raws it belongs to.
-//
-// Panics if the receiver is nil or if ctx is nil.
-func (v *Validator) ValidateForComposition(ctx context.Context, parentType, relationName string, raws []RawInstance) ([]*ValidInstance, diag.Result) {
-	if v == nil {
-		panic("instance.ValidateForComposition: nil validator receiver")
+// resultErr returns res as a *[diag.ResultError], or nil when it holds no
+// failure. The validator draws no issue below failure severity, so res holds
+// failures alone, sorted and counted by the collector that built it.
+func resultErr(res diag.Result) error {
+	if counts := res.SeverityCounts(); counts.Fatal+counts.Errors == 0 {
+		return nil
 	}
-	if ctx == nil {
-		panic("instance.ValidateForComposition: nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, cancelledResult(err, batchProvenance(raws))
-	}
-
-	parent, err := v.resolveType(parentType)
-	if err != nil {
-		return nil, typeResolutionResultForBatch(err, raws)
-	}
-	rel, found := relationByEitherName(parent, relationName)
-	if !found || !rel.IsComposition() {
-		return nil, compositionResolutionResult(parentType, relationName, raws)
-	}
-
-	// Handle nil input per implementation checklist.
-	if raws == nil {
-		return nil, diag.OK()
-	}
-
-	bases := make([]path.Builder, len(raws))
-	for i := range raws {
-		bases[i] = provenancePathBuilder(raws[i].Provenance)
-	}
-	batchCollector := diag.NewCollectorUnlimited()
-	valids, _ := v.validateComposedBatch(ctx, rel, raws, bases, 1, func(i int, res diag.Result) {
-		if i < 0 {
-			batchCollector.Merge(res)
-			return
-		}
-		batchCollector.MergeFunc(res, stampIndex(i))
-	})
-	return valids, batchCollector.Result()
+	return &diag.ResultError{Result: res}
 }
 
 // stampIndex returns the transform that marks an issue with the batch index
@@ -217,38 +163,46 @@ func stampIndex(i int) func(diag.Issue) diag.Issue {
 	}
 }
 
+// basePath returns the path an instance's diagnostics start from: its
+// provenance's path, or [path.Root] when the provenance records none. A
+// provenance keeps an empty path as given, so a snapshot writes it back.
+func basePath(prov Provenance) path.Path {
+	if p := prov.Path(); p != "" {
+		return p
+	}
+	return path.Root
+}
+
 // cancelledResult is the Fatal E_CONTEXT_CANCELLED result, anchored on the
 // provenance in hand so a cancelled batch still names the row it stopped on.
-func cancelledResult(err error, prov *location.Provenance) diag.Result {
-	c := diag.NewCollectorUnlimited()
-	c.Collect(cancelledIssue(err, prov, provenancePathBuilder(prov)))
+func cancelledResult(err error, prov Provenance) diag.Result {
+	c := diag.NewCollector(diag.NoLimit)
+	c.Collect(cancelledIssue(err, prov, basePath(prov)))
 	return c.Result()
 }
 
-func cancelledIssue(err error, prov *location.Provenance, base path.Builder) diag.Issue {
+func cancelledIssue(err error, prov Provenance, base path.Path) diag.Issue {
 	issue := diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error())
 	withProvenance(issue, prov, base.String())
 	return issue.Build()
 }
 
 // cancelled reports whether ctx is done and, when it is, records the one
-// E_CONTEXT_CANCELLED an instance carries — at base, unless a child batch
+// E_CONTEXT_CANCELLED an instance carries — at base, unless a child's result
 // already put one in the collector. Every point in an instance's validation
-// that ends work on cancellation goes through here, so a cancelled row records
-// its cancellation whatever else it drew and no instance reports it twice.
+// that ends work on cancellation goes through here.
 //
-// A cancelled row's other diagnostics are dropped by its caller, because the
-// caller is told the row did not run — except its Fatal E_INTERNAL, which
-// [keepInternalErrors] carries through: a library defect outranks a deadline on
-// the same row, and reporting the defect as the deadline hides it.
-func cancelled(ctx context.Context, collector *diag.Collector, prov *location.Provenance, base path.Builder) bool {
+// [Validator.Validate] and [Validator.ValidateOne] replace what a cancelled row
+// recorded with their own cancellation, because the caller is told the row did
+// not run. Its Fatal E_INTERNAL stays ([keepInternalErrors]): a library defect
+// outranks a deadline on the same row, and reporting the defect as the deadline
+// hides it.
+func cancelled(ctx context.Context, collector *diag.Collector, prov Provenance, base path.Path) bool {
 	err := ctx.Err()
 	if err == nil {
 		return false
 	}
-	if !collector.Result().HasCode(diag.E_CONTEXT_CANCELLED) {
-		collector.Collect(cancelledIssue(err, prov, base))
-	}
+	collector.Collect(cancelledIssue(err, prov, base))
 	return true
 }
 
@@ -257,7 +211,7 @@ func cancelled(ctx context.Context, collector *diag.Collector, prov *location.Pr
 // defect and a deadline can land on one row, and reporting the defect as the
 // deadline hides a class of bug behind a timeout.
 func keepInternalErrors(res diag.Result) diag.Result {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.MergeRetag(res,
 		func(sev diag.Severity, code diag.Code) (diag.Severity, bool) { return sev, code == diag.E_INTERNAL },
 		func(issue diag.Issue) diag.Issue { return issue })
@@ -266,80 +220,52 @@ func keepInternalErrors(res diag.Result) diag.Result {
 
 // internalIssue is the Fatal E_INTERNAL an InternalError becomes, carrying
 // its stack and the provenance in hand.
-func internalIssue(internalErr *InternalError, prov *location.Provenance, base path.Builder) diag.Issue {
+func internalIssue(internalErr *InternalError, prov Provenance, base path.Path) diag.Issue {
 	issue := diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).
 		WithDetail(diag.DetailKeyStackTrace, internalErr.Stack)
 	withProvenance(issue, prov, base.String())
 	return issue.Build()
 }
 
-func firstProvenance(raws []RawInstance) *location.Provenance {
+func firstProvenance(raws []RawInstance) Provenance {
 	if len(raws) > 0 {
 		return raws[0].Provenance
 	}
-	return nil
+	return Provenance{}
 }
 
 // validateComposedBatch validates raw children of rel's target type at the
-// given composed depth, each anchored on its base path. The target is
-// resolved by the relation's completion-recorded absolute identity (see
-// resolveRelationTarget), so a relation declared on an imported type or
-// inherited from a cross-schema parent — whose syntactic target ref is
-// meaningful only in its declaring schema — validates against the true
-// target. collect receives each child's result under its index in raws, or
-// -1 for a result that belongs to the batch as a whole.
+// given composed depth, each anchored on its base path, and hands collect each
+// child's result. The target is resolved by the relation's completion-recorded
+// absolute identity (see resolveRelationTarget), so a relation declared on an
+// imported type or inherited from a cross-schema parent — whose syntactic target
+// ref is meaningful only in its declaring schema — validates against the true
+// target. A cancellation stops the batch, and the entry above it reports that
+// cancellation and keeps only the E_INTERNAL of what was collected.
 func (v *Validator) validateComposedBatch(
 	ctx context.Context,
-	rel *schema.Relation,
+	rel schema.Relation,
 	raws []RawInstance,
-	bases []path.Builder,
+	bases []path.Path,
 	depth int,
-	collect func(i int, res diag.Result),
-) ([]*ValidInstance, *schema.Type) {
-	targetType, found := resolveRelationTarget(v.schema, rel)
-	if !found {
-		collect(-1, typeResolutionResultForBatch(&ValidationError{
-			Code:    ErrTypeNotFound,
-			Message: fmt.Sprintf("type %q not found", rel.Target().String()),
-		}, raws))
-		return nil, nil
-	}
-	if len(raws) == 0 {
-		return []*ValidInstance{}, targetType
-	}
+	collect func(res diag.Result),
+) ([]ValidInstance, schema.Type) {
+	targetType, _ := resolveRelationTarget(v.schema, rel)
 	// A composed child is named the way graph and snapshot name it: the
 	// entry-relative form, never the declaring schema's alias. Identity is
 	// TypeID; the name is display.
 	targetTypeName := schema.TagForm(v.schema, targetType.ID())
 
-	valids := make([]*ValidInstance, 0, len(raws))
+	valids := make([]ValidInstance, 0, len(raws))
 	for i := range raws {
-		// The one cancellation rule, as in Validate: no further child, no
-		// partial diagnostics, one cancellation on the child it stopped on.
-		if err := ctx.Err(); err != nil {
-			collect(i, cancelledResult(err, raws[i].Provenance))
+		if ctx.Err() != nil {
 			return nil, targetType
 		}
 		inst, result := v.validateComposedInstance(ctx, targetTypeName, targetType, raws[i], bases[i], true, depth)
-		if err := ctx.Err(); err != nil {
-			collect(i, keepInternalErrors(result))
-			collect(i, cancelledResult(err, raws[i].Provenance))
-			return nil, targetType
-		}
-		collect(i, result)
+		collect(result)
 		valids = append(valids, inst)
 	}
 	return valids, targetType
-}
-
-// ValidationError represents a system-level validation error.
-type ValidationError struct {
-	Code    diag.Code
-	Message string
-}
-
-func (e *ValidationError) Error() string {
-	return e.Message
 }
 
 // resolveRelationTarget resolves a relation's target type by the absolute
@@ -349,125 +275,89 @@ func (e *ValidationError) Error() string {
 // alias, and its bare form names a declaring-schema type — so re-resolving it
 // against the entry schema would misresolve relations declared on imported
 // types or inherited from cross-schema parents. Every relation a completed
-// schema holds carries its TargetID; a miss reports as not found.
-func resolveRelationTarget(s *schema.Schema, rel *schema.Relation) (*schema.Type, bool) {
+// schema holds carries its TargetID, and the schema's closure holds that type.
+func resolveRelationTarget(s schema.Schema, rel schema.Relation) (schema.Type, bool) {
 	return s.TypeByID(rel.TargetID())
 }
 
 // relationByEitherName resolves a relation by its DSL name or its field
 // name, the two spellings every name-taking surface of this package accepts.
-func relationByEitherName(t *schema.Type, name string) (*schema.Relation, bool) {
+func relationByEitherName(t schema.Type, name string) (schema.Relation, bool) {
 	if r, ok := t.Relation(name); ok {
 		return r, true
 	}
 	return t.RelationByField(name)
 }
 
-// resolveType resolves an entry-relative type name by the one rule
-// [schema.Schema.ResolveTypeName] states.
-func (v *Validator) resolveType(typeName string) (*schema.Type, error) {
-	typ, found := v.schema.ResolveTypeName(typeName)
-	if !found {
-		return nil, &ValidationError{
-			Code:    ErrTypeNotFound,
-			Message: fmt.Sprintf("type %q not found", typeName),
-		}
-	}
-	return typ, nil
-}
-
-// compositionResolutionResult creates a diagnostic result for composition resolution errors.
-// When raws is empty, uses nil provenance.
-func compositionResolutionResult(parentType, relationName string, raws []RawInstance) diag.Result {
-	return createErrorResult(ErrCompositionNotFound, fmt.Sprintf("composition %q not found on type %q", relationName, parentType), batchProvenance(raws))
+// typeNotFound is the message for a type name [schema.Schema.ResolveTypeName]
+// does not resolve.
+func typeNotFound(typeName string) string {
+	return fmt.Sprintf("type %s not found", diag.QuoteValue(typeName))
 }
 
 // batchProvenance is the provenance of a batch-wide failure — the type or
 // relation name, not any row: the source the rows came from, at its root,
 // with no span. Blaming raws[0] pointed the operator at a row that was fine.
-func batchProvenance(raws []RawInstance) *location.Provenance {
-	p := firstProvenance(raws)
-	if p == nil {
-		return nil
-	}
-	return location.NewProvenance(p.SourceName(), path.Root(), location.Span{})
+func batchProvenance(raws []RawInstance) Provenance {
+	return NewProvenance(firstProvenance(raws).SourceName(), path.Root, location.Span{})
 }
 
 // typeResolutionResultForBatch creates a diagnostic result for type resolution errors in batch contexts.
-// When raws is empty, uses nil provenance.
-func typeResolutionResultForBatch(err error, raws []RawInstance) diag.Result {
-	return createErrorResult(ErrTypeNotFound, err.Error(), batchProvenance(raws))
+func typeResolutionResultForBatch(typeName string, raws []RawInstance) diag.Result {
+	return createErrorResult(diag.E_INSTANCE_TYPE_NOT_FOUND, typeNotFound(typeName), batchProvenance(raws))
 }
 
-// validateInstance validates a root instance against its type.
-// canonicalName is the entry-relative type name the caller supplied, preserved
-// on the resulting ValidInstance. typ is the resolved schema type.
 // validateComposedInstance validates an instance, optionally allowing part
 // types. typeName is the entry-relative type name stored on the result and
 // carried on its diagnostics; base is the instance's location in the input
 // document, which every diagnostic's path is built from; depth is its
 // composed depth, 0 for a root.
-func (v *Validator) validateComposedInstance(ctx context.Context, typeName string, typ *schema.Type, raw RawInstance, base path.Builder, allowPartType bool, depth int) (*ValidInstance, diag.Result) {
+func (v *Validator) validateComposedInstance(ctx context.Context, typeName string, typ schema.Type, raw RawInstance, base path.Path, allowPartType bool, depth int) (ValidInstance, diag.Result) {
 	if res, refused := instantiationRefusal(typ, typeName, allowPartType, raw.Provenance); refused {
-		return nil, res
+		return ValidInstance{}, res
 	}
 	return v.validateProperties(ctx, typ, typeName, raw, base, depth)
 }
 
 // instantiationRefusal refuses an abstract type, and a part type unless
-// allowPartType holds, reporting whether it refused.
-func instantiationRefusal(typ *schema.Type, typeName string, allowPartType bool, prov *location.Provenance) (diag.Result, bool) {
+// allowPartType holds, reporting whether it refused. It needs no key check:
+// completion refuses a concrete type with no primary key, declared or inherited
+// ([diag.E_NO_PRIMARY_KEY], unless an error about its key's type or a supertype
+// already refuses it), so with allowPartType false, a type it passes under a
+// resolved name can hold a root.
+func instantiationRefusal(typ schema.Type, typeName string, allowPartType bool, prov Provenance) (diag.Result, bool) {
 	switch {
 	case typ.IsAbstract():
-		return createErrorResult(ErrAbstractType, fmt.Sprintf("cannot instantiate abstract type %q", typeName), prov), true
+		return createErrorResult(diag.E_ABSTRACT_TYPE, fmt.Sprintf("cannot instantiate abstract type %q", typeName), prov), true
 	case !allowPartType && typ.IsPart():
-		return createErrorResult(ErrPartTypeDirect, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), prov), true
+		return createErrorResult(diag.E_PART_TYPE_DIRECT, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), prov), true
 	}
 	return diag.Result{}, false
 }
 
 // validateProperties validates all members of an instance: properties, then
 // the primary key, edges, compositions, and invariants last.
-func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, typeName string, raw RawInstance, base path.Builder, depth int) (*ValidInstance, diag.Result) {
+func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typeName string, raw RawInstance, base path.Path, depth int) (ValidInstance, diag.Result) {
 	collector := diag.NewCollector(v.cfg.maxIssuesPerInstance)
 	prov := raw.Provenance
-	names := slices.Sorted(maps.Keys(raw.Properties))
 
-	// Build the member index: every schema property and relation resolved
-	// to the input key it is read from, once, by one fold rule. Every
-	// collision it finds is reported HERE, before any pass, so no pass has to
-	// carry the report and no gate can swallow it.
-	claims := claimObject(typ, names, v.cfg.strictPropertyNames)
-	propMapping := v.buildPropertyMapping(ctx, typ, claims, collector, prov, base)
-	relInputs := buildRelationMapping(claims, raw.Properties, collector, prov, base)
-
-	// Check for unknown fields
-	if !v.cfg.allowUnknownFields {
-		v.checkUnknownFields(typ, typeName, names, claims, collector, prov, base)
-	}
+	checkUnknownFields(typ, typeName, raw.Properties, collector, prov, base)
 
 	// Each pass is gated on ITS OWN errors, taken as a count before and after —
 	// the use Collector.ErrorCount's godoc names. Asking HasErrors made an
-	// index error, or an earlier pass's, stop every pass after it, so a row
-	// reported one defect per round trip.
+	// unknown field stop every pass after it, so a row reported one defect per
+	// round trip.
 	beforeProperties := collector.ErrorCount()
 
 	// Validate each property and build the validated properties map
 	validatedProps := make(map[string]any)
 	for prop := range typ.AllProperties() {
-		inputName, hasInput := propMapping[prop.Name()]
-
-		// Get the raw value
-		var rawValue any
-		if hasInput {
-			rawValue = raw.Properties[inputName]
-		}
-
+		rawValue := raw.Properties[prop.Name()]
 		// Check required properties
-		if isAbsent(rawValue) && prop.IsRequired() {
+		if value.Absent(rawValue) && prop.IsRequired() {
 			issue := diag.NewIssue(
 				diag.Error,
-				ErrMissingRequired,
+				diag.E_MISSING_REQUIRED,
 				fmt.Sprintf("missing required property %q", prop.Name()),
 			).WithDetails(diag.TypeProp(typeName, prop.Name())...)
 			withProvenance(issue, prov, base.String())
@@ -475,46 +365,40 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 			continue
 		}
 
-		if isAbsent(rawValue) {
+		if value.Absent(rawValue) {
 			continue
 		}
 
-		propPath := base.Key(inputName).String()
+		propPath := base.Key(prop.Name()).String()
 
 		// Validate property type
-		if err := v.checkValueWithRecovery(rawValue, prop.Constraint()); err != nil {
+		if err := checkValueRecovering(rawValue, prop.Constraint()); err != nil {
 			issue := checkIssue(err, fmt.Sprintf("property %q", prop.Name())).
 				WithDetails(diag.TypeProp(typeName, prop.Name())...)
-			if inputName != prop.Name() {
-				issue.WithDetail(diag.DetailKeyField, inputName)
-			}
-			withProvenance(issue, prov, base.Key(inputName).String())
+			withProvenance(issue, prov, propPath)
 			built := issue.Build()
 			collector.Collect(built)
 			if built.Severity() == diag.Fatal {
 				cancelled(ctx, collector, prov, base)
-				return nil, collector.Result()
+				return ValidInstance{}, collector.Result()
 			}
 			continue
 		}
 
 		// Coerce to canonical type (int64, float64, []float64)
-		coercedValue, err := v.coerceValueWithRecovery(rawValue, prop.Constraint())
+		coercedValue, err := coerceValueRecovering(rawValue, prop.Constraint())
 		if err != nil {
 			if internalErr, ok := errors.AsType[*InternalError](err); ok {
 				collector.Collect(internalIssue(internalErr, prov, base))
 				cancelled(ctx, collector, prov, base)
-				return nil, collector.Result()
+				return ValidInstance{}, collector.Result()
 			}
-			// This should not happen after successful CheckValue
+			// This should not happen after the value check above passed
 			issue := diag.NewIssue(
 				diag.Error,
-				ErrTypeMismatch,
+				diag.E_TYPE_MISMATCH,
 				fmt.Sprintf("property %q: coercion error: %s", prop.Name(), err.Error()),
 			).WithDetails(diag.TypeProp(typeName, prop.Name())...)
-			if inputName != prop.Name() {
-				issue.WithDetail(diag.DetailKeyField, inputName)
-			}
 			withProvenance(issue, prov, propPath)
 			collector.Collect(issue.Build())
 			continue
@@ -524,51 +408,49 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 		validatedProps[prop.Name()] = coercedValue
 	}
 
-	// The property pass's own errors stop it; an index error or a collision
-	// does not, so the edge and composition passes still run and the row
-	// reports everything wrong with it at once.
+	// The property pass's own errors stop the passes after it, and an unknown
+	// field does not, so the edge and composition passes report beside it.
 	if cancelled(ctx, collector, prov, base) {
-		return nil, collector.Result()
+		return ValidInstance{}, collector.Result()
 	}
 	if collector.ErrorCount() > beforeProperties {
-		return nil, collector.Result()
+		return ValidInstance{}, collector.Result()
 	}
 
 	// extractPrimaryKey reports nothing; it reads what the pass above validated.
 	pkComponents := v.extractPrimaryKey(typ, validatedProps)
 
 	beforeEdges := collector.ErrorCount()
-	edges := v.validateEdges(ctx, typ, relInputs, collector, prov, base)
+	edges := v.validateEdges(ctx, typ, raw.Properties, collector, prov, base)
 	if cancelled(ctx, collector, prov, base) {
-		return nil, collector.Result()
+		return ValidInstance{}, collector.Result()
 	}
 	if collector.ErrorCount() > beforeEdges {
-		return nil, collector.Result()
+		return ValidInstance{}, collector.Result()
 	}
 
 	beforeCompositions := collector.ErrorCount()
-	composed := v.validateCompositions(ctx, typ, relInputs, collector, prov, base, depth)
+	composed := v.validateCompositions(ctx, typ, raw.Properties, collector, prov, base, depth)
 	if cancelled(ctx, collector, prov, base) {
-		return nil, collector.Result()
+		return ValidInstance{}, collector.Result()
 	}
 	if collector.ErrorCount() > beforeCompositions {
-		return nil, collector.Result()
+		return ValidInstance{}, collector.Result()
 	}
 
 	// The final gate before the instance is built stays HasErrors: a row with
-	// ANY error yields nil and runs no invariants.
+	// ANY error yields the zero instance and runs no invariants.
 	if collector.HasErrors() {
-		return nil, collector.Result()
+		return ValidInstance{}, collector.Result()
 	}
 
 	// The instance is built before its invariants run, so they read the one
 	// scope its parent will read too (scopeOf). A failed invariant discards it.
-	// WithClone isolates the instance from the caller's raw input.
-	validInstance := newValidatedInstance(
+	validInstance := newValidInstance(
 		typeName,
-		typ.ID(),
-		immutable.WrapKey(pkComponents, immutable.WithClone(true)),
-		immutable.WrapProperties(validatedProps, immutable.WithClone(true)),
+		typ,
+		immutable.WrapKey(pkComponents),
+		immutable.WrapProperties(validatedProps),
 		edges,
 		composed,
 		prov,
@@ -583,167 +465,34 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 		} else {
 			cancelled(ctx, collector, prov, base)
 		}
-		return nil, collector.Result()
+		return ValidInstance{}, collector.Result()
 	}
 	if collector.HasErrors() {
-		return nil, collector.Result()
+		return ValidInstance{}, collector.Result()
 	}
 
 	return validInstance, collector.Result()
 }
 
-// FoldKey returns the case-fold the validator matches an input key by, or
-// false for a key no schema name can match under the fold. It is the rule
-// [WithStrictPropertyNames] switches off, and a parser that resolves names
-// before validation reads it so the two agree. Identifiers are ASCII, so a key
-// with a non-ASCII byte folds to nothing: [strings.ToLower] would map a KELVIN
-// SIGN onto "k" and match a field the caller never wrote.
-func FoldKey(key string) (string, bool) {
-	var b []byte
-	for i := range len(key) {
-		c := key[i]
-		if c >= 0x80 {
-			return "", false
+// checkUnknownFields reports each input key that names no property and no
+// relation field of typ, in sorted order so the set that survives a truncated
+// collector is a function of the input.
+func checkUnknownFields(typ schema.Type, typeName string, props map[string]any, collector *diag.Collector, prov Provenance, base path.Path) {
+	for _, inputName := range slices.Sorted(maps.Keys(props)) {
+		if _, ok := typ.Property(inputName); ok {
+			continue
 		}
-		if c >= 'A' && c <= 'Z' {
-			if b == nil {
-				b = []byte(key)
-			}
-			b[i] = c + ('a' - 'A')
-		}
-	}
-	if b == nil {
-		return key, true
-	}
-	return string(b), true
-}
-
-// relationState is what the member index knows about one relation's input:
-// absent, present under key, or collided — two keys fold to its field and
-// the collision was reported once at the object, so the relation is neither
-// absent nor present and the caller moves on.
-type relationState uint8
-
-const (
-	relationAbsent relationState = iota
-	relationPresent
-	relationCollided
-)
-
-type relationInput struct {
-	state      relationState
-	key        string
-	value      any
-	candidates []string // relationCollided: the keys that folded to the field
-}
-
-// buildRelationMapping reads each relation's entry from the member index:
-// present under the key that claims it, or collided, reported here once at the
-// object before any pass runs, so both member kinds report from one site and no
-// pass's gate can swallow the report.
-func buildRelationMapping(claims objectClaims, props map[string]any, collector *diag.Collector, prov *location.Provenance, base path.Builder) map[*schema.Relation]relationInput {
-	rels := make(map[*schema.Relation]relationInput, len(claims.rels)+len(claims.relCollisions))
-	for rel, key := range claims.rels {
-		rels[rel] = relationInput{state: relationPresent, key: key, value: props[key]}
-	}
-	for _, c := range claims.relCollisions {
-		in := relationInput{state: relationCollided, candidates: c.keys}
-		rels[c.rel] = in
-		reportRelationCollision(c.rel, in, collector, prov, base)
-	}
-	return rels
-}
-
-// reportRelationCollision is the one E_CASE_FOLD_COLLISION a collided relation
-// entry draws, emitted by the member index that finds it.
-func reportRelationCollision(rel *schema.Relation, in relationInput, collector *diag.Collector, prov *location.Provenance, base path.Builder) {
-	kind := "relation"
-	if rel.IsComposition() {
-		kind = "composition"
-	}
-	issue := diag.NewIssue(
-		diag.Error,
-		ErrCaseFoldCollision,
-		fmt.Sprintf("multiple input fields %v fold to %s field %q", in.candidates, kind, rel.FieldName()),
-	).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-	withProvenance(issue, prov, base.String())
-	collector.Collect(issue.Build())
-}
-
-// buildPropertyMapping reads each schema property's input key from the member
-// index, reporting each collision there as an E_CASE_FOLD_COLLISION at the
-// object, where neither key is mapped.
-func (v *Validator) buildPropertyMapping(ctx context.Context, typ *schema.Type, claims objectClaims, collector *diag.Collector, prov *location.Provenance, base path.Builder) map[string]string {
-	for _, c := range claims.propCollisions {
-		issue := diag.NewIssue(
-			diag.Error,
-			ErrCaseFoldCollision,
-			fmt.Sprintf("multiple input fields %v fold to schema property %q", c.keys, c.prop),
-		).WithDetail(diag.DetailKeyPropertyName, c.prop)
-		withProvenance(issue, prov, base.String())
-		collector.Collect(issue.Build())
-	}
-	for _, schemaName := range claims.folded {
-		// Through the package's ctx-taking helper, not slog.Logger.Debug, which
-		// the standard library hard-codes to context.Background: WithLogger
-		// promises every record carries the context passed to Validate.
-		trace.Debug(ctx, v.cfg.logger, "property name normalized",
-			slog.String(diag.DetailKeyTypeName, typ.Name()),
-			slog.String("input", claims.props[schemaName]),
-			slog.String("resolved", schemaName),
-		)
-	}
-	return claims.props
-}
-
-// checkUnknownFields reports each input key no member claims and no collision
-// names, in sorted order so the set that survives a truncated collector is a
-// function of the input.
-func (v *Validator) checkUnknownFields(typ *schema.Type, typeName string, names []string, claims objectClaims, collector *diag.Collector, prov *location.Provenance, base path.Builder) {
-	for _, inputName := range names {
-		if claims.accounted[inputName] {
+		if _, ok := typ.RelationByField(inputName); ok {
 			continue
 		}
 		issue := diag.NewIssue(
 			diag.Error,
-			ErrUnknownField,
-			fmt.Sprintf("unknown field %q", inputName),
+			diag.E_UNKNOWN_FIELD,
+			"unknown field "+diag.QuoteValue(inputName),
 		).WithDetails(diag.TypeField(typeName, inputName)...)
-		if shadowed, ok := v.exactMatchShadowing(typ, inputName, claims.props); ok {
-			issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").
-				WithDetail(diag.DetailKeyPropertyName, shadowed)
-		}
 		withProvenance(issue, prov, base.Key(inputName).String())
 		collector.Collect(issue.Build())
 	}
-}
-
-// exactMatchShadowing reports the schema property or relation field inputName
-// case-folds onto when that member was already claimed by an exact match,
-// which is why the fold was skipped and the field reported unknown. Without
-// it the operator sees a bare "unknown field" for a name the schema plainly
-// recognises.
-//
-// Reports false under strict property names, where no fold is attempted at all.
-func (v *Validator) exactMatchShadowing(typ *schema.Type, inputName string, mapping map[string]string) (string, bool) {
-	if v.cfg.strictPropertyNames {
-		return "", false
-	}
-	lower, ok := FoldKey(inputName)
-	if !ok {
-		return "", false
-	}
-	if schemaName, found := typ.CanonicalPropertyName(lower); found {
-		if claimant, claimed := mapping[schemaName]; claimed && claimant != inputName {
-			return schemaName, true
-		}
-		return "", false
-	}
-	if rel, found := typ.RelationByField(lower); found && lower != inputName {
-		return rel.FieldName(), true
-	}
-	return "", false
 }
 
 // scopeOf returns inst's invariant scope, built once per instance and shared:
@@ -751,9 +500,9 @@ func (v *Validator) exactMatchShadowing(typ *schema.Type, inputName string, mapp
 // instance as a composed child holds this same map in its own scope. One
 // scope per instance is what keeps a composed tree's evaluation linear in
 // its depth.
-func (v *Validator) scopeOf(inst *ValidInstance) immutable.Map[string] {
+func (v *Validator) scopeOf(inst ValidInstance) immutable.Properties {
 	inst.scope.once.Do(func() {
-		inst.scope.m = immutable.WrapMap(v.invariantScope(inst))
+		inst.scope.m = immutable.WrapProperties(v.invariantScope(inst))
 	})
 	return inst.scope.m
 }
@@ -763,9 +512,8 @@ func (v *Validator) scopeOf(inst *ValidInstance) immutable.Map[string] {
 // UPPER_SNAKE name. A property's entry is the instance's own immutable value,
 // not a copy; a composition's holds each child's memoised scope, shared, in a
 // list built for a many composition; an association's is built from cloned
-// target keys. A property name starts lower case, so the evaluator tells a
-// relation's entry by its key and reads it by its name or its field name alone
-// (eval's readMember), as docs/SPEC.md states.
+// target keys. The evaluator reads an entry by its exact key, a property's
+// name or a relation's declared name, as docs/SPEC.md states.
 //
 // Relations belong here because the schema completer's membersOf index admits
 // them, so an invariant may reference one. The two relation
@@ -778,42 +526,46 @@ func (v *Validator) scopeOf(inst *ValidInstance) immutable.Map[string] {
 //     properties, both read real values.
 //   - An ASSOCIATION's target is a REFERENCE. The instance holds the foreign
 //     key, never the target's row, so the entry is the single target key, or
-//     the list of target keys for a many association.
+//     the list of target keys for a many association, ordered as Sort orders them.
 //     Presence and cardinality are answerable; the target's properties are not
 //     in this instance to answer with.
 //
-// A relation with no value is absent from the map, so it evaluates to nil and
-// the `!= nil` idiom means what it says. An instance whose type the schema
-// does not hold — a caller-built one — is its properties alone.
-func (v *Validator) invariantScope(inst *ValidInstance) map[string]any {
+// The entries are a function of the records a graph holds, so a root a merge
+// grew and a root the snapshot reader rebuilds read as the record that wrote
+// them: a graph holds an association's targets as a set and keeps no record of
+// an optional listing written empty. So a many relation is a list, empty when
+// it names nothing, and a single-valued relation with no value is absent from
+// the map and evaluates to nil. inst's type is in v's schema, since v built
+// inst.
+func (v *Validator) invariantScope(inst ValidInstance) map[string]any {
 	props := inst.Properties()
 	scope := make(map[string]any, props.Len()+len(inst.edges)+len(inst.composed))
-	for k, val := range props.Range() {
-		scope[k] = val.Unwrap()
+	for k, val := range props.All() {
+		scope[k] = val.Any()
 	}
-	typ, ok := v.schema.TypeByID(inst.TypeID())
-	if !ok {
-		return scope
-	}
+	typ := inst.typ
 
 	for rel := range typ.AllAssociations() {
-		edge, ok := inst.edges[rel.Name()]
-		if !ok {
-			continue
-		}
-		keys := make([]any, 0, len(edge.targets))
-		for t := range edge.TargetsIter() {
+		var keys []any
+		for t := range inst.edges[rel.Name()].Targets() {
 			keys = append(keys, keyValue(t.TargetKey()))
 		}
+		if len(keys) == 0 && !rel.IsMany() {
+			continue
+		}
+		if keys == nil {
+			keys = []any{}
+		}
+		slices.SortFunc(keys, keyOrder)
 		scope[rel.Name()] = relationValue(rel, keys)
 	}
 
 	for rel := range typ.AllCompositions() {
-		value, ok := inst.composed[rel.Name()]
-		if !ok {
+		children := inst.composed[rel.Name()]
+		if len(children) == 0 && !rel.IsMany() {
 			continue
 		}
-		scope[rel.Name()] = v.composedScopeValue(rel, value.Unwrap())
+		scope[rel.Name()] = v.composedScopeValue(rel, children)
 	}
 
 	return scope
@@ -823,8 +575,7 @@ func (v *Validator) invariantScope(inst *ValidInstance) map[string]any {
 // child for a composition that is not many, a list otherwise, each child its
 // own memoised scope — an instance whose properties and relations are in
 // scope, held rather than rebuilt.
-func (v *Validator) composedScopeValue(rel *schema.Relation, value any) any {
-	children := composedChildren(value)
+func (v *Validator) composedScopeValue(rel schema.Relation, children []ValidInstance) any {
 	scopes := make([]any, 0, len(children))
 	for _, child := range children {
 		scopes = append(scopes, v.scopeOf(child))
@@ -838,25 +589,10 @@ func (v *Validator) composedScopeValue(rel *schema.Relation, value any) any {
 	return scopes[0]
 }
 
-// composedChildren unwraps a validated composition value into its children.
-func composedChildren(value any) []*ValidInstance {
-	switch c := value.(type) {
-	case *ValidInstance:
-		return []*ValidInstance{c}
-	case immutable.Slice:
-		out := make([]*ValidInstance, 0, c.Len())
-		for elem := range c.Iter() {
-			out = append(out, composedChildren(elem.Unwrap())...)
-		}
-		return out
-	}
-	return nil
-}
-
 // relationValue renders a relation's entries for the invariant scope: a
-// single-valued relation yields its one entry, so `works_at != nil` reads as a
+// single-valued relation yields its one entry, so `WORKS_AT != nil` reads as a
 // presence test rather than a one-element list.
-func relationValue(rel *schema.Relation, entries []any) any {
+func relationValue(rel schema.Relation, entries []any) any {
 	if rel.IsMany() {
 		return entries
 	}
@@ -866,8 +602,19 @@ func relationValue(rel *schema.Relation, entries []any) any {
 	return entries[0]
 }
 
+// keyOrder orders two target keys as the DSL's Sort orders them. A key's
+// components are values the total order ranks, so it panics only on a defect,
+// which the invariant pass recovers as an internal error.
+func keyOrder(a, b any) int {
+	c, err := value.Order(a, b)
+	if err != nil {
+		panic("instance: a target key the total order cannot rank: " + err.Error())
+	}
+	return c
+}
+
 // keyValue renders a target key for the invariant scope: a single-component key
-// as its component, so `works_at == "c1"` compares against the value the caller
+// as its component, so `WORKS_AT == "c1"` compares against the value the caller
 // wrote, and a composite key as the component list.
 func keyValue(k immutable.Key) any {
 	parts := k.Clone()
@@ -887,12 +634,12 @@ func keyValue(k immutable.Key) any {
 // returning, enabling comprehensive error reporting in a single validation pass.
 func (v *Validator) evaluateInvariants(
 	ctx context.Context,
-	typ *schema.Type,
+	typ schema.Type,
 	typeName string,
-	inst *ValidInstance,
+	inst ValidInstance,
 	collector *diag.Collector,
-	prov *location.Provenance,
-	base path.Builder,
+	prov Provenance,
+	base path.Path,
 ) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -906,18 +653,19 @@ func (v *Validator) evaluateInvariants(
 			return err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
 		}
 
-		expr := inv.Expression()
+		tree := expr.InvariantExpression(inv)
 		if scope == nil {
 			scope = eval.PropertyScopeOf(v.scopeOf(inst))
 		}
 
-		result, err := v.evaluator.EvaluateBool(ctx, expr, scope)
+		result, err := v.evaluator.EvaluateBool(ctx, tree, scope)
 		if err != nil {
 			issue := diag.NewIssue(
 				diag.Error,
-				ErrEvalError,
-				"invariant evaluation error: "+err.Error(),
-			).WithDetail(diag.DetailKeyTypeName, typeName)
+				diag.E_EVAL_ERROR,
+				fmt.Sprintf("invariant %q: %v", inv.Name(), err),
+			).WithDetail(diag.DetailKeyTypeName, typeName).
+				WithDetail(diag.DetailKeyInvariantName, inv.Name())
 			withProvenance(issue, prov, base.String())
 			collector.Collect(issue.Build())
 			continue
@@ -926,9 +674,10 @@ func (v *Validator) evaluateInvariants(
 		if !result {
 			issue := diag.NewIssue(
 				diag.Error,
-				ErrInvariantFail,
+				diag.E_INVARIANT_FAIL,
 				inv.Name(),
-			).WithDetail(diag.DetailKeyTypeName, typeName)
+			).WithDetail(diag.DetailKeyTypeName, typeName).
+				WithDetail(diag.DetailKeyInvariantName, inv.Name())
 			withProvenance(issue, prov, base.String())
 			collector.Collect(issue.Build())
 		}
@@ -941,7 +690,7 @@ func (v *Validator) evaluateInvariants(
 // A primary key is required by definition, so an absent or nil component was
 // already reported as E_MISSING_REQUIRED by the property pass and is skipped
 // here.
-func (v *Validator) extractPrimaryKey(typ *schema.Type, props map[string]any) []any {
+func (v *Validator) extractPrimaryKey(typ schema.Type, props map[string]any) []any {
 	var pkComponents []any
 
 	for pk := range typ.PrimaryKeys() {
@@ -959,31 +708,26 @@ func (v *Validator) extractPrimaryKey(typ *schema.Type, props map[string]any) []
 // instance of typeName, whether or not the validator accepts the rest of raw:
 // each key property is read, checked and coerced as [Validator.Validate] reads
 // it. It reports false when typeName names no type that can hold a root, or a
-// key component is absent, collided or fails its constraint. Panics if the
+// key component is absent or fails its constraint. Panics if the
 // receiver is nil.
 func (v *Validator) PrimaryKeyOf(typeName string, raw RawInstance) (schema.TypeID, immutable.Key, bool) {
 	if v == nil {
 		panic("instance.PrimaryKeyOf: nil validator receiver")
 	}
-	typ, err := v.resolveType(typeName)
-	if err != nil {
+	typ, found := v.schema.ResolveTypeName(typeName)
+	if !found {
 		return schema.TypeID{}, immutable.Key{}, false
 	}
-	if _, refused := instantiationRefusal(typ, typeName, false, nil); refused {
+	if _, refused := instantiationRefusal(typ, typeName, false, Provenance{}); refused {
 		return schema.TypeID{}, immutable.Key{}, false
 	}
-	claims := claimObject(typ, slices.Sorted(maps.Keys(raw.Properties)), v.cfg.strictPropertyNames)
 	var components []any
 	for pk := range typ.PrimaryKeys() {
-		inputName, claimed := claims.props[pk.Name()]
-		if !claimed {
+		val := raw.Properties[pk.Name()]
+		if value.Absent(val) || checkValueRecovering(val, pk.Constraint()) != nil {
 			return schema.TypeID{}, immutable.Key{}, false
 		}
-		val := raw.Properties[inputName]
-		if isAbsent(val) || v.checkValueWithRecovery(val, pk.Constraint()) != nil {
-			return schema.TypeID{}, immutable.Key{}, false
-		}
-		coerced, err := v.coerceValueWithRecovery(val, pk.Constraint())
+		coerced, err := coerceValueRecovering(val, pk.Constraint())
 		if err != nil {
 			return schema.TypeID{}, immutable.Key{}, false
 		}
@@ -992,19 +736,15 @@ func (v *Validator) PrimaryKeyOf(typeName string, raw RawInstance) (schema.TypeI
 	if len(components) == 0 {
 		return schema.TypeID{}, immutable.Key{}, false
 	}
-	return typ.ID(), immutable.WrapKey(components, immutable.WithClone(true)), true
+	return typ.ID(), immutable.WrapKey(components), true
 }
 
 // withProvenance sets an issue's path and source name, and its span when the
 // provenance carries one. pathStr is the issue's own location in the input
 // document; prov supplies the document's name and span.
-func withProvenance(b *diag.IssueBuilder, prov *location.Provenance, pathStr string) *diag.IssueBuilder {
-	sourceName := ""
-	if prov != nil {
-		sourceName = prov.SourceName()
-	}
-	b.WithPath(sourceName, pathStr)
-	if prov != nil && !prov.Span().IsZero() {
+func withProvenance(b *diag.IssueBuilder, prov Provenance, pathStr string) *diag.IssueBuilder {
+	b.WithPath(prov.SourceName(), pathStr)
+	if !prov.Span().IsZero() {
 		b.WithSpan(prov.Span())
 	}
 	return b
@@ -1012,34 +752,14 @@ func withProvenance(b *diag.IssueBuilder, prov *location.Provenance, pathStr str
 
 // createErrorResult creates a diag.Result with a single error issue at the
 // provenance's own location.
-func createErrorResult(code diag.Code, message string, prov *location.Provenance) diag.Result {
-	collector := diag.NewCollectorUnlimited()
+func createErrorResult(code diag.Code, message string, prov Provenance) diag.Result {
+	collector := diag.NewCollector(diag.NoLimit)
 	issue := diag.NewIssue(
 		diag.Error,
 		code,
 		message,
 	)
-	withProvenance(issue, prov, provenancePathBuilder(prov).String())
+	withProvenance(issue, prov, basePath(prov).String())
 	collector.Collect(issue.Build())
 	return collector.Result()
-}
-
-// provenancePathBuilder returns the instance's location in the input document,
-// or the root when it has no provenance.
-func provenancePathBuilder(prov *location.Provenance) path.Builder {
-	if prov == nil {
-		return path.Root()
-	}
-	return prov.Path()
-}
-
-// checkValueWithRecovery calls the Checker's CheckValue with panic recovery.
-func (v *Validator) checkValueWithRecovery(val any, c schema.Constraint) error {
-	return checkValueRecovering(val, c)
-}
-
-// coerceValueWithRecovery runs eval.CoerceValue with panic recovery, as
-// checkValueWithRecovery runs eval.CheckValue.
-func (v *Validator) coerceValueWithRecovery(val any, c schema.Constraint) (any, error) {
-	return coerceValueRecovering(val, c)
 }

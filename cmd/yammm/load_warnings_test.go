@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,8 +32,7 @@ func TestLoadWarningsRenderedByEveryCommand(t *testing.T) {
 		args []string
 	}{
 		{"validate", []string{"validate", fixture}},
-		{"neo4j indexes", []string{"neo4j", "indexes", fixture}},
-		{"neo4j constraints", []string{"neo4j", "constraints", fixture}},
+		{"gen --to cypher", []string{"gen", "--to", "cypher", fixture}},
 		{"gen md", []string{"gen", "--to", "md", fixture}},
 	}
 
@@ -52,7 +54,7 @@ func TestLoadWarningsRenderedByEveryCommand(t *testing.T) {
 // command writes AT MOST ONE JSON document to stderr, whatever phases it runs.
 //
 // Two-phase commands rendered the schema load's diagnostics and then their own,
-// which in --format json wrote two complete JSON objects back to back. Once load
+// which in --json wrote two complete JSON objects back to back. Once load
 // warnings became reachable, any schema carrying one plus a data phase that
 // reported anything produced output that json.Unmarshal, json.loads, and
 // JSON.parse all reject with a trailing-data error.
@@ -67,9 +69,8 @@ func TestJSONDiagnosticsAreOneDocumentPerInvocation(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"check", []string{"check", "--format", "json", schemaPath, dataPath}},
-		{"load", []string{"load", "--format", "json", schemaPath, dataPath}},
-		{"export", []string{"export", "--format", "json", "--to", "json", schemaPath, dataPath}},
+		{"check", []string{"check", "--json", schemaPath, dataPath}},
+		{"snapshot save", []string{"snapshot", "save", "--json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath, dataPath}},
 	}
 
 	for _, tt := range tests {
@@ -95,5 +96,35 @@ func TestJSONDiagnosticsAreOneDocumentPerInvocation(t *testing.T) {
 				t.Errorf("the one document should carry the data-phase error; got:\n%s", doc)
 			}
 		})
+	}
+}
+
+// TestValidate_KeepsAHundredLoadWarnings pins the one-call issue limit on a
+// schema load: of 130 shadowed-annotation warnings, validate prints 100 and a
+// note that counts the 30 it dropped, and warnings alone exit 0.
+func TestValidate_KeepsAHundredLoadWarnings(t *testing.T) {
+	t.Parallel()
+
+	var base, doc strings.Builder
+	for i := range 130 {
+		fmt.Fprintf(&base, "    p%03d Timestamp @writeOnce\n", i)
+		fmt.Fprintf(&doc, "    p%03d Timestamp\n", i)
+	}
+	schemaPath := filepath.Join(t.TempDir(), "warn130.yammm")
+	src := "schema \"many\"\n\nabstract type Base {\n    id String primary\n" + base.String() +
+		"}\n\ntype Doc extends Base {\n" + doc.String() + "}\n"
+	if err := os.WriteFile(schemaPath, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stderr := executeCmdStderr(t, "validate", schemaPath)
+	if code != cli.ExitOK {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitOK)
+	}
+	if got := strings.Count(stderr, "warning[W_ANNOTATION_SHADOWED]"); got != 100 {
+		t.Errorf("validate printed %d warnings, want 100", got)
+	}
+	if !strings.Contains(stderr, "note: 30 more issue(s) dropped at an issue limit") {
+		t.Error("stderr carries no note counting the 30 dropped warnings")
 	}
 }

@@ -15,13 +15,17 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/internal/buildversion"
-	lsp "github.com/simon-lentz/yammm/lsp"
+	lsp "github.com/simon-lentz/yammm/internal/lsp"
 )
 
 // version is the ldflags-injected release version; [buildversion.Resolve]
 // falls back to the build-info module version for `go install pkg@tag` builds,
 // which never receive ldflags.
 var version = "dev"
+
+// shutdownWait bounds the wait for RunStdio after a signal, in which in-flight
+// handlers finish. A client that stopped reading holds the server's write past it.
+const shutdownWait = 5 * time.Second
 
 // LevelTrace is a custom log level below debug for verbose tracing.
 const LevelTrace = slog.Level(-8)
@@ -153,26 +157,14 @@ func run(stdout, stderr io.Writer, args []string) error {
 		return nil
 	case sig := <-sigCh:
 		logger.Info("received signal, shutting down", slog.String("signal", sig.String()))
-		_ = server.Close() // ordered shutdown: workspace.Shutdown() + jrpc2.Stop(); Close always returns nil
+		_ = server.Close() // ordered shutdown; Close always returns nil
 
-		// Close stdin to unblock RunStdio's read operation.
-		// When running manually (not connected to an LSP client), the JSON-RPC
-		// connection's Close() doesn't close the underlying stdin, leaving
-		// RunStdio blocked on os.Stdin.Read().
-		if err := os.Stdin.Close(); err != nil {
-			logger.Debug("error closing stdin", slog.Any("error", err))
-		}
-
-		// Bounded wait for RunStdio to return. This prevents hanging forever
-		// if Close() was called before the connection was initialized, or if
-		// RunStdio() doesn't return for some other reason.
 		select {
 		case err := <-errCh:
 			if err != nil {
-				// Close intentionally causes an error; log at debug level
 				logger.Debug("RunStdio returned after close", slog.Any("error", err))
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(shutdownWait):
 			logger.Warn("shutdown timed out, forcing exit")
 		}
 

@@ -1,0 +1,37 @@
+{
+  "name": "\"b__c__direction_LR\"",
+  "span": {
+    "s": 0,
+    "e": 27
+  },
+  "types": [
+    {
+      "name": "Mark",
+      "name_span": {
+        "s": 34,
+        "e": 38
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 45,
+              "e": 51
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 42,
+            "e": 59
+          }
+        }
+      ],
+      "span": {
+        "s": 29,
+        "e": 61
+      }
+    }
+  ]
+}

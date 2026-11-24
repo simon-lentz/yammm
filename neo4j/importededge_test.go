@@ -1,0 +1,270 @@
+package neo4j
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/schema/cypher"
+
+	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
+	"github.com/simon-lentz/yammm/schema"
+)
+
+// The entry schema declares no type of its own, so every instance below is an
+// imported one and its rendered name is alias-qualified.
+const importedEdgeEntry = `schema "geo"
+
+import "base.yammm" as base
+`
+
+const importedEdgeBase = `schema "base"
+
+type Basin {
+	id String primary
+	--> NEAR (_) Basin { seen Timestamp }
+}
+`
+
+// TestEdgeQueries_ImportedSourceTypeWritesUnderClosureShape pins that an
+// edge whose source type the entry schema imports resolves its shape through
+// the closure walk, by identity: the statement merges on the imported type's
+// own label even though the rendered name is in no schema's local table.
+func TestEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	s, loadErr := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"entry.yammm": []byte(importedEdgeEntry),
+		"base.yammm":  []byte(importedEdgeBase),
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if loadErr != nil {
+		t.Fatalf("load schema: %s", loadErr)
+	}
+	basin, ok := s.ResolveTypeName("base.Basin")
+	if !ok {
+		t.Fatal("base.Basin did not resolve through the entry schema")
+	}
+	id := basin.ID()
+
+	node := func(k string) snapparts.Instance {
+		return snapparts.Instance{
+			TypeID:     id,
+			PrimaryKey: immutable.WrapKey([]any{k}),
+			Properties: immutable.WrapProperties(map[string]any{"id": k}),
+		}
+	}
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
+		Types: []schema.TypeID{id},
+		Instances: []snapparts.Instance{
+			node("b1"),
+			node("b2"),
+		},
+		Edges: []snapparts.Edge{{
+			Relation:   "NEAR",
+			SourceType: id, SourceKey: immutable.WrapKey([]any{"b1"}),
+			TargetKey:  immutable.WrapKey([]any{"b2"}),
+			Properties: immutable.WrapProperties(map[string]any{"seen": "2026-08-17T12:00:00Z"}),
+		}},
+	})
+
+	// The fixture is only meaningful while the rendered name is unresolvable
+	// through the schema's local table — that is what splits the two lookups.
+	if _, ok := s.Type("base.Basin"); ok {
+		t.Fatal("fixture is vacuous: the rendered name resolves, so the lookups agree")
+	}
+
+	a := cypher.Config{}
+	shapes, shapeErr := shapeFor(a, s)
+	if shapeErr != nil {
+		t.Fatalf("shape: %s", shapeErr)
+	}
+
+	if _, ok := shapes.types[id]; !ok {
+		t.Fatal("the closure walk did not produce a shape for the imported source type")
+	}
+
+	queries, err := EdgeQueries(ctx, a, built)
+	if err != nil {
+		t.Fatalf("EdgeQueries: %v", err)
+	}
+	if len(queries) != 1 {
+		t.Fatalf("got %d edge queries; want 1", len(queries))
+	}
+	for _, want := range []string{"base__Basin", "NEAR"} {
+		if !strings.Contains(queries[0].Statement, want) {
+			t.Errorf("edge statement %q does not contain %q", queries[0].Statement, want)
+		}
+	}
+}
+
+// A transitively imported type renders to a bare name, because the entry
+// schema holds no alias for the schema that declares it. When the entry schema
+// declares its own type of that name, the two render identically.
+const collidingShapeEntry = `schema "entry"
+
+import "mid.yammm" as mid
+
+type Hub {
+	code String primary
+	name String required
+}
+`
+
+const collidingShapeMid = `schema "mid"
+
+import "deep.yammm" as deep
+`
+
+const collidingShapeDeep = `schema "deep"
+
+type Hub {
+	id String primary
+}
+`
+
+// TestShapeFor_TransitivelyImportedTypeKeepsItsOwnLabel pins the reason a shape
+// is keyed by identity. The deep Hub has the name of the entry
+// schema's own Hub — a different label, different merge keys, different
+// required fields — and it gets its own closure-provided shape rather than being
+// merged into the entry Hub's.
+//
+// [TestNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel] writes
+// the pair.
+//
+// Mutation: keying graphShape.types by the type's name instead of by TypeID
+// collapses the pair and turns this red.
+func TestShapeFor_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
+	t.Parallel()
+
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"entry.yammm": []byte(collidingShapeEntry),
+		"mid.yammm":   []byte(collidingShapeMid),
+		"deep.yammm":  []byte(collidingShapeDeep),
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
+	}
+
+	local, ok := s.Type("Hub")
+	if !ok {
+		t.Fatal("the entry schema's own Hub did not resolve")
+	}
+	var deep schema.Type
+	for ty := range s.Closure() {
+		for cand := range ty.Types() {
+			if cand.Name() == "Hub" && cand.ID() != local.ID() {
+				deep = cand
+			}
+		}
+	}
+	if deep.IsZero() {
+		t.Fatal("fixture is vacuous: the deep Hub did not resolve through the closure")
+	}
+	if _, addressable := schema.AddressableTag(s, deep.ID()); addressable {
+		t.Fatal("fixture is vacuous: the entry schema can name the deep Hub")
+	}
+
+	a := cypher.Config{}
+	shapes, shapeErr := shapeFor(a, s)
+	if shapeErr != nil {
+		t.Fatalf("shape: %s", shapeErr)
+	}
+
+	localShape, ok := shapes.types[local.ID()]
+	if !ok {
+		t.Fatal("the entry schema's Hub has no shape")
+	}
+	deepShape, ok := shapes.types[deep.ID()]
+	if !ok {
+		t.Fatal("the deep Hub has no shape: the closure walk keyed the two identities as one")
+	}
+	if localShape.label == deepShape.label {
+		t.Fatalf("the two identities share label %q", localShape.label)
+	}
+	if !strings.Contains(deepShape.label, "deep") {
+		t.Errorf("the deep Hub's label is %q, not one derived from its declaring schema", deepShape.label)
+	}
+}
+
+// TestNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel writes a
+// root of the deep Hub beside one of the entry schema's Hub. Both are named Hub;
+// each merges under its own label on its own key.
+func TestNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	s, loadErr := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"entry.yammm": []byte(collidingShapeEntry),
+		"mid.yammm":   []byte(collidingShapeMid),
+		"deep.yammm":  []byte(collidingShapeDeep),
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if loadErr != nil {
+		t.Fatalf("load schema: %s", loadErr)
+	}
+	local, ok := s.Type("Hub")
+	if !ok {
+		t.Fatal("the entry schema's own Hub did not resolve")
+	}
+	var deep schema.TypeID
+	for member := range s.Closure() {
+		if cand, ok := member.Type("Hub"); ok && cand.ID() != local.ID() {
+			deep = cand.ID()
+		}
+	}
+	if deep.IsZero() {
+		t.Fatal("fixture is vacuous: the deep Hub did not resolve through the closure")
+	}
+
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
+		Types: []schema.TypeID{local.ID(), deep},
+		Instances: []snapparts.Instance{
+			{
+				TypeID:     local.ID(),
+				PrimaryKey: immutable.WrapKey([]any{"h1"}),
+				Properties: immutable.WrapProperties(map[string]any{"code": "h1", "name": "entry"}),
+			},
+			{
+				TypeID:     deep,
+				PrimaryKey: immutable.WrapKey([]any{"h1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
+			},
+		},
+	})
+
+	a := cypher.Config{}
+	shapes, shapeErr := shapeFor(a, s)
+	if shapeErr != nil {
+		t.Fatalf("shape: %s", shapeErr)
+	}
+	queries, err := NodeQueries(ctx, a, built)
+	if err != nil {
+		t.Fatalf("NodeQueries: %v", err)
+	}
+	byLabel := map[string]*NodeQuery{}
+	for i, q := range queries {
+		if q.Kind != NodeMerge {
+			continue
+		}
+		for _, label := range []string{shapes.types[local.ID()].label, shapes.types[deep].label} {
+			if strings.Contains(q.Statement, "MERGE (n:"+label+" {") {
+				byLabel[label] = &queries[i]
+			}
+		}
+	}
+	localQuery, deepQuery := byLabel[shapes.types[local.ID()].label], byLabel[shapes.types[deep].label]
+	if localQuery == nil || deepQuery == nil || localQuery == deepQuery {
+		t.Fatalf("want one merge per label, got %d node queries: %v", len(queries), queries)
+	}
+	for q, want := range map[*NodeQuery]string{localQuery: "key_code", deepQuery: "key_id"} {
+		rows, _ := q.Params["rows"].([]map[string]any)
+		if len(rows) != 1 {
+			t.Fatalf("statement %q carries %d rows, want 1", q.Statement, len(rows))
+		}
+		if rows[0][want] != "h1" {
+			t.Errorf("statement %q row %v carries no %s of h1", q.Statement, rows[0], want)
+		}
+	}
+}

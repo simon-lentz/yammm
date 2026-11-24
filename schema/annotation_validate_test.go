@@ -1,11 +1,12 @@
 package schema_test
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -208,6 +209,25 @@ type T {
 			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION: 1},
 		},
 		{
+			name: "@vector on a Vector over 4096 dimensions",
+			source: `schema "main"
+type T {
+	id String primary
+	v Vector[4097] @vector(cosine)
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1},
+		},
+		{
+			name: "@vector on a datatype Vector over 4096 dimensions",
+			source: `schema "main"
+type Wide = Vector[65536]
+type T {
+	id String primary
+	v Wide @vector(euclidean)
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1},
+		},
+		{
 			name: "@vector on non-Vector",
 			source: `schema "main"
 type T {
@@ -343,19 +363,18 @@ type Derived extends Base {
 }
 
 // An unresolved supertype defers the unknown-reference report: the property may
-// live on a not-yet-visible cross-schema ancestor.
+// live on an ancestor the failed reference hides.
 func TestAnnotation_Fulltext_DeferredSupertype_UnknownRefSilent(t *testing.T) {
 	t.Parallel()
-	_, res := schema.NewBuilder().
-		WithName("main").
-		AddType("Entity").
-		Extends(schema.NewTypeRef("ext", "Base", location.Span{})).
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithTypeAnnotation("fulltext", "ghost").
-		Done().
-		Build()
-	if res.HasCode(diag.E_UNKNOWN_ANNOTATION_TARGET) {
-		t.Errorf("@@fulltext under an unresolved supertype must defer the unknown-reference report, got: %v", res)
+	_, err := schema.LoadString(t.Context(), `schema "main"
+
+type Entity extends ext.Base {
+	id String primary
+	@@fulltext(ghost)
+}
+`, "main.yammm")
+	if errors.Is(err, diag.E_UNKNOWN_ANNOTATION_TARGET) {
+		t.Errorf("@@fulltext under an unresolved supertype must defer the unknown-reference report, got: %v", err)
 	}
 }
 
@@ -369,7 +388,7 @@ type T {
 	@@fulltext(id, title)
 }`)
 	ty := schemaType(t, s, "T")
-	all := ty.AllAnnotationsSlice()
+	all := slices.Collect(ty.AllAnnotations())
 	if len(all) == 0 {
 		t.Fatal("T should carry the @@fulltext annotation")
 	}
@@ -475,7 +494,7 @@ type T {
 		t.Errorf("@vector arg kind: got %v, want ArgKeyword", args[0].Kind())
 	}
 	// @@index property-ref args
-	all := ty.AllAnnotationsSlice()
+	all := slices.Collect(ty.AllAnnotations())
 	if len(all) == 0 {
 		t.Fatal("T should carry the @@index annotation")
 	}
@@ -520,6 +539,8 @@ func TestAnnotation_Validation_UnbuiltConstraintNoTargetCascade(t *testing.T) {
 		{"vector", "\te Vector[0] @vector(cosine)"},
 		{"index", "\te Vector[0] @index"},
 		{"compositeIndex", "\te Vector[0]\n\t@@index(e)"},
+		{"fulltext", "\te Vector[0] @fulltext"},
+		{"compositeFulltext", "\te Vector[0]\n\t@@fulltext(e)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -656,7 +677,7 @@ type T {
 	}
 }
 
-// A property annotation written on its own line binds to the property ABOVE
+// A property annotation that begins a line binds to the property ABOVE
 // it, because the grammar's property-trailing annotation* ignores line breaks.
 // A reader coming from a prefix-decorator language means the property BELOW,
 // and nothing else in the load tells the two readings apart — the schema was
@@ -677,9 +698,43 @@ type Doc {
 	}
 	// The message must name the property it actually attached to, so the user
 	// can see which reading the loader took.
-	for _, want := range []string{"@index", "own line", `"state"`, "@@index"} {
+	for _, want := range []string{
+		"@index", "begins a line", `"state"`, "@@index",
+		"write it after that property on the line where the property ends",
+	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message should mention %q; got %q", want, msg)
+		}
+	}
+}
+
+// A Vector of 4096 dimensions takes @vector, and one over it loads unannotated.
+func TestAnnotation_Vector_TakesUpTo4096Dimensions(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{
+		"id String primary\n\tv Vector[4096] @vector(cosine)",
+		"id String primary\n\tv Vector[65536]",
+	} {
+		if _, res := loadNoErr(t, "schema \"main\"\ntype Doc {\n\t"+body+"\n}"); res.Len() != 0 {
+			t.Errorf("%s: got %v, want a clean load", body, res)
+		}
+	}
+}
+
+// A @vector over more than 4096 dimensions is refused at its property, written
+// or through a datatype.
+func TestAnnotation_Vector_OverTheBoundIsRefusedAtItsProperty(t *testing.T) {
+	t.Parallel()
+	for _, src := range []string{
+		"schema \"main\"\ntype Doc {\n\tid String primary\n\tv Vector[4097] @vector(cosine)\n}",
+		"schema \"main\"\ntype Wide = Vector[5000]\ntype Doc {\n\tid String primary\n\tv Wide @vector(cosine)\n}",
+	} {
+		res := loadStringErr(t, src)
+		wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1})
+		for is := range res.Issues() {
+			if at := src[is.Span().Start.Offset:]; !strings.HasPrefix(at, "v ") {
+				t.Errorf("%q: the refusal stands at %q, want the property", src, at)
+			}
 		}
 	}
 }
@@ -690,32 +745,10 @@ func TestAnnotation_SameLine_StaysValid(t *testing.T) {
 	for _, body := range []string{
 		"id String primary\n\tpublished_on Date @index",
 		"id String primary\n\tfirst_seen Timestamp @writeOnce @index",
+		"id String primary\n\tstate Enum[\n\t\t\"a\",\n\t\t\"b\",\n\t] @index",
 	} {
 		if _, res := loadNoErr(t, "schema \"main\"\ntype Doc {\n\t"+body+"\n}"); res.Len() != 0 {
 			t.Errorf("same-line annotations must load clean, got: %v", res)
-		}
-	}
-}
-
-// identity() is the key for both duplicate detection and inherited-annotation
-// dedup, so it must be injective. The name is the first field and needs its own
-// length prefix: without one its bytes run into the first argument's encoding,
-// and a name spelled to imitate that encoding collides with an unrelated
-// annotation. Reachable only through the Builder, which takes the name as a
-// plain string.
-func TestAnnotation_Identity_NameIsDelimited(t *testing.T) {
-	t.Parallel()
-	_, res := schema.NewBuilder().WithName("main").
-		AddType("U").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("a", schema.NewStringConstraint()).
-		WithTypeAnnotation("index\x000\x001\x00a").
-		WithTypeAnnotation("index", "a").
-		Done().
-		Build()
-	for i := range res.Issues() {
-		if strings.Contains(i.Message(), "more than once") {
-			t.Errorf("two structurally different annotations must not collide as duplicates: %s", i.Message())
 		}
 	}
 }

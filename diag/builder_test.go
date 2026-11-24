@@ -3,6 +3,8 @@ package diag
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 )
@@ -25,8 +27,8 @@ func TestNewIssue(t *testing.T) {
 }
 
 func TestIssueBuilder_WithSpan(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
-	span := location.Point(source, 10, 5)
+	source := sourcetest.ID("test://schema.yammm")
+	span := location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}}
 
 	issue := NewIssue(Error, E_SYNTAX, "test").
 		WithSpan(span).
@@ -64,13 +66,13 @@ func TestIssueBuilder_WithHint(t *testing.T) {
 }
 
 func TestIssueBuilder_WithRelated(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
-	related1 := location.RelatedInfo{
-		Span:    location.Point(source, 5, 1),
+	source := sourcetest.ID("test://schema.yammm")
+	related1 := RelatedInfo{
+		Span:    location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}},
 		Message: "previous definition here",
 	}
-	related2 := location.RelatedInfo{
-		Span:    location.Point(source, 10, 1),
+	related2 := RelatedInfo{
+		Span:    location.Span{Source: source, Start: location.Position{Line: 10, Column: 1}, End: location.Position{Line: 10, Column: 1}},
 		Message: "also defined here",
 	}
 
@@ -92,10 +94,10 @@ func TestIssueBuilder_WithRelated(t *testing.T) {
 }
 
 func TestIssueBuilder_WithRelated_Variadic(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
-	related := []location.RelatedInfo{
-		{Span: location.Point(source, 5, 1), Message: "first"},
-		{Span: location.Point(source, 10, 1), Message: "second"},
+	source := sourcetest.ID("test://schema.yammm")
+	related := []RelatedInfo{
+		{Span: location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}}, Message: "first"},
+		{Span: location.Span{Source: source, Start: location.Position{Line: 10, Column: 1}, End: location.Position{Line: 10, Column: 1}}, Message: "second"},
 	}
 
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "test").
@@ -175,10 +177,10 @@ func TestIssueBuilder_WithExpectedGot(t *testing.T) {
 }
 
 func TestIssueBuilder_FluentChaining(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
-	span := location.Point(source, 10, 5)
-	related := location.RelatedInfo{
-		Span:    location.Point(source, 5, 1),
+	source := sourcetest.ID("test://schema.yammm")
+	span := location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}}
+	related := RelatedInfo{
+		Span:    location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}},
 		Message: "previous definition",
 	}
 
@@ -208,11 +210,11 @@ func TestIssueBuilder_FluentChaining(t *testing.T) {
 }
 
 func TestIssueBuilder_BuildImmutability(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 
 	builder := NewIssue(Error, E_DUPLICATE_TYPE, "test").
-		WithRelated(location.RelatedInfo{
-			Span:    location.Point(source, 5, 1),
+		WithRelated(RelatedInfo{
+			Span:    location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}},
 			Message: "original",
 		}).
 		WithDetails(Detail{Key: DetailKeyTypeName, Value: "original"})
@@ -221,8 +223,8 @@ func TestIssueBuilder_BuildImmutability(t *testing.T) {
 	issue1 := builder.Build()
 
 	// Modify builder and build second issue
-	builder.WithRelated(location.RelatedInfo{
-		Span:    location.Point(source, 10, 1),
+	builder.WithRelated(RelatedInfo{
+		Span:    location.Span{Source: source, Start: location.Position{Line: 10, Column: 1}, End: location.Position{Line: 10, Column: 1}},
 		Message: "added",
 	})
 	builder.WithDetails(Detail{Key: DetailKeyPropertyName, Value: "added"})
@@ -249,12 +251,12 @@ func TestIssueBuilder_BuildImmutability(t *testing.T) {
 }
 
 func TestIssueBuilder_BuildDeepCopy(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 
 	// Create builder with slices
 	builder := NewIssue(Error, E_DUPLICATE_TYPE, "test").
-		WithRelated(location.RelatedInfo{
-			Span:    location.Point(source, 5, 1),
+		WithRelated(RelatedInfo{
+			Span:    location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}},
 			Message: "related",
 		}).
 		WithDetails(Detail{Key: DetailKeyTypeName, Value: "type"})
@@ -315,7 +317,8 @@ func TestNewIssue_PanicsOnInvalidInput(t *testing.T) {
 		{"invalid severity", func() { NewIssue(Severity(255), E_SYNTAX, "test") }},
 		{"zero code", func() { NewIssue(Error, Code{}, "test") }},
 		{"empty message", func() { NewIssue(Error, E_SYNTAX, "") }},
-		{"severity just above Hint", func() { NewIssue(Severity(5), E_SYNTAX, "test") }}, // Hint = 4
+		{"severity just above Hint", func() { NewIssue(Hint+1, E_SYNTAX, "test") }},
+		{"the zero severity", func() { NewIssue(Severity(0), E_SYNTAX, "test") }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

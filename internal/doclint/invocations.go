@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -25,9 +24,6 @@ type CommandRules struct {
 	// Commands holds every command the program accepts. The program itself
 	// is the command whose Path is "".
 	Commands []Command
-	// Exclude holds path.Match patterns over slash-separated paths from the
-	// root. A tracked Markdown file matching one is not read.
-	Exclude []string
 }
 
 // Command is one command of a program and the flags it accepts.
@@ -49,10 +45,6 @@ type Flag struct {
 	// NoValue reports that the flag takes no separate value, as a boolean
 	// flag does: the word after it is never its value.
 	NoValue bool
-	// AfterLookup reports that the program defines the flag only once it has
-	// found the command, as cobra does its help and version flags. Written
-	// before the command's name, such a flag takes the next word.
-	AfterLookup bool
 }
 
 // AssertInvocationsExist reports every invocation of rules.Program in the
@@ -60,17 +52,9 @@ type Flag struct {
 // flag the command it names does not define, and returns how many invocations
 // it read. The package
 // documentation states what an invocation is and how it is read.
-//
-// An exclusion that matches no Markdown file is reported too, so none can
-// outlive the file it names.
 func AssertInvocationsExist(t TB, root string, rules CommandRules) (checked int) {
 	t.Helper()
 	tree, problems := newCommandTree(rules)
-	for _, p := range rules.Exclude {
-		if _, err := path.Match(p, ""); err != nil {
-			problems = append(problems, fmt.Sprintf("exclusion %q is not a valid pattern: %v", p, err))
-		}
-	}
 	if len(problems) > 0 {
 		for _, p := range problems {
 			t.Errorf("%s", p)
@@ -82,15 +66,8 @@ func AssertInvocationsExist(t TB, root string, rules CommandRules) (checked int)
 		t.Errorf("listing the paths of %s: %v", root, err)
 		return 0
 	}
-	excluded := make(map[string]bool)
 	for _, rel := range files {
 		if !strings.HasSuffix(rel, ".md") {
-			continue
-		}
-		if matched := matchingPatterns(rules.Exclude, rel); len(matched) > 0 {
-			for _, p := range matched {
-				excluded[p] = true
-			}
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
@@ -108,11 +85,6 @@ func AssertInvocationsExist(t TB, root string, rules CommandRules) (checked int)
 			for _, p := range tree.check(inv.text) {
 				t.Errorf("%s:%d: `%s` %s", rel, inv.line, inv.text, p)
 			}
-		}
-	}
-	for _, p := range rules.Exclude {
-		if !excluded[p] {
-			t.Errorf("exclusion %q matches no tracked Markdown file", p)
 		}
 	}
 	return checked
@@ -368,7 +340,7 @@ func (tree commandTree) takesNextWord(path, tok string) bool {
 		return false
 	}
 	f, ok := tree.flags[path][flag]
-	return !ok || f.AfterLookup || !f.NoValue
+	return !ok || !f.NoValue
 }
 
 // readFlag returns the flags one flag word names on path, each spelled

@@ -21,7 +21,7 @@ func TestCollector_MergeRetag_CountsFollowTheDeclarationUnderTruncation(t *testi
 		t.Fatalf("the source result is not truncated as expected: %s", res)
 	}
 
-	c := NewCollectorUnlimited()
+	c := NewCollector(NoLimit)
 	c.MergeRetag(res,
 		func(sev Severity, code Code) (Severity, bool) {
 			if code == E_CONSTRAINT_FAIL {
@@ -77,7 +77,7 @@ func TestCollector_MergeRetag_DropsWhatTheDeclarationDoesNotKeep(t *testing.T) {
 		t.Fatalf("the source result did not drop its warning as expected: %s", res)
 	}
 
-	c := NewCollectorUnlimited()
+	c := NewCollector(NoLimit)
 	c.MergeRetag(res,
 		func(sev Severity, code Code) (Severity, bool) { return sev, code == E_INTERNAL },
 		func(is Issue) Issue { return is })
@@ -105,7 +105,7 @@ func TestCollector_MergeRetag_DropsWhatTheDeclarationDoesNotKeep(t *testing.T) {
 func TestCollector_MergeRetag_CountsEveryIssueOfACodeAtTheDeclaredSeverity(t *testing.T) {
 	t.Parallel()
 
-	src := NewCollectorUnlimited()
+	src := NewCollector(NoLimit)
 	src.Collect(NewIssue(Error, E_CONSTRAINT_FAIL, "a").Build())
 	src.Collect(NewIssue(Error, E_CONSTRAINT_FAIL, "b").Build())
 	res := src.Result()
@@ -123,7 +123,7 @@ func TestCollector_MergeRetag_CountsEveryIssueOfACodeAtTheDeclaredSeverity(t *te
 	for _, row := range rows {
 		t.Run(row.to.String(), func(t *testing.T) {
 			t.Parallel()
-			c := NewCollectorUnlimited()
+			c := NewCollector(NoLimit)
 			c.MergeRetag(res,
 				func(Severity, Code) (Severity, bool) { return row.to, true },
 				func(is Issue) Issue { return NewIssue(row.to, is.Code(), is.Message()).Build() })
@@ -153,7 +153,7 @@ func TestCollector_MergeRetag_CountsEveryIssueOfACodeAtTheDeclaredSeverity(t *te
 func TestCollector_MergeRetag_PanicsWhenTheBuiltIssueIsZeroOrInvalid(t *testing.T) {
 	t.Parallel()
 
-	src := NewCollectorUnlimited()
+	src := NewCollector(NoLimit)
 	src.Collect(NewIssue(Error, E_CONSTRAINT_FAIL, "a").Build())
 	res := src.Result()
 	toWarning := func(Severity, Code) (Severity, bool) { return Warning, true }
@@ -170,7 +170,7 @@ func TestCollector_MergeRetag_PanicsWhenTheBuiltIssueIsZeroOrInvalid(t *testing.
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			wantPanic(t, row.want, func() {
-				NewCollectorUnlimited().MergeRetag(res, toWarning, row.fn)
+				NewCollector(NoLimit).MergeRetag(res, toWarning, row.fn)
 			})
 		})
 	}
@@ -181,7 +181,7 @@ func TestCollector_MergeRetag_PanicsWhenTheBuiltIssueIsZeroOrInvalid(t *testing.
 func TestCollector_MergeRetag_PanicsWhenTheBuiltIssueDisagreesWithTheDeclaration(t *testing.T) {
 	t.Parallel()
 
-	src := NewCollectorUnlimited()
+	src := NewCollector(NoLimit)
 	src.Collect(NewIssue(Error, E_CONSTRAINT_FAIL, "a").Build())
 	res := src.Result()
 	toWarning := func(Severity, Code) (Severity, bool) { return Warning, true }
@@ -197,8 +197,33 @@ func TestCollector_MergeRetag_PanicsWhenTheBuiltIssueDisagreesWithTheDeclaration
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			wantPanic(t, "diag.Collector.MergeRetag: fn built", func() {
-				NewCollectorUnlimited().MergeRetag(res, toWarning, row.fn)
+				NewCollector(NoLimit).MergeRetag(res, toWarning, row.fn)
 			})
 		})
 	}
+}
+
+// A code the source only counted, dropped past its limit, reaches no built
+// issue, so a retag that declares it an invalid severity panics on the count.
+func TestCollector_MergeRetag_PanicsWhenACountedCodeIsDeclaredInvalid(t *testing.T) {
+	t.Parallel()
+
+	src := NewCollector(1)
+	src.Collect(NewIssue(Error, E_INTERNAL, "stored").Build())
+	src.Collect(NewIssue(Error, E_SYNTAX, "dropped").Build())
+	res := src.Result()
+	if res.Len() != 1 || res.DroppedCount() != 1 {
+		t.Fatalf("the source result is not truncated as expected: %s", res)
+	}
+
+	wantPanic(t, "invalid severity 0", func() {
+		NewCollector(NoLimit).MergeRetag(res,
+			func(_ Severity, code Code) (Severity, bool) {
+				if code == E_SYNTAX {
+					return 0, true
+				}
+				return Warning, true
+			},
+			func(is Issue) Issue { return NewIssue(Warning, is.Code(), is.Message()).Build() })
+	})
 }

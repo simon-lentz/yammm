@@ -1,0 +1,6 @@
+schema "emoji"
+
+/* emoji🎉 */
+type User {
+	status String
+}

@@ -174,6 +174,19 @@ func TestAssertParses_ReportsAndSkipsInvalidBlocks(t *testing.T) {
 	}
 }
 
+// A block is held to parse, not to be valid: a constraint finding the parse
+// also reports is no parse error.
+func TestParseErrors_ReportsNoConstraintFinding(t *testing.T) {
+	t.Parallel()
+
+	for _, decl := range []string{"n Integer[5, 1]", `e Enum["a"]`} {
+		src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + decl + "\n}\n"
+		if got := ParseErrors(src); len(got) != 0 {
+			t.Errorf("ParseErrors(%q) = %q, want none", decl, got)
+		}
+	}
+}
+
 func TestAssertInvalid_ReportsABlockThatLoadsClean(t *testing.T) {
 	t.Parallel()
 
@@ -210,6 +223,21 @@ func TestAssertLoads_ReportsAFailingSchemaBlock(t *testing.T) {
 	}
 	if r2.failed() {
 		t.Errorf("AssertLoads reported a clean block: %v", r2.msgs)
+	}
+}
+
+// TestAssertDocumentedDiagnostics_ReadsAWarningCode pins that a block naming a
+// warning code passes when the load raises that warning, which reaches the gate
+// through the load's warning callback, not its error.
+func TestAssertDocumentedDiagnostics_ReadsAWarningCode(t *testing.T) {
+	t.Parallel()
+
+	var r recorder
+	AssertDocumentedDiagnostics(&r, []Block{
+		block(TagSchema, "// drops it: W_ANNOTATION_SHADOWED\nschema \"main\"\nabstract type Tracked {\n\tfirst_seen Timestamp required @writeOnce\n}\ntype Shadowed extends Tracked {\n\tid String primary\n\tfirst_seen Timestamp required\n}\n"),
+	})
+	if r.failed() {
+		t.Errorf("AssertDocumentedDiagnostics reported a block whose warning the load raises: %v", r.msgs)
 	}
 }
 

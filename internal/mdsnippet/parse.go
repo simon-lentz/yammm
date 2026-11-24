@@ -12,15 +12,15 @@ import (
 // reported, as positioned message strings. An empty slice means source parsed
 // cleanly.
 //
-// The filter is syntax-only. A parse also reports constraint findings — an
-// inverted bound, an enum with one value — and an AssertParses block is
-// allowed to be semantically invalid so long as it parses.
+// The filter keeps E_SYNTAX alone, the one syntax code. A parse also reports
+// constraint findings — an inverted bound, an enum with one value — and an
+// AssertParses block is allowed to be semantically invalid so long as it parses.
 func ParseErrors(source string) []string {
 	_, issues := parse.Parse([]byte(source), location.SourceID{})
 
 	var out []string
 	for _, iss := range issues {
-		if iss.Code().Category() != diag.CategorySyntax {
+		if iss.Code() != diag.E_SYNTAX {
 			continue
 		}
 		span := iss.Span()

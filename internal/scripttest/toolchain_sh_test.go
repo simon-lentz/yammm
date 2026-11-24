@@ -1,8 +1,6 @@
 package scripttest
 
 import (
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,64 +141,6 @@ func TestGateScripts_RefuseAToolchainThatIsNotTheModulesOwn(t *testing.T) {
 	}
 }
 
-// TestMutateScript_RefusesAToolchainThatIsNotTheModulesOwn pins the reason the
-// mutation harness pins at all: without it a tree red under the module's Go and
-// green under the host's yields a full set of verdicts about a tree CI rejects.
-func TestMutateScript_RefusesAToolchainThatIsNotTheModulesOwn(t *testing.T) {
-	t.Parallel()
-	f, _ := mutateFixture(t, "3")
-	f.write("go.mod", "module "+fixtureModule+"\n\ngo 1.0.0\n")
-
-	r := f.mutate()
-
-	r.wantCode(t, 2)
-	r.wantStderr(t, "pins go1.0.0")
-}
-
-// TestRunMutantsScript_RefusesTheToolchainBeforeAnyWorkerStarts pins that the
-// runner checks the pin before it copies the checkout or starts a worker, so a
-// mismatch stops the run with one message rather than one per mutant.
-func TestRunMutantsScript_RefusesTheToolchainBeforeAnyWorkerStarts(t *testing.T) {
-	t.Parallel()
-	f := runMutantsFixture(t)
-	f.write("go.mod", "module "+fixtureModule+"\n\ngo 1.0.0\n")
-	f.index() // the checkout must be clean, which the rewritten go.mod undid
-	f.writeMutant("m01", "a - b")
-
-	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
-
-	r.wantCode(t, 2)
-	r.wantStderr(t, "pins go1.0.0")
-	if _, err := os.Stat(filepath.Join(f.dir, "out", "work", "w1")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the checkout was copied before the refusal: stat says %v", err)
-	}
-}
-
-// TestRunMutantsScript_PinsTheCheckoutFromAnotherDirectory pins that the
-// runner resolves the toolchain in the checkout it reads. From a caller's
-// directory whose go.mod names a toolchain the host does not hold, under
-// GOTOOLCHAIN=auto, a go command resolved there would try to fetch it.
-func TestRunMutantsScript_PinsTheCheckoutFromAnotherDirectory(t *testing.T) {
-	t.Parallel()
-	f := runMutantsFixture(t)
-	caller := t.TempDir()
-	if err := os.WriteFile(filepath.Join(caller, "go.mod"), []byte("module caller\n\ngo 1.99.0\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(caller, "mutants"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	f.env = append(f.env, "GOTOOLCHAIN=auto")
-
-	r := f.runFrom(caller, "run_mutants.sh", f.dir, "mutants", "out")
-
-	r.wantCode(t, 2)
-	r.wantStderr(t, "no mutants in")
-	if strings.Contains(r.stderr, "toolchain:") {
-		t.Errorf("the pin was checked outside the checkout\nstderr:\n%s", r.stderr)
-	}
-}
-
 // TestDirectiveOf pins the spelling the fixtures write into go.mod, which the
 // scripts then compare with the running toolchain.
 func TestDirectiveOf(t *testing.T) {
@@ -231,23 +171,4 @@ func TestGomodtidyScript_IgnoresAnExportedCDPATH(t *testing.T) {
 	r := f.run("gomodtidy.sh")
 
 	r.wantCode(t, 0)
-}
-
-// TestRunMutantsScript_IgnoresAnExportedCDPATH pins that a caller's CDPATH
-// changes nothing: with it, bash's cd prints the directory it chose, and a
-// path captured through $(cd ... && pwd -P) holds two lines.
-func TestRunMutantsScript_IgnoresAnExportedCDPATH(t *testing.T) {
-	t.Parallel()
-	f := runMutantsFixture(t)
-	// A mutant missing its spell file is refused by name, which only a run
-	// that read the mutants directory can do.
-	if err := os.Remove(filepath.Join(f.writeMutant("m01", "a - b"), "spell")); err != nil {
-		t.Fatal(err)
-	}
-	f.env = append(f.env, "CDPATH=.:"+t.TempDir())
-
-	r := f.run("run_mutants.sh", ".", "mutants", "out")
-
-	r.wantCode(t, 2)
-	r.wantStderr(t, "mutant m01 has no spell file")
 }

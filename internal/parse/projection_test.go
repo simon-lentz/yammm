@@ -7,9 +7,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // The projection is deliberately syntax-level: names, modifiers, raw bound
@@ -36,7 +38,10 @@ type projSchema struct {
 	Imports   []projImport   `json:"imports,omitempty"`
 	DataTypes []projDataType `json:"datatypes,omitempty"`
 	Types     []projType     `json:"types,omitempty"`
-	Diags     []projDiag     `json:"diags,omitempty"`
+	// Expressions is every invariant expression's own extent, in source order:
+	// [File.Expressions], which holds one for an invariant the tree leaves out.
+	Expressions []projSpan `json:"expressions,omitempty"`
+	Diags       []projDiag `json:"diags,omitempty"`
 }
 
 type projImport struct {
@@ -112,11 +117,10 @@ type projArg struct {
 }
 
 type projInv struct {
-	Msg      string   `json:"msg"` // raw STRING spelling
-	Doc      string   `json:"doc,omitempty"`
-	Expr     string   `json:"expr"`      // canonical S-expression rendering
-	ExprSpan projSpan `json:"expr_span"` // the constraint expression's own extent
-	Span     projSpan `json:"span"`
+	Msg  string   `json:"msg"` // raw STRING spelling
+	Doc  string   `json:"doc,omitempty"`
+	Expr string   `json:"expr"` // canonical S-expression rendering
+	Span projSpan `json:"span"`
 }
 
 // projConstraint is the syntax-level shape of a data type reference: the kind
@@ -147,7 +151,7 @@ type projDiag struct {
 // its own, so a golden difference is a difference in the parser. The issues
 // come back alongside because the projection flattens severity to a label.
 func project(name, src string) (*projSchema, []diag.Issue) {
-	file, issues := Parse([]byte(src), location.NewSourceID(name))
+	file, issues := Parse([]byte(src), sourcetest.ID(name))
 
 	p := projector{src: src}
 	out := &projSchema{
@@ -172,6 +176,9 @@ func project(name, src string) (*projSchema, []diag.Issue) {
 	}
 	for _, ty := range file.Types {
 		out.Types = append(out.Types, p.typeDecl(ty))
+	}
+	for _, e := range file.Expressions {
+		out.Expressions = append(out.Expressions, p.span(e))
 	}
 	for _, iss := range issues {
 		out.Diags = append(out.Diags, p.diag(iss))
@@ -205,11 +212,10 @@ func (p projector) typeDecl(ty *TypeDecl) projType {
 	}
 	for _, inv := range ty.Invariants {
 		nt.Invariants = append(nt.Invariants, projInv{
-			Msg:      inv.MessageRaw,
-			Doc:      inv.Doc,
-			Expr:     renderExpr(inv.Expr),
-			ExprSpan: p.span(inv.ExprSpan),
-			Span:     p.span(inv.Span),
+			Msg:  inv.MessageRaw,
+			Doc:  inv.Doc,
+			Expr: renderExpr(inv.Expr),
+			Span: p.span(inv.Span),
 		})
 	}
 	return nt
@@ -323,10 +329,8 @@ func (p projector) constraint(c *Constraint) projConstraint {
 	case ConstraintEnum:
 		n.Args = rawLits(c.EnumLits)
 	case ConstraintPattern:
-		n.Args = rawLits(c.PatternLits)
-	case ConstraintTimestamp:
-		if c.FormatLit != nil {
-			n.Args = []string{c.FormatLit.Raw}
+		if c.PatternLit != nil {
+			n.Args = []string{c.PatternLit.Raw}
 		}
 	case ConstraintVector:
 		if c.DimsLit != nil {
@@ -385,14 +389,14 @@ func (p projector) diag(iss diag.Issue) projDiag {
 		Code:     iss.Code().String(),
 		Severity: iss.Severity().String(),
 		Msg:      iss.Message(),
-		Span:     projSpan{Start: sp.Start.Byte, End: sp.End.Byte},
-		Line:     lineOf(p.src, sp.Start.Byte),
-		EndLine:  lineOf(p.src, sp.End.Byte),
+		Span:     projSpan{Start: sp.Start.Offset, End: sp.End.Offset},
+		Line:     lineOf(p.src, sp.Start.Offset),
+		EndLine:  lineOf(p.src, sp.End.Offset),
 	}
 }
 
 func (p projector) span(s location.Span) projSpan {
-	return projSpan{Start: s.Start.Byte, End: s.End.Byte}
+	return projSpan{Start: s.Start.Offset, End: s.End.Offset}
 }
 
 // lineOf returns the 1-based line of a byte offset in src.
@@ -433,10 +437,10 @@ func renderExpr(e expr.Expression) string {
 		return "(" + strings.Join(parts, " ") + ")"
 	case expr.Op:
 		return string(v)
-	case expr.DatatypeLiteral:
-		return "(dt " + string(v) + ")"
+	case *expr.Literal:
+		return renderLiteral(v.Val)
 	default:
-		return renderLiteral(e.Literal())
+		return fmt.Sprintf("<%T>", v)
 	}
 }
 

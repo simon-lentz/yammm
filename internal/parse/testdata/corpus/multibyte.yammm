@@ -1,4 +1,5 @@
-schema "多字节"
+/* 多字节 */
+schema "multibyte"
 
 /* Dokumentation für Prüfung — höchst wichtig */
 type Pruefstueck {

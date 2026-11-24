@@ -6,7 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
+	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/jsonstring"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -21,75 +28,55 @@ import (
 // Rules:
 //   - Do NOT reorder existing fields within a format version.
 //   - New fields may be appended (with omitempty for backward compatibility).
-//   - Removing or reordering fields requires a format version bump.
+//   - A writer may stop writing a field only when the reader needs none of
+//     it. The reader reads past a member it does not declare, so a document
+//     that still carries the field reads as before, at the same version.
+//     schema_source left the writer so.
+//   - Any other removal or reordering requires a format version bump.
 //   - TestWireStructs_FieldOrder in wire_internal_test.go pins every wire
 //     struct's field order and tags by name, and
 //     TestWireStructs_EveryStructIsPinned fails when a new wire struct is
 //     added without a row there.
 //
-// TOP-LEVEL KEY ORDER AND BODY-SUFFIX STABILITY CONTRACT.
-//
-// The .ys wire format commits to two structural contracts beyond the
-// per-struct field order above, and UpdateMetadata adds a third rule of its
-// own. The two format contracts are load-bearing for UpdateMetadata's
-// byte-surgery primitive: they are properties of the bytes Marshal emits, and
-// relaxing either silently breaks every existing and future metadata-rewrite
-// call site. The third is a behaviour of UpdateMetadata rather than of the
-// format, and relaxing it would announce itself through the version field.
+// TOP-LEVEL KEY ORDER AND METADATA-REWRITE CONTRACT.
 //
 //  1. Field-order contract (established pre-v0.3.0). The top-level
 //     document has exactly four keys in a fixed order:
 //     yammm_snapshot → types → instances → diagnostics. No future Marshal
 //     change may reorder these or insert a new key in between.
 //
-//  2. Body-byte-range stability contract (introduced v0.3.0). The byte
-//     range starting at the ',' immediately following the yammm_snapshot
-//     header value's closing '}' and running through the document's
-//     final '}' is the "body suffix". UpdateMetadata preserves this
-//     suffix verbatim: it rebuilds only the header, recomputes the
-//     integrity hash over new_header + body_suffix, and emits
-//     new_header + body_suffix as the output. Future Marshal changes
-//     that insert a fifth top-level key, shift the header-body
-//     transition, or change the inter-key separator pattern silently
-//     break UpdateMetadata even without relaxing the field-order rule.
-//     UpdateMetadata(x, newMeta) == Marshal(Load(x), WithIndent(i)) for a
+//  2. Header-splice contract. UpdateMetadata replaces the header value alone,
+//     at the offsets the header decode reports: from its opening '{' to the
+//     byte after its closing '}'. Every byte before and after that span is kept
+//     verbatim, so it updates every document the readers accept, whatever
+//     whitespace surrounds the header. It writes the header as Marshal does,
+//     in the indent that follows a line feed directly after the document's
+//     opening brace, and recomputes the integrity hash over the result.
+//     UpdateMetadata(x, newMeta) == Marshal(Unmarshal(x), WithIndent(i)) for a
 //     document the current Marshal produced with indent i that carries no
-//     created_at, when newMeta is empty: UpdateMetadata keeps the input's
-//     indent. The last two conditions are not the same kind of condition.
-//     created_at is a condition on the document: UpdateMetadata preserves
-//     it from the input header and Load does not return it, so a
-//     re-marshal cannot reproduce it. Metadata is a condition on the
-//     call: UpdateMetadata writes newMeta and discards whatever the
-//     input carried, so a document holding metadata still matches a
-//     re-marshal when newMeta is empty, and a document holding none
+//     created_at, when newMeta is empty. The last two conditions are not the
+//     same kind of condition. created_at is a condition on the document:
+//     UpdateMetadata keeps its bytes from the input header and Unmarshal does
+//     not return it, so a re-marshal cannot reproduce it. Metadata is a
+//     condition on the call: UpdateMetadata writes newMeta and discards
+//     whatever the input carried, so a document holding metadata still
+//     matches a re-marshal when newMeta is empty, and a document holding none
 //     diverges when newMeta is not.
 //
 //  3. Version preservation (introduced v0.12.0). UpdateMetadata rebuilds
 //     the header at the version it read, so it is a header rewrite and
 //     never a migration. The only readable version is the current one:
-//     an older document is refused with
-//     E_SNAPSHOT_UNSUPPORTED_VERSION rather than rewritten, and
-//     UpdateMetadataOrReMarshal's Load + Marshal fallback refuses it
-//     the same way.
+//     an older document is refused with E_SNAPSHOT_UNSUPPORTED_VERSION
+//     rather than rewritten.
 //
-// These contracts are tested in snapshot/wire_test.go via:
-//   - TestWireFormat_TopLevelKeyOrder (token-level key-order pin)
-//   - TestWireFormat_BodySuffixContract (bodyOffset-capture + shape pin)
-//
-// the equivalence above in snapshot/wire_equivalence_test.go via
-// TestWireContract_UpdateMetadataMatchesReMarshal, which pins the
-// equality, the created_at divergence and both metadata directions in
-// the same test, and version preservation in
-// snapshot/update_contract_test.go via
-// TestUpdateMetadata_PreservesInputVersion.
-//
-// TestWireFormat_TopLevelKeyOrder and TestWireFormat_BodySuffixContract run
-// across a corpus of Marshal outputs under six combinations of the indent,
-// created_at and metadata options, so a future Marshal-side
-// change that silently breaks either contract fails at the wire-format
-// test level before reaching the consumers that depend on it.
-// See snapshot/update.go for the UpdateMetadata primitive that consumes
-// these contracts.
+// These contracts are tested in snapshot/wire_test.go via
+// TestWireFormat_TopLevelKeyOrder (token-level key-order pin), the equivalence
+// above in snapshot/wire_equivalence_test.go via
+// TestWireContract_UpdateMetadataMatchesReMarshal, which pins the equality,
+// the created_at divergence and both metadata directions in the same test,
+// and version preservation in snapshot/update_contract_test.go via
+// TestUpdateMetadata_PreservesInputVersion. See snapshot/update.go for the
+// UpdateMetadata primitive that consumes these contracts.
 
 // topLevelKeys is the exact key sequence contract 1 fixes. A document that
 // does not present these four keys, in this order, exactly once each, and none
@@ -99,7 +86,7 @@ var topLevelKeys = [...]string{"yammm_snapshot", "types", "instances", "diagnost
 // checkTopLevelKeys is the one definition of the document's outermost shape:
 // presence, order, uniqueness and non-nullness of the four top-level keys, and
 // that the document ends where the object does. Every surface holding the whole
-// document runs it. [HeaderOnlyRead] and [ScanDir] cannot and say so on their
+// document runs it. [ReadHeader] and [ScanDir] cannot and say so on their
 // own godoc: they read through a capped reader and never hold the body.
 //
 // It is not free: it scans the whole document and copies each top-level value
@@ -114,7 +101,7 @@ func checkTopLevelKeys(data []byte) error {
 		return fmt.Errorf("expected JSON object: %w", err)
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("expected JSON object, got %v", tok)
+		return fmt.Errorf("expected JSON object, got %s", diag.CutValue(fmt.Sprint(tok)))
 	}
 
 	seen := 0
@@ -125,14 +112,14 @@ func checkTopLevelKeys(data []byte) error {
 		}
 		key, ok := tok.(string)
 		if !ok {
-			return fmt.Errorf("expected a top-level key, got %v", tok)
+			return fmt.Errorf("expected a top-level key, got %s", diag.CutValue(fmt.Sprint(tok)))
 		}
 		if seen == len(topLevelKeys) {
-			return fmt.Errorf("document carries a fifth top-level key %q; the format has exactly %d",
-				key, len(topLevelKeys))
+			return fmt.Errorf("document carries a fifth top-level key %s; the format has exactly %d",
+				diag.QuoteValue(key), len(topLevelKeys))
 		}
 		if key != topLevelKeys[seen] {
-			return fmt.Errorf("top-level key %d is %q, expected %q", seen, key, topLevelKeys[seen])
+			return fmt.Errorf("top-level key %d is %s, expected %q", seen, diag.QuoteValue(key), topLevelKeys[seen])
 		}
 		if err := skipValue(dec, key); err != nil {
 			return err
@@ -178,19 +165,11 @@ func skipValue(dec *json.Decoder, key string) error {
 	return nil
 }
 
-// MinReadableVersion is the lowest .ys wire-format version this package
-// accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead).
-// The accept range is the closed interval [MinReadableVersion, currentVersion].
-// A document outside the range draws an Error-severity
-// [diag.E_SNAPSHOT_UNSUPPORTED_VERSION]. The package doc's Wire Format
-// Versions section and docs/VERSIONING.md carry the full policy.
-//
-// It is DERIVED from currentVersion, not written as a second literal: this
-// package reads only the version it writes, and two independent literals let
-// a version bump widen the accept range by accident — a reader that silently
-// admits the previous format instead of refusing it. Widening the range is a
-// deliberate act that replaces this expression, never an edit that forgets to.
-const MinReadableVersion = currentVersion
+// minReadableVersion is the lowest .ys wire-format version this package
+// accepts on read paths and at UpdateMetadata. It is derived from
+// currentVersion, not written as a second literal, so a version bump cannot
+// widen the accept range by accident.
+const minReadableVersion = currentVersion
 
 const (
 	// Version 4 keys the types table by the declaring schema's NAME. Version 3
@@ -207,17 +186,21 @@ const (
 // headerWire is used for decoding .ys headers. All fields are present
 // including version and hash algorithm version (which are written as
 // literal constants during marshal).
+//
+// It declares no schema_source. A document an earlier writer wrote carries
+// one, and the reader reads past it as it reads past any member it does not
+// declare.
 type headerWire struct {
-	Version             int               `json:"version"`
-	SchemaName          string            `json:"schema_name"`
-	SchemaSource        string            `json:"schema_source"`
-	SchemaHash          string            `json:"schema_hash"`
-	SchemaHashAlgorithm int               `json:"schema_hash_algorithm"`
-	IntegrityHash       string            `json:"integrity_hash"`
-	Features            []string          `json:"features"`
-	CreatedAt           string            `json:"created_at,omitempty"`
-	Metadata            map[string]string `json:"metadata,omitempty"`
-	Attestation         *attestationWire  `json:"attestation,omitempty"`
+	Version             int      `json:"version"`
+	SchemaName          string   `json:"schema_name"`
+	SchemaHash          string   `json:"schema_hash"`
+	SchemaHashAlgorithm int      `json:"schema_hash_algorithm"`
+	IntegrityHash       string   `json:"integrity_hash"`
+	Features            []string `json:"features"`
+	// CreatedAt is the member's JSON text, so a header rewrite keeps its bytes.
+	CreatedAt   json.RawMessage   `json:"created_at,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	Attestation *attestationWire  `json:"attestation,omitempty"`
 }
 
 // marshalHeaderWire is used for encoding .ys headers. Version and
@@ -225,11 +208,10 @@ type headerWire struct {
 // byte assembly, not serialized from this struct.
 type marshalHeaderWire struct {
 	SchemaName    string            `json:"schema_name"`
-	SchemaSource  string            `json:"schema_source"`
 	SchemaHash    string            `json:"schema_hash"`
 	IntegrityHash string            `json:"integrity_hash"`
 	Features      []string          `json:"features"`
-	CreatedAt     string            `json:"created_at,omitempty"`
+	CreatedAt     json.RawMessage   `json:"created_at,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 	Attestation   *attestationWire  `json:"attestation,omitempty"`
 }
@@ -255,8 +237,8 @@ type provenanceWire struct {
 //
 // Schema is the declaring schema's DECLARED NAME, not its source path. The
 // name travels between machines where a path does not, and it is unique
-// across an import closure because [github.com/simon-lentz/yammm/schema.Registry.Register]
-// refuses a second schema with an existing name. Keying by source path made
+// across an import closure because a load refuses a second schema with an
+// existing name. Keying by source path made
 // two documents of one schema text — loaded from two directories, or from
 // disk and from embedded sources — carry an identical schema_hash and
 // mutually unreadable type tables, because
@@ -296,18 +278,24 @@ type edgeWire struct {
 	Properties map[string]any `json:"properties"`
 }
 
-// conflictWire is the address of the instance a duplicate collided with.
-// Key is null for a keyless slot occupant, which the reader resolves
-// through the parent slot alone.
+// statesNothing reports whether the element is null or holds no field with a
+// value. It then states no target key to judge.
+func (e edgeWire) statesNothing() bool {
+	return e.TargetType == nil && len(e.TargetKey) == 0 && len(e.Properties) == 0
+}
+
+// conflictWire is the address of the root a duplicate collided with.
 type conflictWire struct {
 	Type *int  `json:"type"`
 	Key  []any `json:"key"`
 }
 
 // dupWire is the wire representation of a duplicate record. Type and Key
-// identify the rejected instance; Conflict addresses the instance it
-// collided with. The parent coordinates are present only for a
-// composed-child duplicate and must name a root instance.
+// identify the rejected root; Conflict addresses the root it collided with.
+// Marshal writes no parent coordinates. The reader decodes them to refuse a
+// record that states one, since it reads a member it does not declare as absent
+// and would take such a record for a root's. A coordinate that is null or empty
+// states none, so it loads and the next Marshal drops it.
 type dupWire struct {
 	Type       *int          `json:"type"`
 	Key        []any         `json:"key"`
@@ -316,6 +304,16 @@ type dupWire struct {
 	ParentType *int          `json:"parent_type,omitempty"`
 	ParentKey  []any         `json:"parent_key,omitempty"`
 	Relation   string        `json:"relation,omitempty"`
+}
+
+// statesNothing reports whether the element is null or holds no field with a
+// value: each is absent, null or empty, and a conflict or provenance object,
+// even an empty one, is a value. That is one break however many facts it leaves
+// unstated.
+func (d dupWire) statesNothing() bool {
+	i := d.Instance
+	return d.Type == nil && len(d.Key) == 0 && d.Conflict == nil && d.ParentType == nil && len(d.ParentKey) == 0 && d.Relation == "" &&
+		len(i.Key) == 0 && i.Type == nil && len(i.Properties) == 0 && len(i.Edges) == 0 && len(i.Composed) == 0 && i.Provenance == nil
 }
 
 // unresolvedWire is the wire representation of an unresolved edge record.
@@ -330,8 +328,264 @@ type unresolvedWire struct {
 	Properties map[string]any `json:"properties,omitempty"`
 }
 
+// statesNothing reports whether the element is null or holds no field with a
+// value: each is absent, null or empty, and a required of false is no value, as
+// the wire does not tell it from an absent one. That is one break however many
+// facts it leaves unstated.
+func (u unresolvedWire) statesNothing() bool {
+	return u.SourceType == nil && len(u.SourceKey) == 0 && u.Relation == "" && u.TargetType == nil && len(u.TargetKey) == 0 &&
+		!u.Required && u.Reason == "" && len(u.Properties) == 0
+}
+
 // diagWire is the wire representation of the diagnostics section.
 type diagWire struct {
 	Duplicates []dupWire        `json:"duplicates"`
 	Unresolved []unresolvedWire `json:"unresolved"`
+}
+
+// checkDocument holds data to the document's outermost shape, to its member
+// names and to its text. Every surface that holds the whole document runs it
+// before it decodes the header, so a document one of them accepts is one Unmarshal
+// decodes as written. A fault it finds draws E_SNAPSHOT_MALFORMED whatever version
+// the header states; [ReadHeader] judges the version first.
+func checkDocument(data []byte) error {
+	if err := checkTopLevelKeys(data); err != nil {
+		return err
+	}
+	return checkStrings(data)
+}
+
+// readString returns the index of the quote that closes the string opening at
+// data[i], and whether the string holds an escape. It returns an error for a
+// string encoding/json would rewrite: it decodes each byte that is not UTF-8,
+// and each surrogate escape that is not half of a pair, as U+FFFD with no error.
+// data must be JSON that encoding/json has read whole.
+func readString(data []byte, i int) (int, bool, error) {
+	end, escaped := i+1, false
+	for data[end] != '"' {
+		if data[end] == '\\' {
+			end++
+			escaped = true
+		}
+		end++
+	}
+	body := data[i+1 : end]
+	if !utf8.Valid(body) {
+		return 0, false, fmt.Errorf("the string at byte %d is not valid UTF-8; encoding/json would read each invalid byte as U+FFFD", i)
+	}
+	if escaped {
+		if at := jsonstring.LoneSurrogate(body); at >= 0 {
+			return 0, false, fmt.Errorf("the string at byte %d holds the surrogate escape %s, which is half of no pair; encoding/json would read it as U+FFFD", i, body[at:at+6])
+		}
+	}
+	return end, escaped, nil
+}
+
+// checkText returns an error for the first string of data that [readString]
+// refuses. It is the part of [checkStrings] a reader that holds only a prefix of
+// the document can run; the prefix ends between two values.
+func checkText(data []byte) error {
+	for i := 0; i < len(data); i++ {
+		if data[i] != '"' {
+			continue
+		}
+		end, _, err := readString(data, i)
+		if err != nil {
+			return err
+		}
+		i = end
+	}
+	return nil
+}
+
+// invalidMetadata refuses the first metadata key, in key order, that is not
+// valid UTF-8 or names a value that is not. encoding/json writes each such
+// byte as U+FFFD, so the document would read back other text, and two such
+// keys as one repeated member.
+func invalidMetadata(m map[string]string) error {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		switch {
+		case !utf8.ValidString(k):
+			return fmt.Errorf("metadata key %s is not valid UTF-8", diag.QuoteValue(k))
+		case !utf8.ValidString(m[k]):
+			return fmt.Errorf("metadata value of %s is not valid UTF-8", diag.QuoteValue(k))
+		}
+	}
+	return nil
+}
+
+// wireShape is how the reader decodes one JSON value of the document: a
+// struct's members by their JSON names, or a map's or a slice's element. A nil
+// shape decodes into any, whose objects are maps.
+type wireShape struct {
+	isStruct bool
+	names    []string              // a struct's JSON names, in field order
+	members  map[string]*wireShape // a struct's, by JSON name
+	elem     *wireShape            // a map's or a slice's
+}
+
+// documentShape is the document as the reader decodes it, section by section,
+// derived from the wire structs, so it cannot drift from them.
+var documentShape = func() *wireShape {
+	memo := make(map[reflect.Type]*wireShape)
+	doc := &wireShape{isStruct: true, members: make(map[string]*wireShape)}
+	for _, section := range []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{"yammm_snapshot", reflect.TypeFor[headerWire]()},
+		{"types", reflect.TypeFor[[]typeTableEntry]()},
+		{"instances", reflect.TypeFor[[]instanceGroupWire]()},
+		{"diagnostics", reflect.TypeFor[diagWire]()},
+	} {
+		doc.names = append(doc.names, section.name)
+		doc.members[section.name] = shapeOf(section.typ, memo)
+	}
+	return doc
+}()
+
+// shapeOf returns t's shape, memoized so a struct that holds itself through a
+// map or a slice (instWire's composed children) terminates.
+func shapeOf(t reflect.Type, memo map[reflect.Type]*wireShape) *wireShape {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if s, ok := memo[t]; ok {
+		return s
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		s := &wireShape{isStruct: true, members: make(map[string]*wireShape, t.NumField())}
+		memo[t] = s
+		for f := range t.Fields() {
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			s.names = append(s.names, name)
+			s.members[name] = shapeOf(f.Type, memo)
+		}
+		return s
+	case reflect.Map, reflect.Slice:
+		s := &wireShape{}
+		memo[t] = s
+		s.elem = shapeOf(t.Elem(), memo)
+		return s
+	default:
+		return nil
+	}
+}
+
+// member returns the shape of the value under name in an object of shape s,
+// and, when s is a struct that declares no member name and one name differs
+// from it only in case, that declared name.
+func (s *wireShape) member(name string) (*wireShape, string) {
+	switch {
+	case s == nil:
+		return nil, ""
+	case !s.isStruct:
+		return s.elem, ""
+	}
+	if m, ok := s.members[name]; ok {
+		return m, ""
+	}
+	for _, declared := range s.names {
+		if strings.EqualFold(declared, name) {
+			return nil, declared
+		}
+	}
+	return nil, ""
+}
+
+// smallObject is how many member names [checkStrings] compares one by
+// one as it reads them; a larger object's names are sorted and compared once,
+// when it closes.
+const smallObject = 16
+
+// checkStrings returns an error for the first string of data that [readString]
+// refuses, and for the first object that repeats a member name, or that decodes
+// into a wire struct and holds a name differing from a declared one only in
+// case. Names compare as decoded text, so a name spelled with an escape repeats
+// the same name without one. data must be JSON that encoding/json has read whole;
+// [checkTopLevelKeys] reads it so.
+func checkStrings(data []byte) error {
+	type frame struct {
+		start int        // index in names of an object's first name; -1 for an array
+		shape *wireShape // how the container decodes
+		next  *wireShape // how the next value in it decodes
+	}
+	var (
+		stack  []frame
+		names  [][]byte
+		atName bool
+	)
+	open := func(object bool) {
+		shape := documentShape
+		if len(stack) > 0 {
+			shape = stack[len(stack)-1].next
+		}
+		f := frame{start: -1, shape: shape}
+		if object {
+			f.start = len(names)
+		} else if shape != nil {
+			f.next = shape.elem
+		}
+		stack = append(stack, f)
+		atName = object
+	}
+	for i := 0; i < len(data); i++ {
+		switch data[i] {
+		case '{':
+			open(true)
+		case '[':
+			open(false)
+		case '}', ']':
+			top := stack[len(stack)-1]
+			if top.start >= 0 {
+				if own := names[top.start:]; len(own) > smallObject {
+					// The object's own names, sorted in place: the stack drops them next.
+					slices.SortFunc(own, bytes.Compare)
+					for j := 1; j < len(own); j++ {
+						if bytes.Equal(own[j-1], own[j]) {
+							return repeatedMemberError(own[j])
+						}
+					}
+				}
+				names = names[:top.start]
+			}
+			stack = stack[:len(stack)-1]
+			atName = false
+		case ',':
+			atName = stack[len(stack)-1].start >= 0
+		case '"':
+			end, escaped, err := readString(data, i)
+			if err != nil {
+				return err
+			}
+			if atName {
+				name := data[i+1 : end]
+				if escaped {
+					var decoded string
+					if err := json.Unmarshal(data[i:end+1], &decoded); err != nil {
+						return fmt.Errorf("member name %s does not decode: %w", diag.CutValue(string(data[i:end+1])), err)
+					}
+					name = []byte(decoded)
+				}
+				top := &stack[len(stack)-1]
+				if own := names[top.start:]; len(own) < smallObject && slices.ContainsFunc(own, func(n []byte) bool { return bytes.Equal(n, name) }) {
+					return repeatedMemberError(name)
+				}
+				next, declared := top.shape.member(string(name))
+				if declared != "" {
+					return fmt.Errorf("an object holds the member %s, which encoding/json reads as the member %q; every member is spelled as the format declares it", diag.QuoteValue(string(name)), declared)
+				}
+				top.next = next
+				names = append(names, name)
+				atName = false
+			}
+			i = end
+		}
+	}
+	return nil
+}
+
+func repeatedMemberError(name []byte) error {
+	return fmt.Errorf("an object repeats the member %s; every member name occurs once in its object", diag.QuoteValue(string(name)))
 }

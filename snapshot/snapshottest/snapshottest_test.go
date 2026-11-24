@@ -3,46 +3,49 @@ package snapshottest_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
-func testSchema(t *testing.T) *schema.Schema {
+func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.NewBuilder().
-		WithName("snapshottest-self").
-		WithSourceID(location.MustNewSourceID("test://snapshottest-self.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), false, false).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("testSchema: %v", res.Err())
+	s, err := schema.LoadString(t.Context(), `schema "snapshottest_self"
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (one) Company
+}
+
+type Company {
+	id String primary
+}
+`, "snapshottest_self.yammm")
+	if err != nil {
+		t.Fatalf("testSchema: %v", err)
 	}
 	return s
 }
 
 // buildSnapshot is a local alias for the exported helper under test.
-func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
+func buildSnapshot(t *testing.T, s schema.Schema, instances ...instance.ValidInstance) graph.Snapshot {
 	t.Helper()
 	return snapshottest.BuildSnapshot(t, s, instances...)
 }
 
-func typeID(t *testing.T, s *schema.Schema, name string) schema.TypeID {
+func typeID(t *testing.T, s schema.Schema, name string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(name)
 	if !ok {
@@ -53,7 +56,7 @@ func typeID(t *testing.T, s *schema.Schema, name string) schema.TypeID {
 
 // compositionSchema declares a two-level composition (Holder -> Account ->
 // Card) so projection depth is observable.
-func compositionSchema(t *testing.T) *schema.Schema {
+func compositionSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "snaptest"
 
@@ -71,43 +74,25 @@ type Holder {
 	*-> ACCOUNTS (_:many) Account
 }
 `
-	s, res := schema.LoadString(context.Background(), src, "snaptest.yammm")
-	if res.HasErrors() {
-		t.Fatalf("compositionSchema: %v", res.Err())
+	s, err := schema.LoadString(context.Background(), src, "snaptest.yammm")
+	if err != nil {
+		t.Fatalf("compositionSchema: %v", err)
 	}
 	return s
 }
 
-// employerEdge builds the single-target EMPLOYER edge data for a Person.
-func employerEdge(target string) map[string]*instance.ValidEdgeData {
-	return map[string]*instance.ValidEdgeData{
-		"EMPLOYER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{target}), immutable.WrapProperties(nil)),
-		}),
-	}
-}
-
 // company builds a Company instance with the given primary key.
-func company(t *testing.T, s *schema.Schema, id string) *instance.ValidInstance {
+func company(t *testing.T, s schema.Schema, id string) instance.ValidInstance {
 	t.Helper()
-	return instancetest.VI(
-		"Company",
-		instancetest.TypeID(typeID(t, s, "Company")),
-		instancetest.PK(id),
-		instancetest.Props(map[string]any{"id": id}),
-	)
+	return instancetest.Valid(t, s, "Company", map[string]any{"id": id})
 }
 
 // person builds a Person instance whose EMPLOYER edge points at target.
-func person(t *testing.T, s *schema.Schema, id, name, target string) *instance.ValidInstance {
+func person(t *testing.T, s schema.Schema, id, name, target string) instance.ValidInstance {
 	t.Helper()
-	return instancetest.VI(
-		"Person",
-		instancetest.TypeID(typeID(t, s, "Person")),
-		instancetest.PK(id),
-		instancetest.Props(map[string]any{"id": id, "name": name}),
-		instancetest.Edges(employerEdge(target)),
-	)
+	return instancetest.Valid(t, s, "Person", map[string]any{
+		"id": id, "name": name, "employer": map[string]any{"_target_id": target},
+	})
 }
 
 // TestRoundTripHelpers exercises the live helper surface end-to-end on a
@@ -125,7 +110,7 @@ func TestRoundTripHelpers(t *testing.T) {
 		person(t, s, "p2", "Bob", "c-missing"),
 	)
 
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 	snapshottest.AssertDeterministic(t, snap)
 	snapshottest.DiffSnapshots(t, snap, snap)
 }
@@ -160,18 +145,8 @@ func TestDiffSnapshots_DetectsEdgeDifference(t *testing.T) {
 // fails on structurally different snapshots, via a probe testing.T.
 func TestDiffSnapshots_DetectsDifference(t *testing.T) {
 	s := testSchema(t)
-	a := buildSnapshot(t, s, instancetest.VI(
-		"Person",
-		instancetest.TypeID(typeID(t, s, "Person")),
-		instancetest.PK("p1"),
-		instancetest.Props(map[string]any{"id": "p1", "name": "Alice"}),
-	))
-	b := buildSnapshot(t, s, instancetest.VI(
-		"Person",
-		instancetest.TypeID(typeID(t, s, "Person")),
-		instancetest.PK("p1"),
-		instancetest.Props(map[string]any{"id": "p1", "name": "Bob"}),
-	))
+	a := buildSnapshot(t, s, instancetest.Valid(t, s, "Person", map[string]any{"id": "p1", "name": "Alice"}))
+	b := buildSnapshot(t, s, instancetest.Valid(t, s, "Person", map[string]any{"id": "p1", "name": "Bob"}))
 
 	probe := &testing.T{}
 	snapshottest.DiffSnapshots(probe, a, b)
@@ -188,13 +163,15 @@ func TestDiffSnapshots_DetectsDifference(t *testing.T) {
 // dynamic-type mismatch is a real defect, not a wire artifact.
 func TestDiffSnapshots_ComparesNumbersExactly(t *testing.T) {
 	s := testSchema(t)
-	person := func(code any) *graph.Snapshot {
-		return buildSnapshot(t, s, instancetest.VI(
-			"Person",
-			instancetest.TypeID(typeID(t, s, "Person")),
-			instancetest.PK("p1"),
-			instancetest.Props(map[string]any{"id": "p1", "name": code}),
-		))
+	personID := typeID(t, s, "Person")
+	key := immutable.WrapKey([]any{"p1"})
+	person := func(code any) graph.Snapshot {
+		return snappartstest.Loaded(t, s, snapparts.Parts{
+			Instances: []snapparts.Instance{{
+				TypeID: personID, PrimaryKey: key, Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": code}),
+			}},
+			Unresolved: []snapparts.Unresolved{{SourceType: personID, SourceKey: key, Relation: "EMPLOYER", Reason: "absent"}},
+		})
 	}
 
 	probe := &testing.T{}
@@ -216,17 +193,15 @@ func TestDiffSnapshots_ComparesNumbersExactly(t *testing.T) {
 // is data loss even when the source name is empty.
 func TestDiffSnapshots_DistinguishesProvenancePresence(t *testing.T) {
 	s := testSchema(t)
-	person := func(opts ...instancetest.VIOption) *graph.Snapshot {
-		base := []instancetest.VIOption{
-			instancetest.TypeID(typeID(t, s, "Person")),
-			instancetest.PK("p1"),
-			instancetest.Props(map[string]any{"id": "p1"}),
-		}
-		return buildSnapshot(t, s, instancetest.VI("Person", append(base, opts...)...))
+	person := func(prov instance.Provenance) graph.Snapshot {
+		return buildSnapshot(t, s, instancetest.ValidRaw(t, s, "Person", instance.RawInstance{
+			Properties: map[string]any{"id": "p1", "name": "Alice"},
+			Provenance: prov,
+		}))
 	}
 
-	with := person(instancetest.Provenance(location.NewProvenance("", path.Root(), location.Span{})))
-	without := person()
+	with := person(instance.NewProvenance("", path.Root, location.Span{}))
+	without := person(instance.Provenance{})
 
 	probe := &testing.T{}
 	snapshottest.DiffSnapshots(probe, with, without)
@@ -240,21 +215,21 @@ func TestDiffSnapshots_DistinguishesProvenancePresence(t *testing.T) {
 // unresolved edge; only the instance the edge hangs off differs.
 func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 	s := testSchema(t)
-	personParts := func(key string) graph.InstanceParts {
-		return graph.InstanceParts{
+	personParts := func(key string) snapparts.Instance {
+		return snapparts.Instance{
 			TypeID:     typeID(t, s, "Person"),
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key}),
 		}
 	}
-	withSource := func(sourceKey, other string) *graph.Snapshot {
-		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	withSource := func(sourceKey, other string) graph.Snapshot {
+		return snappartstest.Loaded(t, s, snapparts.Parts{
 			Types: []schema.TypeID{typeID(t, s, "Person")},
-			Instances: []graph.InstanceParts{
+			Instances: []snapparts.Instance{
 				personParts("p1"),
 				personParts("p2"),
 			},
-			Unresolved: []graph.UnresolvedParts{{
+			Unresolved: []snapparts.Unresolved{{
 				SourceType: typeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{sourceKey}),
 				Relation:   "EMPLOYER",
@@ -268,10 +243,6 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 				Reason:     "absent",
 			}},
 		})
-		if res.HasErrors() {
-			t.Fatalf("rebuild: %s", res)
-		}
-		return built
 	}
 
 	probe := &testing.T{}
@@ -281,23 +252,55 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 	}
 }
 
-// TestDiffSnapshots_ComparesProvenancePaths pins the path itself, not only
-// whether provenance is present. RawPath is populated only on a parse failure,
-// so a projection reading it alone reports every well-formed path as empty.
-func TestDiffSnapshots_ComparesProvenancePaths(t *testing.T) {
-	s := testSchema(t)
-	person := func(p path.Builder) *graph.Snapshot {
-		return buildSnapshot(t, s, instancetest.VI(
-			"Person",
-			instancetest.TypeID(typeID(t, s, "Person")),
-			instancetest.PK("p1"),
-			instancetest.Props(map[string]any{"id": "p1"}),
-			instancetest.Provenance(location.NewProvenance("feed", p, location.Span{})),
-		))
+// An unresolved record's reason is part of what DiffSnapshots compares.
+func TestDiffSnapshots_SeesAReasonDifference(t *testing.T) {
+	s, err := schema.LoadString(t.Context(), "schema \"reasons\"\ntype Person {\n\tid String primary\n\t--> CLIENTS (one:many) Company\n}\ntype Company {\n\tid String primary\n}\n", "reasons.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
+	}
+	withReason := func(reason string) graph.Snapshot {
+		return snappartstest.Loaded(t, s, snapparts.Parts{
+			Types: []schema.TypeID{typeID(t, s, "Person")},
+			Instances: []snapparts.Instance{{
+				TypeID:     typeID(t, s, "Person"),
+				PrimaryKey: immutable.WrapKey([]any{"p1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
+			}},
+			Unresolved: []snapparts.Unresolved{{
+				SourceType: typeID(t, s, "Person"),
+				SourceKey:  immutable.WrapKey([]any{"p1"}),
+				Relation:   "CLIENTS",
+				Reason:     reason,
+			}},
+		})
 	}
 
 	probe := &testing.T{}
-	snapshottest.DiffSnapshots(probe, person(path.Root().Key("first")), person(path.Root().Key("second")))
+	snapshottest.DiffSnapshots(probe, withReason("absent"), withReason("empty"))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots passed two snapshots whose one record differs in its reason")
+	}
+	probe = &testing.T{}
+	snapshottest.DiffSnapshots(probe, withReason("absent"), withReason("absent"))
+	if probe.Failed() {
+		t.Error("DiffSnapshots reported a difference between identical snapshots")
+	}
+}
+
+// TestDiffSnapshots_ComparesProvenancePaths pins the path itself, not only
+// whether provenance is present: a projection that reads presence alone
+// reports two snapshots that differ only in a path as equal.
+func TestDiffSnapshots_ComparesProvenancePaths(t *testing.T) {
+	s := testSchema(t)
+	person := func(p path.Path) graph.Snapshot {
+		return buildSnapshot(t, s, instancetest.ValidRaw(t, s, "Person", instance.RawInstance{
+			Properties: map[string]any{"id": "p1", "name": "Alice"},
+			Provenance: instance.NewProvenance("feed", p, location.Span{}),
+		}))
+	}
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, person(path.Root.Key("first")), person(path.Root.Key("second")))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect two instances whose provenance paths differ")
 	}
@@ -309,55 +312,54 @@ func TestDiffSnapshots_ComparesProvenancePaths(t *testing.T) {
 // compare equal.
 func TestDiffSnapshots_ComparesComposedTreesRecursively(t *testing.T) {
 	s := compositionSchema(t)
-	holder := func(withCard bool, accountProv *location.Provenance) *graph.Snapshot {
-		var cards []*instance.ValidInstance
-		if withCard {
-			cards = append(cards, instancetest.VI(
-				"Card",
-				instancetest.TypeID(typeID(t, s, "Card")),
-				instancetest.PK("4242"),
-				instancetest.Props(map[string]any{"last4": "4242"}),
-			))
+	// A validator gives a child its root's provenance, so a child that alone holds
+	// one comes from a document.
+	holder := func(withCard bool, accountProv instance.Provenance) graph.Snapshot {
+		account := snapparts.Instance{
+			TypeID: typeID(t, s, "Account"), PrimaryKey: immutable.WrapKey([]any{"a1"}),
+			Properties: immutable.WrapProperties(map[string]any{"number": "a1"}),
+			Provenance: accountProv,
 		}
-		account := instancetest.VI(
-			"Account",
-			instancetest.TypeID(typeID(t, s, "Account")),
-			instancetest.PK("a1"),
-			instancetest.Props(map[string]any{"number": "a1"}),
-			instancetest.Composed(map[string]immutable.Value{"CARDS": immutable.Wrap(cards)}),
-			instancetest.Provenance(accountProv),
-		)
-		return buildSnapshot(t, s, instancetest.VI(
-			"Holder",
-			instancetest.TypeID(typeID(t, s, "Holder")),
-			instancetest.PK("h1"),
-			instancetest.Props(map[string]any{"id": "h1"}),
-			instancetest.Composed(map[string]immutable.Value{"ACCOUNTS": immutable.Wrap([]*instance.ValidInstance{account})}),
-		))
+		if withCard {
+			account.Composed = map[string][]snapparts.Instance{"CARDS": {{
+				TypeID: typeID(t, s, "Card"), PrimaryKey: immutable.WrapKey([]any{"4242"}),
+				Properties: immutable.WrapProperties(map[string]any{"last4": "4242"}),
+			}}}
+		}
+		return snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
+			TypeID: typeID(t, s, "Holder"), PrimaryKey: immutable.WrapKey([]any{"h1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
+			Composed:   map[string][]snapparts.Instance{"ACCOUNTS": {account}},
+		}}})
 	}
 
 	probe := &testing.T{}
-	snapshottest.DiffSnapshots(probe, holder(true, nil), holder(false, nil))
+	snapshottest.DiffSnapshots(probe, holder(true, instance.Provenance{}), holder(false, instance.Provenance{}))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect loss of a composed child's own children")
 	}
 
 	probe = &testing.T{}
-	prov := location.NewProvenance("feed", path.Root(), location.Span{})
-	snapshottest.DiffSnapshots(probe, holder(false, prov), holder(false, nil))
+	prov := instance.NewProvenance("feed", path.Root, location.Span{})
+	snapshottest.DiffSnapshots(probe, holder(false, prov), holder(false, instance.Provenance{}))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect loss of a composed child's provenance")
 	}
 }
 
-// recordingTB records Fatalf instead of stopping the test, so a helper's
+// recordingTB records Fatalf and Errorf instead of failing the test, so a helper's
 // failure can be asserted on.
 type recordingTB struct {
 	testing.TB
 	fatals []string
+	errors []string
 }
 
 func (r *recordingTB) Helper() {}
+
+func (r *recordingTB) Errorf(format string, args ...any) {
+	r.errors = append(r.errors, fmt.Sprintf(format, args...))
+}
 
 func (r *recordingTB) Fatalf(format string, args ...any) {
 	r.fatals = append(r.fatals, fmt.Sprintf(format, args...))
@@ -370,19 +372,36 @@ func (r *recordingTB) Fatalf(format string, args ...any) {
 func TestBuildSnapshot_FailsOnARefusalButADuplicate(t *testing.T) {
 	t.Parallel()
 	s := testSchema(t)
-	person := func(props map[string]any) *instance.ValidInstance {
-		return instancetest.VI("Person", instancetest.TypeID(typeID(t, s, "Person")), instancetest.PK("p1"), instancetest.Props(props))
-	}
+	// A validated child read out of its parent is the one record Add refuses for
+	// its type.
+	holder, err := schema.LoadString(t.Context(), `schema "holder"
 
+part type P {
+	id String primary
+}
+
+type H {
+	id String primary
+	*-> PS (many) P
+}
+`, "holder.yammm")
+	if err != nil {
+		t.Fatalf("load the holder: %s", err)
+	}
 	refused := &recordingTB{TB: t}
-	snapshottest.BuildSnapshot(refused, s, person(map[string]any{"name": "no key property"}))
+	var child instance.ValidInstance
+	for c := range instancetest.Valid(t, holder, "H", map[string]any{"id": "h", "ps": []any{map[string]any{"id": "p"}}}).Composed("PS") {
+		child = c
+	}
+	snapshottest.BuildSnapshot(refused, holder, child)
 	if len(refused.fatals) != 1 || !strings.Contains(refused.fatals[0], "instance 0 was refused") {
 		t.Errorf("a refused fixture: fatals = %q, want one naming instance 0", refused.fatals)
 	}
 
 	dup := &recordingTB{TB: t}
-	snap := snapshottest.BuildSnapshot(dup, s, person(map[string]any{"id": "p1"}), person(map[string]any{"id": "p1"}))
-	if len(dup.fatals) != 0 || len(snap.Duplicates()) != 1 {
-		t.Errorf("a duplicate fixture: fatals = %q, %d duplicates; want none and one", dup.fatals, len(snap.Duplicates()))
+	first := instancetest.Valid(t, s, "Person", map[string]any{"id": "p1", "name": "Alice"})
+	snap := snapshottest.BuildSnapshot(dup, s, first, first)
+	if len(dup.fatals) != 0 || len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Errorf("a duplicate fixture: fatals = %q, %d duplicates; want none and one", dup.fatals, len(slices.Collect(snap.Duplicates())))
 	}
 }

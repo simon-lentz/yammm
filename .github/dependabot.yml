@@ -23,7 +23,7 @@ updates:
   # The vscode extension has its own npm manifest; the npm ecosystem does
   # not recurse from the repo root, so the directory must be named.
   - package-ecosystem: npm
-    directory: /lsp/editors/vscode
+    directory: /editors/vscode
     schedule:
       interval: monthly
     groups:

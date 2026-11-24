@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -15,8 +17,8 @@ func TestNewCollector(t *testing.T) {
 	if len(c.issues) != 0 {
 		t.Errorf("len(c.issues) = %d; want 0", len(c.issues))
 	}
-	if !c.Result().OK() {
-		t.Error("OK() = false; want true for empty collector")
+	if err := c.Err(); err != nil {
+		t.Errorf("Err() = %v; want nil for empty collector", err)
 	}
 	if c.limitReached {
 		t.Error("LimitReached() = true; want false")
@@ -32,8 +34,8 @@ func TestCollector_Collect(t *testing.T) {
 	if len(c.issues) != 1 {
 		t.Errorf("len(c.issues) = %d; want 1", len(c.issues))
 	}
-	if c.Result().OK() {
-		t.Error("OK() = true; want false after collecting error")
+	if c.Err() == nil {
+		t.Error("Err() = nil; want a failure after collecting error")
 	}
 	if !c.HasErrors() {
 		t.Error("HasErrors() = false; want true")
@@ -150,20 +152,20 @@ func TestCollector_MergeTruncatedResult_PreservesCountsAndTruncation(t *testing.
 	src.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
 	src.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
 	srcRes := src.Result()
-	if !srcRes.LimitReached() || srcRes.Len() != 1 || srcRes.DroppedCount() != 1 || srcRes.OK() {
-		t.Fatalf("source setup: LimitReached=%v Len=%d Dropped=%d OK=%v; want true/1/1/false",
-			srcRes.LimitReached(), srcRes.Len(), srcRes.DroppedCount(), srcRes.OK())
+	if !srcRes.LimitReached() || srcRes.Len() != 1 || srcRes.DroppedCount() != 1 || srcRes.SeverityCounts().Errors != 1 {
+		t.Fatalf("source setup: LimitReached=%v Len=%d Dropped=%d Errors=%d; want true/1/1/1",
+			srcRes.LimitReached(), srcRes.Len(), srcRes.DroppedCount(), srcRes.SeverityCounts().Errors)
 	}
 
-	dst := NewCollectorUnlimited()
+	dst := NewCollector(NoLimit)
 	dst.Merge(srcRes)
 	res := dst.Result()
 
-	if res.OK() {
-		t.Error("OK() = true; want false — the dropped error must survive the merge")
+	if got := res.SeverityCounts().Errors; got != 1 {
+		t.Errorf("SeverityCounts().Errors = %d; want 1 — the dropped error must survive the merge", got)
 	}
-	if !res.HasErrors() {
-		t.Error("HasErrors() = false; want true")
+	if dst.Err() == nil {
+		t.Error("Err() = nil; want the dropped error's failure")
 	}
 	if !res.LimitReached() {
 		t.Error("LimitReached() = false; want true — truncation must propagate through Merge")
@@ -188,7 +190,7 @@ func TestCollector_Merge_AddsEachTruncatedResultsDrops(t *testing.T) {
 		t.Fatalf("source setup: Dropped=%d; want 1", srcRes.DroppedCount())
 	}
 
-	dst := NewCollectorUnlimited()
+	dst := NewCollector(NoLimit)
 	dst.Merge(srcRes)
 	dst.Merge(srcRes)
 	res := dst.Result()
@@ -232,7 +234,7 @@ func TestCollector_Limit(t *testing.T) {
 
 func TestCollector_DroppedErrorStillCounts(t *testing.T) {
 	// Severity counts reflect every issue SEEN, not just those stored under
-	// the limit. Callers gate on ErrorCount()/HasErrors()/OK() (the loader and
+	// the limit. Callers gate on ErrorCount()/HasErrors()/Err() (the loader and
 	// completer compare ErrorCount deltas to decide whether a schema failed);
 	// an error dropped at the cap that left those untouched would read as
 	// success and let a broken schema escape the all-or-nothing contract.
@@ -252,18 +254,15 @@ func TestCollector_DroppedErrorStillCounts(t *testing.T) {
 	if !c.HasErrors() {
 		t.Error("HasErrors() = false; want true (a dropped error is still an error)")
 	}
-	if c.Result().OK() {
-		t.Error("OK() = true; want false (a dropped error is still an error)")
+	if c.Err() == nil {
+		t.Error("Err() = nil; want a failure (a dropped error is still an error)")
 	}
 
-	// The Result snapshot must agree: a nil schema with an OK() result would
-	// be a self-contradiction for consumers checking result.OK().
+	// The Result snapshot must agree: a nil schema beside a Result that
+	// counts no error would contradict itself.
 	res := c.Result()
-	if res.OK() {
-		t.Error("Result.OK() = true; want false")
-	}
-	if !res.HasErrors() {
-		t.Error("Result.HasErrors() = false; want true")
+	if got := res.SeverityCounts().Errors; got != 1 {
+		t.Errorf("Result.SeverityCounts().Errors = %d; want 1", got)
 	}
 	if res.Len() != 1 {
 		t.Errorf("Result.Len() = %d; want 1 (stored count is unaffected)", res.Len())
@@ -274,15 +273,15 @@ func TestCollector_DroppedErrorStillCounts(t *testing.T) {
 }
 
 func TestCollector_Result_Sorted(t *testing.T) {
-	source := location.MustNewSourceID("test://b.yammm")
-	sourceA := location.MustNewSourceID("test://a.yammm")
+	source := sourcetest.ID("test://b.yammm")
+	sourceA := sourcetest.ID("test://a.yammm")
 
 	c := NewCollector(0)
 
 	// Add issues in non-sorted order
-	c.Collect(NewIssue(Error, E_SYNTAX, "b:10").WithSpan(location.Point(source, 10, 1)).Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "a:5").WithSpan(location.Point(sourceA, 5, 1)).Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "b:1").WithSpan(location.Point(source, 1, 1)).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "b:10").WithSpan(location.Span{Source: source, Start: location.Position{Line: 10, Column: 1}, End: location.Position{Line: 10, Column: 1}}).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "a:5").WithSpan(location.Span{Source: sourceA, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}}).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "b:1").WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).Build())
 
 	result := c.Result()
 
@@ -340,12 +339,29 @@ func TestCollector_Result_Independent(t *testing.T) {
 	}
 }
 
+// A Result's per-code counts are its own: a later Collect of the same code
+// leaves an earlier Result's count where it was.
+func TestCollector_Result_CodeCountsIndependent(t *testing.T) {
+	c := NewCollector(NoLimit)
+	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "first").Build())
+	earlier := c.Result()
+
+	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "second").Build())
+
+	if got := earlier.CodeCounts(Warning)[W_ANNOTATION_SHADOWED]; got != 1 {
+		t.Errorf("earlier Result's CodeCounts = %d after a later Collect; want 1", got)
+	}
+	if got := c.Result().CodeCounts(Warning)[W_ANNOTATION_SHADOWED]; got != 2 {
+		t.Errorf("later Result's CodeCounts = %d; want 2", got)
+	}
+}
+
 func TestCollector_SeverityQueries(t *testing.T) {
 	c := NewCollector(0)
 
 	// Initially OK
-	if !c.Result().OK() {
-		t.Error("empty collector should be OK")
+	if c.Err() != nil {
+		t.Error("empty collector should hold no failure")
 	}
 	if c.HasErrors() {
 		t.Error("empty collector should not have errors")
@@ -356,14 +372,14 @@ func TestCollector_SeverityQueries(t *testing.T) {
 
 	// Add warning - still OK
 	c.Collect(NewIssue(Warning, E_INVALID_NAME, "warning").Build())
-	if !c.Result().OK() {
-		t.Error("collector with only warnings should be OK")
+	if c.Err() != nil {
+		t.Error("collector with only warnings should hold no failure")
 	}
 
 	// Add error - not OK
 	c.Collect(NewIssue(Error, E_SYNTAX, "error").Build())
-	if c.Result().OK() {
-		t.Error("collector with error should not be OK")
+	if c.Err() == nil {
+		t.Error("collector with error should hold a failure")
 	}
 	if !c.HasErrors() {
 		t.Error("collector with error should have errors")
@@ -401,7 +417,7 @@ func TestCollector_ThreadSafety(t *testing.T) {
 	for range numGoroutines / 2 {
 		wg.Go(func() {
 			for range issuesPerGoroutine {
-				_ = c.Result().OK()
+				_ = c.Err()
 				_ = c.HasErrors()
 				_ = c.ErrorCount()
 			}
@@ -437,7 +453,7 @@ func TestCollector_ThreadSafety_Result(t *testing.T) {
 				result := c.Result()
 				// Just access the result to ensure no race
 				_ = result.Len()
-				_ = result.OK()
+				_ = result.SeverityCounts()
 			}
 		})
 	}
@@ -503,10 +519,10 @@ func TestCollector_NegativeLimit(t *testing.T) {
 }
 
 func TestCompareIssues_SpanBackedBeforePathOnly(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := sourcetest.ID("test://a.yammm")
 
 	spanBacked := NewIssue(Error, E_SYNTAX, "span-backed").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 
 	pathOnly := NewIssue(Error, E_SYNTAX, "path-only").
@@ -546,14 +562,14 @@ func TestCompareIssues_PathOnlyOrdering(t *testing.T) {
 }
 
 func TestCompareIssues_SeverityTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := sourcetest.ID("test://a.yammm")
 
 	// Same span, same code, different severity
 	errorIssue := NewIssue(Error, E_SYNTAX, "same message").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 	warningIssue := NewIssue(Warning, E_SYNTAX, "same message").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 
 	// Error (severity 1) < Warning (severity 2) numerically
@@ -563,14 +579,14 @@ func TestCompareIssues_SeverityTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_MessageTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := sourcetest.ID("test://a.yammm")
 
 	// Same span, same code, same severity, different message
 	issueA := NewIssue(Error, E_SYNTAX, "aaa").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 	issueB := NewIssue(Error, E_SYNTAX, "bbb").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 
 	if cmp := compareIssues(issueA, issueB); cmp >= 0 {
@@ -579,15 +595,15 @@ func TestCompareIssues_MessageTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_HintTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := sourcetest.ID("test://a.yammm")
 
 	// Same everything except hint
 	issueA := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		WithHint("hint A").
 		Build()
 	issueB := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		WithHint("hint B").
 		Build()
 
@@ -597,15 +613,15 @@ func TestCompareIssues_HintTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_DetailsTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := sourcetest.ID("test://a.yammm")
 
 	// Same everything except details
 	issueA := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		WithDetails(Detail{Key: "key", Value: "a"}).
 		Build()
 	issueB := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		WithDetails(Detail{Key: "key", Value: "b"}).
 		Build()
 
@@ -615,10 +631,10 @@ func TestCompareIssues_DetailsTieBreaker(t *testing.T) {
 
 	// Fewer details sorts before more details
 	issueNoDetails := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 	issueWithDetails := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		WithDetails(Detail{Key: "key", Value: "val"}).
 		Build()
 
@@ -628,21 +644,21 @@ func TestCompareIssues_DetailsTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_RelatedTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
-	relSource := location.MustNewSourceID("test://related.yammm")
+	source := sourcetest.ID("test://a.yammm")
+	relSource := sourcetest.ID("test://related.yammm")
 
 	// Same everything except related info
 	issueA := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
-		WithRelated(location.RelatedInfo{
-			Span:    location.Point(relSource, 1, 1),
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
+		WithRelated(RelatedInfo{
+			Span:    location.Span{Source: relSource, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}},
 			Message: "related A",
 		}).
 		Build()
 	issueB := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
-		WithRelated(location.RelatedInfo{
-			Span:    location.Point(relSource, 1, 1),
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
+		WithRelated(RelatedInfo{
+			Span:    location.Span{Source: relSource, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}},
 			Message: "related B",
 		}).
 		Build()
@@ -653,10 +669,10 @@ func TestCompareIssues_RelatedTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_TotalOrder_IdenticalIssuesEqual(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := sourcetest.ID("test://a.yammm")
 
 	issue := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		WithHint("hint").
 		WithDetails(Detail{Key: "k", Value: "v"}).
 		Build()
@@ -670,16 +686,16 @@ func TestCompareIssues_TotalOrder_IdenticalIssuesEqual(t *testing.T) {
 func TestCompareIssues_HybridIssues_DifferentPaths(t *testing.T) {
 	// This test verifies the fix for the total order bug where hybrid issues
 	// with identical spans but different paths would incorrectly compare equal.
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 
 	// Two hybrid issues: same span, same everything, but different instance paths
 	issue1 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
-		WithSpan(location.Point(source, 10, 5)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}}).
 		WithPath("data.json", "$.users[0].age").
 		Build()
 
 	issue2 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
-		WithSpan(location.Point(source, 10, 5)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}}).
 		WithPath("data.json", "$.users[1].age").
 		Build()
 
@@ -699,15 +715,15 @@ func TestCompareIssues_HybridIssues_DifferentPaths(t *testing.T) {
 
 func TestCompareIssues_HybridIssues_DifferentSourceNames(t *testing.T) {
 	// Verify sourceName tie-breaker for hybrid issues
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 
 	issue1 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
-		WithSpan(location.Point(source, 10, 5)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}}).
 		WithPath("a.json", "$.value").
 		Build()
 
 	issue2 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
-		WithSpan(location.Point(source, 10, 5)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}}).
 		WithPath("b.json", "$.value").
 		Build()
 
@@ -720,14 +736,14 @@ func TestCompareIssues_HybridIssues_DifferentSourceNames(t *testing.T) {
 func TestCompareIssues_SchemaOnlyBeforeHybrid(t *testing.T) {
 	// When span, code, severity, message, hint are all equal,
 	// schema-only (sourceName="", path="") should sort before hybrid
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 
 	schemaOnly := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 
 	hybrid := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		WithPath("data.json", "$.x").
 		Build()
 
@@ -746,7 +762,7 @@ func TestCollector_DeterministicOrdering_Concurrent(t *testing.T) {
 		issuesPerG    = 20
 	)
 
-	source := location.MustNewSourceID("test://a.yammm")
+	source := sourcetest.ID("test://a.yammm")
 
 	// Run multiple times to detect non-determinism
 	var referenceOrder []string
@@ -764,7 +780,7 @@ func TestCollector_DeterministicOrdering_Concurrent(t *testing.T) {
 					// any reordering instability is detectable.
 					msg := fmt.Sprintf("%c%02d", 'A'+g, i)
 					issue := NewIssue(Error, E_SYNTAX, msg).
-						WithSpan(location.Point(source, 1, 1)).
+						WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 						Build()
 					c.Collect(issue)
 				}
@@ -800,19 +816,19 @@ func TestCollector_DeterministicOrdering_Concurrent(t *testing.T) {
 
 func TestCollector_DeterministicOrdering_MixedIssueTypes(t *testing.T) {
 	// Verify ordering with mix of span-backed, path-only, and hybrid issues
-	sourceA := location.MustNewSourceID("test://a.yammm")
-	sourceB := location.MustNewSourceID("test://b.yammm")
+	sourceA := sourcetest.ID("test://a.yammm")
+	sourceB := sourcetest.ID("test://b.yammm")
 
 	c := NewCollector(0)
 
 	// Add in deliberately scrambled order
 	c.Collect(NewIssue(Error, E_SYNTAX, "path-only-2").WithPath("data.json", "$.b").Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "span-b-10").WithSpan(location.Point(sourceB, 10, 1)).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "span-b-10").WithSpan(location.Span{Source: sourceB, Start: location.Position{Line: 10, Column: 1}, End: location.Position{Line: 10, Column: 1}}).Build())
 	c.Collect(NewIssue(Error, E_SYNTAX, "path-only-1").WithPath("data.json", "$.a").Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "span-a-1").WithSpan(location.Point(sourceA, 1, 1)).Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "span-a-5").WithSpan(location.Point(sourceA, 5, 1)).Build())
-	c.Collect(NewIssue(Warning, E_SYNTAX, "span-a-1-warn").WithSpan(location.Point(sourceA, 1, 1)).Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "hybrid").WithSpan(location.Point(sourceA, 1, 1)).WithPath("data.json", "$.x").Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "span-a-1").WithSpan(location.Span{Source: sourceA, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "span-a-5").WithSpan(location.Span{Source: sourceA, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}}).Build())
+	c.Collect(NewIssue(Warning, E_SYNTAX, "span-a-1-warn").WithSpan(location.Span{Source: sourceA, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "hybrid").WithSpan(location.Span{Source: sourceA, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).WithPath("data.json", "$.x").Build())
 
 	result := c.Result()
 	var messages []string

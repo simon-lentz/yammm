@@ -2,8 +2,9 @@
 // suite. A test that calls [Skip] still runs: the test summary recognizes the
 // skip by its reason, and scripts/test.sh runs each such test again without
 // -race and fails unless it passes. Use it for a test whose measurement the
-// detector's instrumentation distorts, such as a performance ratio, never to
-// hide a race.
+// detector's instrumentation distorts, such as a performance ratio, and for a
+// test on one goroutine whose cost the detector multiplies, never to hide a
+// race.
 package raceskip
 
 import "testing"

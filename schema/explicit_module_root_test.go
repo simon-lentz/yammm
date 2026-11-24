@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -44,6 +44,8 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 		}
 	}
 	plain := filepath.Join(dir, "plain")
+	// The refusal reads as Unix's ENOTDIR on every host, Windows included.
+	const notDirectory = "not a directory"
 	type refusal struct {
 		name  string
 		root  string
@@ -51,13 +53,13 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 	}
 	refusals := []refusal{
 		{"a missing path", filepath.Join(dir, "missing"), ""},
-		{"a regular file", plain, syscall.ENOTDIR.Error()},
-		{"a path under a regular file", filepath.Join(plain, "sub"), syscall.ENOTDIR.Error()},
+		{"a regular file", plain, notDirectory},
+		{"a path under a regular file", filepath.Join(plain, "sub"), notDirectory},
 	}
 	// The message opens with the root as given; its cause names where the link
 	// resolves it.
 	if err := os.Symlink(dir, filepath.Join(dir, "via")); err == nil {
-		refusals = append(refusals, refusal{"a regular file through a linked directory", filepath.Join(dir, "via", "plain"), syscall.ENOTDIR.Error()})
+		refusals = append(refusals, refusal{"a regular file through a linked directory", filepath.Join(dir, "via", "plain"), notDirectory})
 	}
 	for _, entry := range []string{"solo.yammm", "main.yammm"} {
 		for _, c := range refusals {
@@ -71,9 +73,9 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 		for name, root := range map[string]string{"an existing directory": dir, "a regular file's parent, spelled through it": plain + string(filepath.Separator) + ".."} {
 			t.Run(entry+", "+name, func(t *testing.T) {
 				t.Parallel()
-				s, res := schema.Load(context.Background(), filepath.Join(dir, entry), schema.WithModuleRoot(root))
-				if s == nil || res.HasErrors() {
-					t.Errorf("Load under module root %s failed: %s", root, res)
+				s, err := schema.Load(context.Background(), filepath.Join(dir, entry), schema.WithModuleRoot(root))
+				if s.IsZero() || err != nil {
+					t.Errorf("Load under module root %s failed: %s", root, err)
 				}
 			})
 		}
@@ -85,8 +87,10 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 // a goroutine may call it.
 func checkRefusedRoot(t *testing.T, entry, root, cause string) {
 	t.Helper()
-	s, res := schema.Load(context.Background(), entry, schema.WithModuleRoot(root))
-	if s != nil {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(context.Background(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+	})
+	if !s.IsZero() {
 		t.Errorf("Load returned a schema under module root %s", root)
 	}
 	var issues []diag.Issue
@@ -118,8 +122,8 @@ func TestLoadSourcesWithEntry_TakesARootNoDirectoryHolds(t *testing.T) {
 		"entry.yammm": []byte("schema \"entry\"\n\nimport \"./dep\" as dep\n\ntype T {\n\tid String primary\n}\n"),
 		"dep.yammm":   []byte(depSchema),
 	}
-	s, res := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", root)
-	if s == nil || res.HasErrors() {
-		t.Errorf("LoadSourcesWithEntry under root %s failed: %s", root, res)
+	s, err := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", schema.WithModuleRoot(root))
+	if s.IsZero() || err != nil {
+		t.Errorf("LoadSourcesWithEntry under root %s failed: %s", root, err)
 	}
 }

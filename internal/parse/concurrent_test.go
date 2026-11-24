@@ -6,10 +6,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // TestParse_ConcurrentCallsShareTheParsersSafely exercises the shared parser
@@ -35,7 +37,7 @@ func TestParse_ConcurrentCallsShareTheParsersSafely(t *testing.T) {
 	first := make(map[int]string, len(sources))
 	yammmtest.RunConcurrent(8, 25, func() {
 		for i, src := range sources {
-			file, issues := Parse([]byte(src), location.NewSourceID("c.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("c.yammm"))
 			got := render(file, issues)
 			mu.Lock()
 			if want, seen := first[i]; seen && want != got {
@@ -186,8 +188,8 @@ func TestRender_Discriminates(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.what, func(t *testing.T) {
-			fa, ia := Parse([]byte(tc.a), location.NewSourceID("c.yammm"))
-			fb, ib := Parse([]byte(tc.b), location.NewSourceID("c.yammm"))
+			fa, ia := Parse([]byte(tc.a), sourcetest.ID("c.yammm"))
+			fb, ib := Parse([]byte(tc.b), sourcetest.ID("c.yammm"))
 			if render(fa, ia) == render(fb, ib) {
 				t.Errorf("fingerprint is blind to %s: two parses differing only there render alike", tc.what)
 			}
@@ -202,7 +204,7 @@ func TestRender_Discriminates(t *testing.T) {
 func TestRender_CarriesEveryDiagnostic(t *testing.T) {
 	src := "schema \"a\"\ntype A {\n\tn Integer[9, 2]\n\tv Vector[0]\n}\n"
 
-	file, issues := Parse([]byte(src), location.NewSourceID("c.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("c.yammm"))
 
 	if len(issues) < 2 {
 		t.Fatalf("fixture reported %d issues, want at least 2", len(issues))
@@ -232,15 +234,18 @@ func TestRender_CarriesEveryNodeField(t *testing.T) {
 		"\tn Integer required\n" +
 		"\t@index\n" +
 		"\t--> R (many) B { since Timestamp }\n" +
+		"\t! \"m\" n > 0\n" +
 		"}\n"
 
-	file, issues := Parse([]byte(src), location.NewSourceID("c.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("c.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("fixture must parse clean: %v", issues)
 	}
 	got := render(file, issues)
+	expression := strings.Index(src, "n > 0")
 
 	for _, want := range []struct{ what, text string }{
+		{"invariant expression extent", fmt.Sprintf("!@%d-%d/", expression, expression+len("n > 0"))},
 		{"import path", "x.yammm"},
 		{"import alias", "alpha"},
 		{"abstract flag", "Base/truefalse"},
@@ -300,7 +305,6 @@ func render(f *File, issues []diag.Issue) string {
 		for _, inv := range ty.Invariants {
 			out.WriteString(inv.Message)
 			fp.span(inv.MessageSpan)
-			fp.span(inv.ExprSpan)
 			fp.expr(inv.Expr)
 			out.WriteByte('~')
 		}
@@ -308,6 +312,11 @@ func render(f *File, issues []diag.Issue) string {
 			fp.annotation(a)
 		}
 		out.WriteByte(';')
+	}
+	out.WriteByte('|')
+	for _, e := range f.Expressions {
+		out.WriteByte('!')
+		fp.span(e)
 	}
 	out.WriteByte('|')
 	for _, iss := range issues {
@@ -323,7 +332,7 @@ func render(f *File, issues []diag.Issue) string {
 type fingerprint struct{ out *strings.Builder }
 
 func (fp fingerprint) span(s location.Span) {
-	fmt.Fprintf(fp.out, "@%d-%d/%d:%d", s.Start.Byte, s.End.Byte, s.Start.Line, s.Start.Column)
+	fmt.Fprintf(fp.out, "@%d-%d/%d:%d", s.Start.Offset, s.End.Offset, s.Start.Line, s.Start.Column)
 }
 
 func (fp fingerprint) property(p *Property) {
@@ -375,10 +384,7 @@ func (fp fingerprint) constraint(c *Constraint) {
 	fmt.Fprintf(fp.out, "%v/%v/%v/%v/%v/%v/%v",
 		deref(c.IntMin), deref(c.IntMax), deref(c.FloatMin), deref(c.FloatMax),
 		deref(c.LenMin), deref(c.LenMax), deref(c.VectorDims))
-	fmt.Fprintf(fp.out, "%v/%v", c.EnumValues(), c.PatternRegexps())
-	if f, ok := c.Format(); ok {
-		fmt.Fprintf(fp.out, "f%s", f)
-	}
+	fmt.Fprintf(fp.out, "%v/%v", c.EnumValues(), c.PatternRegexp())
 	if c.Alias != nil {
 		fmt.Fprintf(fp.out, "a%s.%s", c.Alias.Qualifier, c.Alias.Name)
 	}
@@ -387,9 +393,9 @@ func (fp fingerprint) constraint(c *Constraint) {
 }
 
 // expr renders an expression tree. An argument list is handled before the
-// generic branch because its Literal is a slice of Expression pointers, whose
+// literal branch because its value is a slice of Expression pointers, whose
 // addresses differ between parses and would make every fingerprint unique.
-// Lambda parameters need no such case: their Literal is a []string.
+// Lambda parameters need no such case: their value is a []string.
 func (fp fingerprint) expr(e expr.Expression) {
 	if e == nil {
 		fp.out.WriteString("<nil>")
@@ -404,14 +410,23 @@ func (fp fingerprint) expr(e expr.Expression) {
 		fp.out.WriteByte(')')
 		return
 	}
-	fmt.Fprintf(fp.out, "%s|%v", e.Op(), e.Literal())
-	if kids := e.Children(); len(kids) > 0 {
-		fp.out.WriteByte('(')
-		for _, c := range kids {
-			fp.expr(c)
-			fp.out.WriteByte(' ')
+	switch n := e.(type) {
+	case expr.SExpr:
+		fmt.Fprintf(fp.out, "%s|%s", n.Op(), n.Op())
+		if kids := n.Children(); len(kids) > 0 {
+			fp.out.WriteByte('(')
+			for _, c := range kids {
+				fp.expr(c)
+				fp.out.WriteByte(' ')
+			}
+			fp.out.WriteByte(')')
 		}
-		fp.out.WriteByte(')')
+	case expr.Op:
+		fmt.Fprintf(fp.out, "%s|%s", n, n)
+	case *expr.Literal:
+		fmt.Fprintf(fp.out, "lit|%v", n.Val)
+	default:
+		fmt.Fprintf(fp.out, "%T", n)
 	}
 }
 

@@ -3,24 +3,25 @@ package instance_test
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/yammmtest"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func loadT(t *testing.T, src string) *schema.Schema {
+func loadT(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), src, "p.yammm")
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	s, err := schema.LoadString(t.Context(), src, "p.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	return s
 }
@@ -33,12 +34,7 @@ func codes(res diag.Result) []string {
 	return out
 }
 
-// A typed nil pointer — the shape adapter/gogen emits for an absent optional
-// scalar — is the absent value at every null-rule site, exactly as an
-// interface nil is. A typed nil slice or map stays an empty container.
-func TestTypedNilPointer_IsAbsent(t *testing.T) {
-	t.Parallel()
-	s := loadT(t, `schema "p"
+const nullRuleSchema = `schema "p"
 
 part type Line {
 	id String primary
@@ -57,61 +53,162 @@ type T {
 	--> AT (one) Co
 	*-> LINES (many) Line
 }
-`)
-	v := instance.NewValidator(s)
-	var nilStr *string
-	t.Run("optional pointer is dropped", func(t *testing.T) {
+`
+
+// A nil slice or a nil map is the absent value at every null-rule site, as an
+// interface nil is.
+func TestValidateOne_ANilSliceOrMapIsAbsentAtEveryNullRuleSite(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nullRuleSchema))
+	t.Run("optional nil slice is dropped", func(t *testing.T) {
 		t.Parallel()
-		vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "nick": nilStr}})
-		if res.Err() != nil {
-			t.Fatalf("refused: %v", res.Err())
-		}
-		if _, ok := vi.Property("nick"); ok {
-			t.Error("an absent optional was stored")
-		}
-	})
-	t.Run("required pointer is missing, not a type mismatch", func(t *testing.T) {
-		t.Parallel()
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": nilStr}})
-		if !res.HasCode(diag.E_MISSING_REQUIRED) || res.HasCode(diag.E_TYPE_MISMATCH) {
-			t.Errorf("want E_MISSING_REQUIRED alone, got %v", codes(res))
-		}
-	})
-	t.Run("typed nil slice is an empty list", func(t *testing.T) {
-		t.Parallel()
-		var nilTags []any
-		vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "tags": nilTags}})
-		if res.Err() != nil {
-			t.Fatalf("refused: %v", res.Err())
-		}
-		tv, ok := vi.Property("tags")
-		sl, isList := tv.Slice()
-		if !ok || !isList || sl.Len() != 0 {
-			t.Errorf("a typed nil slice must be stored as an empty list: stored=%v list=%v", ok, isList)
-		}
-	})
-	t.Run("edge value pointer is the null an explicit null is", func(t *testing.T) {
-		t.Parallel()
-		var nilEdge *map[string]any
-		_, control := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nil}})
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nilEdge}})
-		if !control.HasCode(diag.E_EDGE_SHAPE_MISMATCH) || !res.HasCode(diag.E_EDGE_SHAPE_MISMATCH) {
-			t.Errorf("explicit null drew %v, typed nil pointer drew %v; want E_EDGE_SHAPE_MISMATCH from both", codes(control), codes(res))
-		}
-	})
-	t.Run("FK component pointer is a null component", func(t *testing.T) {
-		t.Parallel()
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any{"_target_id": nilStr}}})
-		found := false
-		for is := range res.Issues() {
-			if strings.Contains(is.Message(), "got null") {
-				found = true
+		for _, nilTags := range []any{[]any(nil), []string(nil)} {
+			vi, err := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "tags": nilTags}})
+			if err != nil {
+				t.Fatalf("%T: refused: %v", nilTags, err)
+			}
+			if _, ok := vi.Property("tags"); ok {
+				t.Errorf("%T: a nil slice was stored", nilTags)
 			}
 		}
-		if !found {
-			t.Errorf("a typed nil FK component was not reported as null: %v", res.Err())
+	})
+	t.Run("edge value nil map and nil slice are the absent value an explicit null is", func(t *testing.T) {
+		t.Parallel()
+		_, oneControl := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nil}})
+		})
+		_, one := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any(nil)}})
+		})
+		_, manyControl := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": nil}})
+		})
+		_, many := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": []any(nil)}})
+		})
+		for name, pair := range map[string][2]diag.Result{"a nil map at a (one) association": {oneControl, one}, "a nil slice at a (many) composition": {manyControl, many}} {
+			if !slices.Equal(codes(pair[0]), codes(pair[1])) || diagtest.Err(pair[1]) != nil {
+				t.Errorf("%s drew %v, an explicit null %v; want both accepted as absent", name, codes(pair[1]), codes(pair[0]))
+			}
 		}
 	})
+	t.Run("FK component nil slice is a null component", func(t *testing.T) {
+		t.Parallel()
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any{"_target_id": []string(nil)}}})
+		})
+		if !strings.Contains(res.String(), `FK field "_target_id": expected string, got null`) {
+			t.Errorf("a nil slice at an FK component was not reported as null: %s", res)
+		}
+	})
+}
+
+// A nil pointer is a value of no form at every null-rule site, where an
+// interface nil is the absent value: each site refuses it by its Go type and
+// none reads it as null or as missing. The edge-property and composition sites
+// are [TestValidateOne_APointerIsNoValueAtAnEdgePropertyOrAComposition]'s.
+func TestValidateOne_ANilPointerIsNoAbsentValueAtAnyNullRuleSite(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nullRuleSchema))
+	var nilStr *string
+	t.Run("optional property", func(t *testing.T) {
+		t.Parallel()
+		vi, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "nick": nilStr}})
+		})
+		if !slices.Equal(codes(res), []string{diag.E_TYPE_MISMATCH.String()}) || !vi.IsZero() {
+			t.Errorf("want E_TYPE_MISMATCH alone and no instance, got %v", codes(res))
+		}
+		if !strings.Contains(res.String(), "expected string, got *string") {
+			t.Errorf("the refusal does not name the pointer: %s", res)
+		}
+	})
+	t.Run("required property", func(t *testing.T) {
+		t.Parallel()
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": nilStr}})
+		})
+		if !slices.Equal(codes(res), []string{diag.E_TYPE_MISMATCH.String()}) {
+			t.Errorf("want E_TYPE_MISMATCH alone, got %v", codes(res))
+		}
+	})
+	t.Run("edge value", func(t *testing.T) {
+		t.Parallel()
+		var nilEdge *map[string]any
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nilEdge}})
+		})
+		if !res.HasCode(diag.E_EDGE_SHAPE_MISMATCH) || !strings.Contains(res.String(), "got *map[string]interface {}") || strings.Contains(res.String(), "got null") {
+			t.Errorf("want E_EDGE_SHAPE_MISMATCH naming the pointer, got %s", res)
+		}
+	})
+	t.Run("FK component", func(t *testing.T) {
+		t.Parallel()
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any{"_target_id": nilStr}}})
+		})
+		if diagtest.Err(res) == nil || strings.Contains(res.String(), "got null") || !strings.Contains(res.String(), "*string") {
+			t.Errorf("want a refusal naming the pointer, got %s", res)
+		}
+	})
+}
+
+// A pointer is a value of no form at an edge property, a composition's value
+// and a composed child too, nil or not: each site refuses it by its Go type, and
+// none reads a nil one as null or as missing.
+func TestValidateOne_APointerIsNoValueAtAnEdgePropertyOrAComposition(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, `schema "p"
+
+part type Line {
+	id String primary
+}
+
+type Co {
+	id String primary
+}
+
+type T {
+	id String primary
+	--> AT (one) Co {
+		note String
+	}
+	*-> LINES (many) Line
+}
+`))
+	text := "x"
+	var (
+		nilText  *string
+		nilLines *[]any
+		nilLine  *map[string]any
+	)
+	lines := []any{map[string]any{"id": "l"}}
+	line := map[string]any{"id": "l"}
+	for name, c := range map[string]struct {
+		props map[string]any
+		code  diag.Code
+		want  string
+	}{
+		"a nil pointer at an edge property":   {map[string]any{"at": map[string]any{"_target_id": "c", "note": nilText}}, diag.E_TYPE_MISMATCH, `edge property "note": expected string, got *string`},
+		"a pointer at an edge property":       {map[string]any{"at": map[string]any{"_target_id": "c", "note": &text}}, diag.E_TYPE_MISMATCH, `edge property "note": expected string, got *string`},
+		"a nil pointer at a composition":      {map[string]any{"lines": nilLines}, diag.E_EDGE_SHAPE_MISMATCH, `expected array, got *[]interface {}`},
+		"a pointer at a composition":          {map[string]any{"lines": &lines}, diag.E_EDGE_SHAPE_MISMATCH, `expected array, got *[]interface {}`},
+		"a nil pointer at a composed child":   {map[string]any{"lines": []any{nilLine}}, diag.E_EDGE_SHAPE_MISMATCH, `composition child must be an object, got *map[string]interface {}`},
+		"a pointer at a composed child":       {map[string]any{"lines": []any{&line}}, diag.E_EDGE_SHAPE_MISMATCH, `composition child must be an object, got *map[string]interface {}`},
+		"a pointer at a one-edge's value":     {map[string]any{"at": &line}, diag.E_EDGE_SHAPE_MISMATCH, `expected object, got *map[string]interface {}`},
+		"a nil pointer at a one-edge's value": {map[string]any{"at": nilLine}, diag.E_EDGE_SHAPE_MISMATCH, `expected object, got *map[string]interface {}`},
+	} {
+		c.props["id"] = "x"
+		vi, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: c.props})
+		})
+		if !slices.Equal(codes(res), []string{c.code.String()}) || !vi.IsZero() {
+			t.Errorf("%s: want %s alone and no instance, got %v", name, c.code, codes(res))
+		}
+		if !strings.Contains(res.String(), c.want) || strings.Contains(res.String(), "null") {
+			t.Errorf("%s: %s; want %q and no null", name, res, c.want)
+		}
+	}
 }
 
 // A cancelled batch returns no partial slice: the documented "one entry per
@@ -127,12 +224,16 @@ func TestValidate_CancellationReturnsNoPartialSlice(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	// Cancel after the first instance validates: the second ctx.Err() check trips.
-	valids, res := v.Validate(ctx, "T", raws)
-	if res.Err() != nil || len(valids) != 5 {
-		t.Fatalf("control: %d valids, %v", len(valids), res.Err())
+	valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(ctx, "T", raws)
+	})
+	if diagtest.Err(res) != nil || len(valids) != 5 {
+		t.Fatalf("control: %d valids, %v", len(valids), res)
 	}
 	cancel()
-	valids, res = v.Validate(ctx, "T", raws)
+	valids, res = diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(ctx, "T", raws)
+	})
 	if valids != nil {
 		t.Errorf("a cancelled batch returned a partial slice of %d", len(valids))
 	}
@@ -142,8 +243,7 @@ func TestValidate_CancellationReturnsNoPartialSlice(t *testing.T) {
 }
 
 // An unknown type name is a failure whatever the batch: Validate resolves
-// the name before it answers a nil or empty batch, as ValidateForComposition
-// does, and as docs/API.md states.
+// the name before it answers a nil or empty batch, as docs/API.md states.
 func TestValidate_UnknownTypeFailsOnAnEmptyBatch(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
@@ -151,14 +251,16 @@ func TestValidate_UnknownTypeFailsOnAnEmptyBatch(t *testing.T) {
 	for name, raws := range map[string][]instance.RawInstance{"nil": nil, "empty": {}} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			valids, res := v.Validate(t.Context(), "Nope", raws)
-			if valids != nil || !res.HasCode(instance.ErrTypeNotFound) {
+			valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+				return v.Validate(t.Context(), "Nope", raws)
+			})
+			if valids != nil || !res.HasCode(diag.E_INSTANCE_TYPE_NOT_FOUND) {
 				t.Errorf("valids=%v codes=%v; want nil and E_INSTANCE_TYPE_NOT_FOUND", valids, codes(res))
 			}
 		})
 	}
-	if valids, res := v.Validate(t.Context(), "T", nil); valids != nil || res.Err() != nil {
-		t.Errorf("control: a known type and a nil batch is nil, OK; got %v, %v", valids, res.Err())
+	if valids, err := v.Validate(t.Context(), "T", nil); valids != nil || err != nil {
+		t.Errorf("control: a known type and a nil batch is nil, OK; got %v, %v", valids, err)
 	}
 }
 
@@ -174,7 +276,9 @@ func TestValidate_AnAbstractOrPartNameFailsOnAnEmptyBatch(t *testing.T) {
 		code diag.Code
 	}{{"A", diag.E_ABSTRACT_TYPE}, {"P", diag.E_PART_TYPE_DIRECT}} {
 		for batch, raws := range map[string][]instance.RawInstance{"nil": nil, "empty": {}} {
-			valids, res := v.Validate(t.Context(), c.name, raws)
+			valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+				return v.Validate(t.Context(), c.name, raws)
+			})
 			if valids != nil || !res.HasCode(c.code) {
 				t.Errorf("%s, %s batch: valids=%v codes=%v; want nil and %s", c.name, batch, valids, codes(res), c.code)
 			}
@@ -187,8 +291,8 @@ func TestValidate_AnAbstractOrPartNameFailsOnAnEmptyBatch(t *testing.T) {
 			}
 		}
 	}
-	if valids, res := v.Validate(t.Context(), "T", []instance.RawInstance{}); valids == nil || res.Err() != nil {
-		t.Errorf("control: a root type and an empty batch is empty, OK; got %v, %v", valids, res.Err())
+	if valids, err := v.Validate(t.Context(), "T", []instance.RawInstance{}); valids == nil || err != nil {
+		t.Errorf("control: a root type and an empty batch is empty, OK; got %v, %v", valids, err)
 	}
 }
 
@@ -196,9 +300,11 @@ func TestValidate_AnAbstractOrPartNameFailsOnAnEmptyBatch(t *testing.T) {
 func TestValidate_AnAbstractRowRefusalCarriesItsSpan(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"a\"\n\nabstract type A {\n\tid String primary\n}\n")
-	span := location.Point(location.NewSourceID("rows.json"), 7, 3)
-	raw := instance.RawInstance{Properties: map[string]any{"id": "x"}, Provenance: location.NewProvenance("rows.json", path.Root(), span)}
-	_, res := instance.NewValidator(s).Validate(t.Context(), "A", []instance.RawInstance{raw})
+	span := location.Span{Source: sourcetest.ID("rows.json"), Start: location.Position{Line: 7, Column: 3}, End: location.Position{Line: 7, Column: 3}}
+	raw := instance.RawInstance{Properties: map[string]any{"id": "x"}, Provenance: instance.NewProvenance("rows.json", path.Root, span)}
+	_, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return instance.NewValidator(s).Validate(t.Context(), "A", []instance.RawInstance{raw})
+	})
 	if !res.HasCode(diag.E_ABSTRACT_TYPE) {
 		t.Fatalf("Validate = %s, want E_ABSTRACT_TYPE", res)
 	}
@@ -209,32 +315,17 @@ func TestValidate_AnAbstractRowRefusalCarriesItsSpan(t *testing.T) {
 	}
 }
 
-// A cancelled composition batch returns no partial slice either: the
-// one-entry-per-input contract is ValidateForComposition's as it is Validate's.
-func TestValidateForComposition_CancellationReturnsNoPartialSlice(t *testing.T) {
-	t.Parallel()
-	s := loadT(t, "schema \"p\"\n\npart type Line {\n\tid String primary\n}\n\ntype T {\n\tid String primary\n\t*-> LINES (many) Line\n}\n")
-	v := instance.NewValidator(s)
-	raws := []instance.RawInstance{{Properties: map[string]any{"id": "a"}}, {Properties: map[string]any{"id": "b"}}}
-	ctx, cancel := context.WithCancel(t.Context())
-	if valids, res := v.ValidateForComposition(ctx, "T", "LINES", raws); res.Err() != nil || len(valids) != 2 {
-		t.Fatalf("control: %d valids, %v", len(valids), res.Err())
-	}
-	cancel()
-	if valids, res := v.ValidateForComposition(ctx, "T", "LINES", raws); valids != nil || !res.HasCode(diag.E_CONTEXT_CANCELLED) {
-		t.Errorf("a cancelled composition batch returned %d valids with %v", len(valids), codes(res))
-	}
-}
-
 // A batch-wide resolution error names the source and no row: the type name,
 // not raws[0], is at fault.
 func TestValidate_BatchWideErrorBlamesNoRow(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
 	v := instance.NewValidator(s)
-	prov := location.NewProvenance("rows.json", path.Root().Index(7), location.Span{})
-	valids, res := v.Validate(t.Context(), "NoSuchType", []instance.RawInstance{{Properties: map[string]any{"id": "x"}, Provenance: prov}})
-	if !res.HasCode(instance.ErrTypeNotFound) {
+	prov := instance.NewProvenance("rows.json", path.Root.Index(7), location.Span{})
+	valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(t.Context(), "NoSuchType", []instance.RawInstance{{Properties: map[string]any{"id": "x"}, Provenance: prov}})
+	})
+	if !res.HasCode(diag.E_INSTANCE_TYPE_NOT_FOUND) {
 		t.Fatalf("want E_TYPE_NOT_FOUND, got %v", codes(res))
 	}
 	if valids != nil {
@@ -255,36 +346,15 @@ func TestValidate_BatchWideErrorBlamesNoRow(t *testing.T) {
 	}
 }
 
-// NewValidInstance does not alias the caller's maps: the godoc promises
-// immutability, so a caller that reuses its map cannot change the instance.
-func TestNewValidInstance_DoesNotAliasCallerMaps(t *testing.T) {
-	t.Parallel()
-	edges := map[string]*instance.ValidEdgeData{"AT": instance.NewValidEdgeData(nil)}
-	composed := map[string]immutable.Value{}
-	vi := instance.NewValidInstance("T", schema.TypeID{}, immutable.Key{}, immutable.Properties{}, edges, composed, nil)
-	delete(edges, "AT")
-	if _, ok := vi.Edge("AT"); !ok {
-		t.Error("deleting from the caller's map removed the instance's edge")
-	}
-	composed["LINES"] = immutable.Wrap([]any{})
-	n := 0
-	for range vi.Compositions() {
-		n++
-	}
-	if n != 0 {
-		t.Error("adding to the caller's composed map reached the instance")
-	}
-}
-
-// A nil *ValidInstance — the documented shape of a failed entry in Validate's
+// A nil ValidInstance — the documented shape of a failed entry in Validate's
 // slice — answers its accessors as ValidEdgeData does, instead of panicking.
-func TestValidInstance_NilReceiverIsSafe(t *testing.T) {
+func TestValidInstance_ZeroHandleIsSafe(t *testing.T) {
 	t.Parallel()
-	var vi *instance.ValidInstance
-	if vi.TypeName() != "" || vi.Validated() || vi.Provenance() != nil {
+	var vi instance.ValidInstance
+	if vi.TypeName() != "" || !vi.Provenance().IsZero() {
 		t.Error("a nil instance must answer zero values")
 	}
-	if vi.TypeID() != (schema.TypeID{}) || vi.PrimaryKey().Len() != 0 || vi.Properties().Len() != 0 {
+	if vi.Type() != (schema.Type{}) || vi.PrimaryKey().Len() != 0 || vi.Properties().Len() != 0 {
 		t.Error("a nil instance must answer zero identity, key and properties")
 	}
 	if _, ok := vi.Property("x"); ok {
@@ -297,7 +367,7 @@ func TestValidInstance_NilReceiverIsSafe(t *testing.T) {
 	for range vi.Edges() {
 		n++
 	}
-	for range vi.Compositions() {
+	for range vi.Composed("x") {
 		n++
 	}
 	if n != 0 {
@@ -326,9 +396,11 @@ type P {
 }
 `)
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "P", instance.RawInstance{Properties: map[string]any{
-		"id": "p", "addrs": []any{map[string]any{"id": "a", "rooms": []any{map[string]any{"id": "r", "bogus": 1}}}},
-	}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "P", instance.RawInstance{Properties: map[string]any{
+			"id": "p", "addrs": []any{map[string]any{"id": "a", "rooms": []any{map[string]any{"id": "r", "bogus": 1}}}},
+		}})
+	})
 	if !res.HasCode(diag.E_UNKNOWN_FIELD) {
 		t.Fatalf("want E_UNKNOWN_FIELD on the grandchild, got %v", codes(res))
 	}
@@ -366,42 +438,33 @@ type Sub extends Base {
 }
 `)
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "Sub", instance.RawInstance{Properties: map[string]any{"id": "s", "n": int64(-1)}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Sub", instance.RawInstance{Properties: map[string]any{"id": "s", "n": int64(-1)}})
+	})
 	if !res.HasCode(diag.E_INVARIANT_FAIL) {
 		t.Errorf("the inherited invariant did not run: %v", codes(res))
 	}
 }
 
-// The validator's logger reaches the evaluator: an invariant evaluation
-// emits the evaluator's trace op under it.
-func TestWithLogger_ReachesTheEvaluator(t *testing.T) {
-	t.Parallel()
-	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tn Integer\n\t! \"pos\" n > 0\n}\n")
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	v := instance.NewValidator(s, instance.WithLogger(slog.New(h)))
-	if _, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": int64(1)}}); res.Err() != nil {
-		t.Fatal(res.Err())
-	}
-	if !yammmtest.HasAttr(h.Records(), "op", "yammm.eval.expr") {
-		t.Error("the evaluator's trace op was never logged: the validator's logger does not reach it")
-	}
-}
-
-// A json.Number — what adapter/json's UseNumber decode emits for every
+// A json.Number — what an encoding/json decode with UseNumber emits for every
 // number — is a number at a String property, not a string of digits.
 func TestValidateOne_JSONNumberIsNotAString(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\ts String\n\tn Integer\n}\n")
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "s": json.Number("4200")}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "s": json.Number("4200")}})
+	})
 	if !res.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Errorf("json.Number at a String property: want E_TYPE_MISMATCH, got %v", codes(res))
 	}
-	vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": json.Number("42")}})
-	if res.Err() != nil {
-		t.Fatalf("control: json.Number at an Integer property refused: %v", res.Err())
+	vi, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": json.Number("42")}})
+	})
+	if diagtest.Err(res) != nil {
+		t.Fatalf("control: json.Number at an Integer property refused: %v", res)
 	}
-	if n, _ := vi.Property("n"); n.Unwrap() != int64(42) {
-		t.Errorf("stored %#v, want int64(42)", n.Unwrap())
+	if n, _ := vi.Property("n"); n.Any() != int64(42) {
+		t.Errorf("stored %#v, want int64(42)", n.Any())
 	}
 }

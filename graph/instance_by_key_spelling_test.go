@@ -1,19 +1,21 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // TestInstanceByKey_AnySpellingOnEveryPath pins that a Timestamp-keyed
-// instance entered by a non-canonical spelling is
-// found by its own key, by FormatKey of the canonical text and by FormatKey
-// of the spelling the caller wrote, on a snapshot built through Add and on
-// one rebuilt from parts.
+// instance is found by its own key, by FormatKey of the canonical text and by
+// FormatKey of another spelling of it, on a snapshot built through Add from a
+// non-canonical spelling and on one rebuilt from parts, which hold the
+// canonical text.
 func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 	t.Parallel()
 	s := callerSpellingSchema(t)
@@ -21,30 +23,27 @@ func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 	want := graph.FormatKey(canonInstant)
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	built := g.Snapshot()
 
-	rebuilt, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	rebuilt := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{runID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
-				TypeID: runID, PrimaryKey: immutable.WrapKey([]any{rawInstant}),
+				TypeID: runID, PrimaryKey: immutable.WrapKey([]any{canonInstant}),
 				Properties: immutable.WrapProperties(map[string]any{"at": rawInstant}),
 			},
 		},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 
 	paths := []struct {
 		name string
-		snap *graph.Snapshot
-	}{{"Add", built}, {"RebuildSnapshot", rebuilt}}
+		snap graph.Snapshot
+	}{{"Add", built}, {"rebuild", rebuilt}}
 	for _, path := range paths {
-		own := path.snap.InstancesOf(runID)[0].PrimaryKey().String()
+		own := slices.Collect(path.snap.InstancesOf(runID))[0].PrimaryKey().String()
 		spellings := []struct {
 			name, key string
 		}{
@@ -78,13 +77,12 @@ func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 	// path this test names.
 	tagID := mustTypeID(t, s, "Tag")
 	g := graph.New(s)
-	if r := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	tag := instance.NewValidInstance("Tag", tagID, immutable.WrapKey([]any{"t1"}),
-		immutable.WrapProperties(map[string]any{"name": "t1"}), nil, nil, nil)
-	if r := g.Add(t.Context(), tag); !r.OK() {
-		t.Fatalf("add tag: %s", r)
+	tag := instancetest.Valid(t, s, "Tag", map[string]any{"name": "t1"})
+	if err := g.Add(t.Context(), tag); err != nil {
+		t.Fatalf("add tag: %s", err)
 	}
 	snap := g.Snapshot()
 	for _, id := range []schema.TypeID{runID, tagID} {
@@ -92,7 +90,7 @@ func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 		if _, ok := snap.InstanceByKey(id, snapshotSomeKeyOf(t, snap, id)); !ok {
 			t.Fatalf("type %s has no indexed instance; the unparseable arm would return at the typeIndex guard", id)
 		}
-		if inst, ok := snap.InstanceByKey(id, "not an address"); ok || inst != nil {
+		if inst, ok := snap.InstanceByKey(id, "not an address"); ok || !inst.IsZero() {
 			t.Errorf("InstanceByKey(%s, unparseable) = %v, %v; want nil, false", id, inst, ok)
 		}
 	}
@@ -100,9 +98,9 @@ func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 
 // snapshotSomeKeyOf returns the rendered key of one indexed instance of id,
 // which a lookup must find. It fails the test when the type has none.
-func snapshotSomeKeyOf(t *testing.T, snap *graph.Snapshot, id schema.TypeID) string {
+func snapshotSomeKeyOf(t *testing.T, snap graph.Snapshot, id schema.TypeID) string {
 	t.Helper()
-	insts := snap.InstancesOf(id)
+	insts := slices.Collect(snap.InstancesOf(id))
 	if len(insts) == 0 {
 		t.Fatalf("type %s holds no instance", id)
 	}

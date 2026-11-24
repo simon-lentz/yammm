@@ -53,7 +53,7 @@ type Person {
 
 ## 3. Missing Nil Guard in Invariants
 
-Optional fields can be nil. An unguarded comparison against a nil field evaluates to false, tripping the invariant (`E_INVARIANT_FAIL`) on every instance where the optional field is absent.
+Optional fields can be nil, and nil orders below every other value. So `end_date > start_date` is false wherever `end_date` is absent, and the invariant trips (`E_INVARIANT_FAIL`) on every such instance.
 
 ```yammm-snippet
 // WRONG -- loads clean; trips at validation time on every nil end_date
@@ -131,7 +131,7 @@ type User {
 
 ## 7. Single-Option Enum
 
-Enums require at least two options. A single-option Enum is a parse error.
+Enums require at least two options. A single-option Enum is refused with `E_INVALID_CONSTRAINT`.
 
 ```yammm-invalid
 // WRONG -- only one option: E_INVALID_CONSTRAINT
@@ -302,25 +302,26 @@ age Integer
 
 ---
 
-## 14. Lowercase Built-in Function Names
+## 14. Unknown or Misapplied Built-in Functions
 
-All built-in functions in invariants are capitalized. A lowercase name is not a
-built-in, so the schema still **loads clean** — the failure surfaces at
-validation time as `E_EVAL_ERROR` ("unknown method"), not at load. Nothing
-catches this for you at compile time.
+The schema load checks every call in an invariant. A name no built-in holds draws
+`E_INVALID_INVARIANT` ("unknown function"). A receiver of a kind the built-in
+refuses on every input draws the same code: `Contains` takes a list, so a `String`
+receiver is refused. A built-in name is matched exactly, so `name -> len` is
+refused as `name -> Length` is. The tables in `expressions.md` spell each name.
 
-```yammm-snippet
-// WRONG -- loads clean; fails at validation time
-! "check_len" name -> len > 0
-! "all_valid" ITEMS -> all |$i| { $i.qty > 0 }
-! "has_name" name -> contains("test")
+```yammm-invalid
+// WRONG -- no built-in is named Length, and Contains takes a list: E_INVALID_INVARIANT
+name String required
+! "check_len" name -> Length > 0
+! "mentions_test" name -> Contains("test")
 ```
 
 ```yammm-snippet
-// RIGHT -- capitalized
+// RIGHT -- a built-in's name, on a receiver it takes
 ! "check_len" name -> Len > 0
-! "all_valid" ITEMS -> All |$i| { $i.qty > 0 }
-! "has_name" name -> Contains("test")
+! "mentions_test" name =~ /test/
+! "tagged_test" tags -> Contains("test")
 ```
 
 ---
@@ -330,7 +331,7 @@ catches this for you at compile time.
 Relationship property blocks cannot use `Vector` or `List` types.
 
 ```yammm-invalid
-// WRONG -- List not allowed in edge properties: E_LIST_ON_EDGE
+// WRONG -- List not allowed in edge properties: E_INVALID_EDGE_PROPERTY_TYPE
 --> RATED (many) Product {
     score Float[0.0, 5.0] required
     tags List<String>
@@ -419,26 +420,25 @@ type User {
 
 ## 19. Reusing an Invariant Message
 
-An invariant's string is its **message** and doubles as its **name**. Reusing one
-is not an error — the schema loads clean and both invariants evaluate — but the
-name is load-bearing in two ways, so a duplicate costs you something.
+An invariant's string is its **message** and doubles as its **name**, which is
+its identity on the type.
 
-Within a type, two invariants sharing a message produce two failures reporting
-the same text, and nothing in the diagnostic says which expression tripped.
+Within a type, a message is declared once. A second invariant with the same
+message draws `E_DUPLICATE_INVARIANT`, and the schema does not load.
 
-Across inheritance it matters more: invariants merge by name, keep-first, so a
-subtype declaring a parent's message **overrides** the parent's invariant rather
-than adding to it. That is the intended way to refine an inherited rule — and a
-silent surprise if the collision was accidental.
+Across inheritance, invariants merge by name: a subtype declaring a parent's
+message **overrides** the parent's invariant rather than adding to it. That is
+the intended way to refine an inherited rule — and a silent surprise if the
+collision was accidental.
 
-```yammm-snippet
-// RISKY -- both evaluate; both failures read "check"
+```yammm-invalid
+// WRONG -- one message twice on a type: E_DUPLICATE_INVARIANT
 ! "check" name -> Len > 0
 ! "check" email -> Len > 0
 ```
 
 ```yammm-snippet
-// BETTER -- each failure names the rule that tripped
+// RIGHT -- each failure names the rule that tripped
 ! "name_not_empty" name -> Len > 0
 ! "email_not_empty" email -> Len > 0
 ```
@@ -485,5 +485,35 @@ type Document {
     published_on Date
 
     @@index(state, published_on)
+}
+```
+
+---
+
+## 22. A Member Name in Another Case
+
+A member is named by one exact spelling at each door, in instance data and in an invariant. With `name` declared, the data key `"Name"` is an unknown field (`E_UNKNOWN_FIELD`) and `name` stays absent; the relation `WORKS_AT` arrives as `works_at` and under no other key. In an invariant, `Name` reads no member and is refused at load.
+
+```yammm-invalid
+schema "people"
+
+type Person {
+    id String primary
+    name String
+
+    // WRONG -- the property is "name": E_UNKNOWN_PROPERTY
+    ! "has_name" Name != nil
+}
+```
+
+```yammm-schema
+schema "people"
+
+type Person {
+    id String primary
+    name String
+
+    // RIGHT -- read the property by its declared name
+    ! "has_name" name != nil
 }
 ```

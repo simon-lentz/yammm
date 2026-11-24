@@ -1,8 +1,10 @@
 package main
 
 import (
+	"os"
+	"strings"
+
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func newNeo4jCmd() *cobra.Command {
@@ -15,43 +17,34 @@ func newNeo4jCmd() *cobra.Command {
 		RunE: requireSubcommand,
 		// A mistyped subcommand is reported as unknown, by name.
 		Args: cobra.NoArgs,
-		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			return bindNeo4jFlags(cmd)
-		},
 	}
 
-	cmd.PersistentFlags().String("uri", "", "Neo4j bolt URI (e.g., neo4j://localhost:7687) [$YAMMM_NEO4J_URI]")
-	cmd.PersistentFlags().String("username", "neo4j", "Neo4j username [$YAMMM_NEO4J_USERNAME]")
-	cmd.PersistentFlags().String("password", "", "Neo4j password [$YAMMM_NEO4J_PASSWORD]")
-	cmd.PersistentFlags().String("database", "neo4j", "Neo4j database name [$YAMMM_NEO4J_DATABASE]")
-
-	cmd.AddCommand(
-		newNeo4jConstraintsCmd(),
-		newNeo4jIndexesCmd(),
-		newNeo4jDiffCmd(),
-		newNeo4jIntrospectCmd(),
-	)
+	cmd.AddCommand(newNeo4jDiffCmd())
 
 	return cmd
 }
 
-// bindNeo4jFlags binds Neo4j persistent flags to environment variables.
-// When a flag is not set on the command line but the corresponding env var
-// is present, the env value is written back into the cobra flag so that
-// subcommands can continue using cmd.Flags().GetString() unchanged.
+// registerConnectionFlags adds the flags that name a database and its
+// credentials, each also read from its YAMMM_NEO4J_* variable. Only a command
+// that connects takes them, so none is accepted and then ignored.
+func registerConnectionFlags(cmd *cobra.Command) {
+	cmd.Flags().String("uri", "", "Neo4j bolt URI (e.g., neo4j://localhost:7687) [$YAMMM_NEO4J_URI]")
+	cmd.Flags().String("username", "neo4j", "Neo4j username [$YAMMM_NEO4J_USERNAME]")
+	cmd.Flags().String("password", "", "Neo4j password [$YAMMM_NEO4J_PASSWORD]")
+	cmd.Flags().String("database", "neo4j", "Neo4j database name [$YAMMM_NEO4J_DATABASE]")
+	cmd.PreRunE = func(cmd *cobra.Command, _ []string) error { return bindNeo4jFlags(cmd) }
+}
+
+// bindNeo4jFlags sets each connection flag the command line did not set from
+// its YAMMM_NEO4J_* variable, YAMMM_NEO4J_URI for --uri. A variable set to
+// the empty string is read as unset, so it keeps the flag's default.
 func bindNeo4jFlags(cmd *cobra.Command) error {
-	v := viper.New()
-	v.SetEnvPrefix("YAMMM_NEO4J")
-	v.AutomaticEnv()
-
-	flags := []string{"uri", "username", "password", "database"}
-	for _, name := range flags {
-		if err := v.BindPFlag(name, cmd.Flags().Lookup(name)); err != nil {
-			return err
+	for _, name := range []string{"uri", "username", "password", "database"} {
+		if cmd.Flags().Changed(name) {
+			continue
 		}
-
-		if !cmd.Flags().Changed(name) && v.IsSet(name) {
-			if err := cmd.Flags().Set(name, v.GetString(name)); err != nil {
+		if v := os.Getenv("YAMMM_NEO4J_" + strings.ToUpper(name)); v != "" {
+			if err := cmd.Flags().Set(name, v); err != nil {
 				return err
 			}
 		}

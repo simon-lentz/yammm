@@ -1,5 +1,5 @@
-// Package doclint holds the module's documentation gates: doc links that name
-// nothing, doc comments go doc renders wrongly, dependency lines, cited
+// Package doclint holds documentation gates of the module, beside the docs
+// package's own example and corpus tests: doc links that name nothing, doc comments go doc renders wrongly, dependency lines, cited
 // diagnostic codes, command invocations, and process references in names.
 //
 // # Why
@@ -26,18 +26,25 @@
 //
 // # Resolution
 //
-// The resolution unit is the directory, not the package: every .go file in a
-// directory contributes names, test files included. A non-test file behind a
-// build constraint that the pinned linux/amd64 context excludes is outside this
-// gate, as it is outside go doc there; a test file is read under any
-// constraint. That is what lets a
-// production doc comment anchor a regression test by name — the convention the
-// repo's comment rules sanction — while still catching an anchor that names a
-// test somebody deleted.
+// The resolution unit is the directory, not the package: the .go files of a
+// directory contribute names, test files included, under the rules below, and
+// where git can list the tracked files only the tracked ones do. The gate's build
+// context pins GOOS and GOARCH to linux/amd64, sets no build tag, and takes
+// cgo, the Go release, GOEXPERIMENT and the architecture feature tags from the
+// run, so on a host that is not amd64 a file constrained by amd64.v1 is outside
+// the gate, and a run under GOEXPERIMENT=jsonv2 reads the files that
+// experiment selects. A non-test file behind a build constraint that context
+// excludes is outside this gate, as it is outside go doc there, unless no
+// non-test file of its directory is in that build: then links into the
+// directory resolve against those files' names, save one whose constraint is
+// the bare "ignore". A test file is read under any constraint. That is what lets a production doc
+// comment anchor a regression test by name while still catching an anchor
+// that names a test somebody deleted.
 //
 // A qualified link resolves its package part against the referencing file's own
-// imports first. This module has an adapter/json package, so a bare
-// package-name match for a json-qualified link would collide with encoding/json.
+// imports first. This module has an instance/path package, so a bare
+// package-name match for a path-qualified link would collide with the standard
+// library's path.
 // When the file does not import the name, a unique in-module package with that
 // name is the fallback, which is how a comment can reference a package that
 // would be an import cycle to depend on. Links resolving outside the module are
@@ -57,8 +64,10 @@
 // # Code names
 //
 // [AssertCitedCodesExist] reads the diagnostic code names written in tracked Go
-// comments, Markdown files and shell scripts' comments, outside testdata and
-// the caller's exclusions, against the registry the caller passes. A renamed or removed code leaves its name in prose exactly as a
+// comments, in Markdown files and in the lines of a shell script that open on
+// "#", save a first line's "#!", outside testdata and the caller's exclusions,
+// against the registry the caller passes. A shell comment that follows a command on its line is not
+// read. A renamed or removed code leaves its name in prose exactly as a
 // removed symbol leaves its links, and a code name is not a doc link, so the
 // resolver cannot see it.
 //
@@ -66,10 +75,9 @@
 //
 // [AssertInvocationsExist] reads every invocation of a command-line program
 // written in a tracked Markdown file, testdata included, against the program's
-// commands and flags, which the caller passes as data. A file matching one of
-// the caller's exclusions is not read. Outside a git work tree the gate walks
-// the filesystem instead, skipping node_modules and dot-directories, and reads
-// every Markdown file it reaches that no exclusion matches. A table entry the
+// commands and flags, which the caller passes as data. Outside a git work tree
+// the gate walks the filesystem instead, skipping node_modules and
+// dot-directories, and reads every Markdown file it reaches. A table entry the
 // gate could never read back from an invocation, such as a flag name holding
 // "=" or a space, is refused before any file is read. A renamed flag or
 // command leaves its old spelling in every example that uses it, and a flag
@@ -77,7 +85,7 @@
 //
 // The Markdown is read as GitHub reads it, CRLF and a lone CR as line endings:
 // CommonMark with GitHub's extensions, parsed by goldmark, the reader
-// adapter/markdown puts its structural questions to. An invocation is a line of
+// schema/markdown puts its structural questions to. An invocation is a line of
 // a fenced code block that, less its indentation, is the program's name alone
 // or the name followed by white space, or a code span that starts with the name
 // and white space; a span may cross the lines of its paragraph, and each line
@@ -87,15 +95,14 @@
 // and a fence's info string hold no invocation.
 //
 // The invocation ends at shell text: a word that opens a comment ("#"), a pipe,
-// "&&", "||", "&", or a redirection (">", "2>", "&>", or "<" alone). It also
+// "&&", "||", "&", or a redirection (">", digits before ">" as in "2>",
+// "&>", or "<" alone). It also
 // ends after a word that ends in ";". The words after the program name the
 // command, looked up as cobra's Find looks one up: a level at a time, and at
 // each level every word left is read with that level's flags by the rule of
 // cobra's stripFlags. There a flag written without "=" takes the next word as
 // its value, unless the command at that level defines it as taking no value; a
-// flag the lookup does not know takes one, and so does a flag the program
-// defines only after the lookup (Flag.AfterLookup), as cobra does its help and
-// version flags. For a single dash, only a word of two bytes such as -o takes
+// flag the lookup does not know takes one. For a single dash, only a word of two bytes such as -o takes
 // one, and a synopsis word with alternatives, such as [-w|--check], takes
 // none. A synopsis word is read as the flag it names, where cobra would read
 // "[--output" as a word. A lone "-" is not part of the lookup. The first

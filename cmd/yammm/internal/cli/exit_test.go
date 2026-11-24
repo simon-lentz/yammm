@@ -12,7 +12,9 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/schematest"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/neo4j"
 )
 
 func TestExitError_MessageWithoutAWrappedError(t *testing.T) {
@@ -25,11 +27,28 @@ func TestExitError_MessageWithoutAWrappedError(t *testing.T) {
 		{ExitValidation, "validation errors found"},
 		{ExitUsage, "usage error"},
 		{ExitRuntime, "runtime error"},
-		{99, "exit"},
 	} {
-		if got := (&ExitError{Code: tt.code}).Error(); got != tt.want {
-			t.Errorf("ExitError{Code: %d}.Error() = %q, want %q", tt.code, got, tt.want)
+		if got := Exit(tt.code).Error(); got != tt.want {
+			t.Errorf("Exit(%d).Error() = %q, want %q", tt.code, got, tt.want)
 		}
+	}
+}
+
+func TestExit_SuccessIsNoErrorAndAnUnnamedCodePanics(t *testing.T) {
+	t.Parallel()
+
+	if err := Exit(ExitOK); err != nil {
+		t.Errorf("Exit(ExitOK) = %v, want nil", err)
+	}
+	for _, code := range []int{-1, 4, 256} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("Exit(%d) did not panic; the CLI names no such code", code)
+				}
+			}()
+			_ = Exit(code)
+		}()
 	}
 }
 
@@ -37,13 +56,48 @@ func TestExitError_CarriesItsError(t *testing.T) {
 	t.Parallel()
 
 	cause := errors.New("resolve path: no such file")
-	e := &ExitError{Code: ExitUsage, Err: cause}
+	e := Usage(cause)
 
 	if got := e.Error(); got != cause.Error() {
 		t.Errorf("Error() = %q, want the wrapped message %q", got, cause.Error())
 	}
 	if !errors.Is(e, cause) {
 		t.Error("Unwrap does not make the cause reachable")
+	}
+}
+
+// A classifier names the code of an error that carries none, and only of such
+// an error: no failure carries another as its cause.
+func TestUsageAndRuntime_ClassifyOnlyAnUnclassifiedError(t *testing.T) {
+	t.Parallel()
+
+	if Usage(nil) != nil || Runtime(nil) != nil {
+		t.Error("a classifier of nil returned an error")
+	}
+	cause := errors.New("boom")
+	for _, tt := range []struct {
+		err  error
+		want int
+	}{
+		{Usage(cause), ExitUsage},
+		{Runtime(cause), ExitRuntime},
+	} {
+		if got := ExitForError(tt.err); got != tt.want {
+			t.Errorf("ExitForError(%v) = %d, want %d", tt.err, got, tt.want)
+		}
+	}
+	for _, classified := range []error{
+		Validationf("a.yammm: unformatted"),
+		Exit(ExitValidation),
+		fmt.Errorf("ctx: %w", Validationf("a.yammm: unformatted")),
+		JoinExitErrors(Validationf("a"), Runtimef("b")),
+	} {
+		if got := Usage(classified); got != classified { //nolint:errorlint // the same error, not one that matches it
+			t.Errorf("Usage(%#v) = %#v, want it returned as it is", classified, got)
+		}
+		if got := Runtime(classified); got != classified { //nolint:errorlint // the same error, not one that matches it
+			t.Errorf("Runtime(%#v) = %#v, want it returned as it is", classified, got)
+		}
 	}
 }
 
@@ -89,10 +143,10 @@ func TestExitForError(t *testing.T) {
 		want int
 	}{
 		{"nil is success", nil, ExitOK},
-		{"an ExitError keeps its own code", &ExitError{Code: ExitValidation}, ExitValidation},
+		{"a bare signal keeps its own code", Exit(ExitValidation), ExitValidation},
 		{
-			"an ExitError wrapping a path error still keeps its code",
-			&ExitError{Code: ExitUsage, Err: statErr}, ExitUsage,
+			"a usage failure wrapping a path error still keeps its code",
+			Usage(statErr), ExitUsage,
 		},
 		{"a real path error is a runtime failure", statErr, ExitRuntime},
 		{"the not-exist sentinel is a runtime failure", fs.ErrNotExist, ExitRuntime},
@@ -145,7 +199,7 @@ func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 	}{
 		{"a schema load I/O failure", diag.E_LOAD_IO_FAILURE, ExitRuntime},
 		{"a snapshot I/O failure", diag.E_SNAPSHOT_IO, ExitRuntime},
-		{"an adapter I/O failure", diag.E_ADAPTER_IO, ExitRuntime},
+		{"a database answer the diff cannot plan from", neo4j.E_NEO4J_INVALID_REMOTE_OBJECT, ExitRuntime},
 		{"an internal fault", diag.E_INTERNAL, ExitRuntime},
 		{"a cancelled context", diag.E_CONTEXT_CANCELLED, ExitRuntime},
 		{"an ordinary error", diag.E_MISSING_REQUIRED, ExitValidation},
@@ -153,7 +207,7 @@ func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := diag.NewCollectorUnlimited()
+			c := diag.NewCollector(diag.NoLimit)
 			c.Collect(diag.NewIssue(diag.Error, tt.code, "boom").Build())
 			if got := ExitForResult(c.Result()); got != tt.want {
 				t.Errorf("ExitForResult = %d, want %d", got, tt.want)
@@ -163,7 +217,7 @@ func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 
 	t.Run("a clean result is success", func(t *testing.T) {
 		t.Parallel()
-		if got := ExitForResult(diag.OK()); got != ExitOK {
+		if got := ExitForResult(diag.Result{}); got != ExitOK {
 			t.Errorf("ExitForResult of a clean result = %d, want %d", got, ExitOK)
 		}
 	})
@@ -185,7 +239,7 @@ func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 
 	t.Run("an I/O code at Warning severity is still a runtime failure", func(t *testing.T) {
 		t.Parallel()
-		c := diag.NewCollectorUnlimited()
+		c := diag.NewCollector(diag.NoLimit)
 		c.Collect(diag.NewIssue(diag.Warning, diag.E_LOAD_IO_FAILURE, "boom").Build())
 		if got := ExitForResult(c.Result()); got != ExitRuntime {
 			t.Errorf("ExitForResult = %d, want %d — an I/O code counts at whatever severity the loader chose", got, ExitRuntime)
@@ -204,7 +258,7 @@ func TestReportError(t *testing.T) {
 		{"nil writes nothing", nil, ""},
 		{
 			"a bare exit signal writes nothing",
-			&ExitError{Code: ExitValidation}, "",
+			Exit(ExitValidation), "",
 		},
 		{
 			"a carried message is prefixed once",
@@ -218,6 +272,11 @@ func TestReportError(t *testing.T) {
 		},
 		{
 			"every joined message gets its own line and prefix",
+			JoinExitErrors(Validationf("first"), Validationf("second")),
+			"error: first\nerror: second\n",
+		},
+		{
+			"each line of one failure gets its own prefix",
 			errors.Join(errors.New("first"), errors.New("second")),
 			"error: first\nerror: second\n",
 		},
@@ -228,8 +287,63 @@ func TestReportError(t *testing.T) {
 		},
 		{
 			"a bare exit signal inside a join adds no line",
-			errors.Join(&ExitError{Code: ExitValidation}, errors.New("b.yammm: unreadable")),
+			joined{Exit(ExitValidation), errors.New("b.yammm: unreadable")},
 			"error: b.yammm: unreadable\n",
+		},
+		{
+			"a failure with no text is reported under its exit code",
+			joined{errors.New(""), fmt.Errorf("%.0w%.0w", errors.New("a"), errors.New("b")), Validationf("\n\n"), errors.New("c")},
+			"error: runtime error\nerror: runtime error\nerror: validation errors found\nerror: c\n",
+		},
+		{
+			"a failure with no text is reported under the code it exits with",
+			Validationf("%w", Runtimef("")),
+			"error: validation errors found\n",
+		},
+		{
+			"a text of only white space is no text, and a line of it writes no line",
+			joined{Validationf(" \r\n"), errors.New("a\n\r\nb")},
+			"error: validation errors found\nerror: a\nerror: b\n",
+		},
+		{
+			"a line keeps its own trailing white space",
+			errors.New("unknown flag: --format \nnext\t"),
+			"error: unknown flag: --format \nerror: next\t\n",
+		},
+		{
+			"white space beyond space, tab and carriage return is text",
+			errors.New("\u00a0"),
+			"error: \u00a0\n",
+		},
+		{
+			"a classifier keeps a bare signal bare",
+			Runtime(Exit(ExitValidation)),
+			"",
+		},
+		{
+			"an empty line inside a failure writes no line",
+			fmt.Errorf("ctx: %w", JoinExitErrors(Validationf("a\n"), Validationf("b"))),
+			"error: ctx: a\nerror: b\n",
+		},
+		{
+			"a bare exit signal inside another error's join is part of that one failure",
+			errors.Join(Exit(ExitValidation), errors.New("b")),
+			"error: validation errors found\nerror: b\n",
+		},
+		{
+			"an error that wraps several causes under one message is one failure",
+			fmt.Errorf("type %q: %w: %w", "Grid", errors.New("refused"), errors.New("class")),
+			"error: type \"Grid\": refused: class\n",
+		},
+		{
+			"a control in a line shows as the glyph a terminal is shown for it",
+			errors.New("bad \x1b[31mred\x1b[0m\x00\nnext\u202e\x7f"),
+			"error: bad \u241b[31mred\u241b[0m\u2400\nerror: next\ufffd\u2421\n",
+		},
+		{
+			"a marked refusal is the one failure it marks",
+			Validationf("generate node queries: %w", markedRefusal(t)),
+			"error: generate node queries: param \"v\": expected integer, got float 2.5\n",
 		},
 	}
 	for _, tt := range tests {
@@ -246,17 +360,46 @@ func TestReportError(t *testing.T) {
 
 // TestFailureResult pins the one conversion from a failure to a diagnostic: one
 // E_COMMAND_FAILED issue per message, each carrying the process exit code, and
-// nothing for a failure that carries no message.
+// nothing for nil or a bare exit signal.
 func TestFailureResult(t *testing.T) {
 	t.Parallel()
 
-	for _, err := range []error{nil, &ExitError{Code: ExitValidation}, JoinExitErrors(&ExitError{Code: ExitRuntime})} {
+	for _, err := range []error{
+		nil, Exit(ExitValidation), JoinExitErrors(Exit(ExitRuntime)), Runtime(Exit(ExitValidation)),
+	} {
 		if _, ok := FailureResult(err); ok {
 			t.Errorf("FailureResult(%v) reported a failure; a bare signal carries no message", err)
 		}
 	}
 
-	err := JoinExitErrors(Validationf("a.yammm: unformatted\n"), &ExitError{Code: ExitValidation}, Runtimef("open b.yammm: denied"))
+	for _, tt := range []struct {
+		err  error
+		want []string
+	}{
+		{errors.New(""), []string{"runtime error"}},
+		{errors.New("boom\n \n"), []string{"boom"}},
+		{errors.New("unknown flag: --format "), []string{"unknown flag: --format "}},
+		{Validationf("%s", ""), []string{"validation errors found"}},
+		{fmt.Errorf("%w", Validationf("%s", "")), []string{"validation errors found"}},
+		{fmt.Errorf("%.0w%.0w", errors.New("a"), errors.New("b")), []string{"runtime error"}},
+		{JoinExitErrors(errors.New(""), Usagef("%s", "")), []string{"runtime error", "usage error"}},
+	} {
+		result, ok := FailureResult(tt.err)
+		if !ok {
+			t.Errorf("FailureResult(%#v) reported no failure; a failure with no text is still a failure", tt.err)
+			continue
+		}
+		var got []string
+		for iss := range result.Issues() {
+			got = append(got, iss.Message())
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("FailureResult(%#v) messages = %q, want %q", tt.err, got, tt.want)
+		}
+	}
+
+	err := JoinExitErrors(Validationf("a.yammm: unformatted\n"), Exit(ExitValidation), Runtimef("open b.yammm: denied"))
 	result, ok := FailureResult(err)
 	if !ok {
 		t.Fatal("FailureResult of two messages reported none")
@@ -316,11 +459,11 @@ func TestJoinExitErrors(t *testing.T) {
 
 	t.Run("bare exit signals stay bare", func(t *testing.T) {
 		t.Parallel()
-		err := JoinExitErrors(&ExitError{Code: ExitValidation}, nil, &ExitError{Code: ExitValidation})
+		err := JoinExitErrors(Exit(ExitValidation), nil, Exit(ExitValidation))
 		if got := ExitForError(err); got != ExitValidation {
 			t.Errorf("exit code = %d, want %d", got, ExitValidation)
 		}
-		if exitErr, ok := errors.AsType[*ExitError](err); !ok || exitErr.Err != nil {
+		if exitErr, ok := errors.AsType[*exitError](err); !ok || exitErr.err != nil {
 			t.Errorf("JoinExitErrors of bare signals = %#v, want a bare ExitError", err)
 		}
 		var buf bytes.Buffer
@@ -339,4 +482,12 @@ func TestJoinExitErrors(t *testing.T) {
 				ExitForError(forwards), ExitForError(backwards))
 		}
 	})
+}
+
+// markedRefusal returns the neo4j package's refusal of a float at an Integer,
+// which wraps the coercion error and the package's class.
+func markedRefusal(tb testing.TB) error {
+	tb.Helper()
+	_, err := neo4j.CoerceParams(map[string]any{"v": 2.5}, neo4j.ParamTypes{"v": schematest.Constraint(tb, "Integer")})
+	return err
 }

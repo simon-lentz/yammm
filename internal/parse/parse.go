@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/alecthomas/participle/v2"
@@ -36,6 +37,28 @@ func LexAndParse(src string, sourceID location.SourceID) (*File, []Token, []diag
 }
 
 func parseSource(text string, sourceID location.SourceID, withTokens bool) (*File, []Token, []diag.Issue) {
+	b := parsed(text, sourceID)
+
+	var stream []Token
+	if withTokens {
+		stream = make([]Token, 0, len(b.toks))
+		for _, t := range b.toks {
+			if t.EOF() {
+				break
+			}
+			stream = append(stream, Token{
+				Kind:  b.ps.names[t.Type],
+				Value: t.Value,
+				Start: t.Pos.Offset,
+				End:   t.Pos.Offset + len(t.Value),
+			})
+		}
+	}
+	return b.file, stream, b.issues
+}
+
+// parsed parses text and returns the builder that holds the result.
+func parsed(text string, sourceID location.SourceID) *builder {
 	ps := mustParsers()
 
 	base := lexStart(text)
@@ -59,30 +82,16 @@ func parseSource(text string, sourceID location.SourceID, withTokens bool) (*Fil
 	b.parseFile(plex)
 	b.checkSourceText()
 	slices.SortStableFunc(b.issues, compareIssues)
-
-	var stream []Token
-	if withTokens {
-		stream = make([]Token, 0, len(b.toks))
-		for _, t := range b.toks {
-			if t.EOF() {
-				break
-			}
-			stream = append(stream, Token{
-				Kind:  ps.names[t.Type],
-				Value: t.Value,
-				Start: t.Pos.Offset,
-				End:   t.Pos.Offset + len(t.Value),
-			})
-		}
-	}
-	return b.file, stream, b.issues
+	b.file.Unparsed = b.unparsed
+	return b
 }
 
 // checkSourceText reports every run of text the source rules refuse inside a
 // comment or a string or regex literal, at the run itself. These four tokens
 // hold any character but their own delimiters, and all but a doc comment end
 // at a line break; anywhere else such a character lexes as ANY_OTHER, and the
-// construct holding it fails.
+// parser recovers from it as from any unexpected token (the package doc's
+// "What Parse reports" section).
 func (b *builder) checkSourceText() {
 	tok := b.ps.tok
 	for i := range b.toks {
@@ -154,8 +163,24 @@ type builder struct {
 	// from zero on every call, which made a parse quadratic in file size.
 	lineStarts []int
 
+	// runeMarks[i] is the number of runes before [builder.runeMark] i, so a
+	// column counts fewer than runeStride and three bytes from a mark, in
+	// whatever order positions are asked for. Counting from the line's start
+	// made a parse quadratic in a line's length for spans nested on one line. Built at the first position asked for.
+	// counted is the bytes positionAt has counted runes over, the marks
+	// included, and the bytes startsLine has read, the measure of that cost:
+	// [TestParse_PositionsCostALinesLengthOnce],
+	// [TestParse_NestedPositionsCostTheSourceOnce] and
+	// [TestParse_AnnotationsCostTheirLineOnce] bound it.
+	runeMarks []int
+	counted   int
+
 	file   *File
 	issues []diag.Issue
+
+	// unparsed holds the issues that become File.Unparsed. Each construct
+	// reports its own as it is read, so they are in position order.
+	unparsed []diag.Issue
 }
 
 // lineStarts returns the byte offset of each line's first byte, starting at 0.
@@ -200,7 +225,7 @@ func (b *builder) parseHeader(plex *lexer.PeekingLexer) {
 		// declaration, so everything it skips belongs to other constructs and a
 		// malformed literal in any of them would take over this diagnostic.
 		from := plex.Peek().Pos.Offset
-		past := resumeFloor(err, from)
+		past, _ := resumeFloor(err, from)
 		b.syntaxErr(diag.Fatal, err, "in the schema header", from, past)
 		b.resync(plex, past, false, func(t *lexer.Token) bool { return declStart(b.ps.tok, t) })
 		return
@@ -210,15 +235,16 @@ func (b *builder) parseHeader(plex *lexer.PeekingLexer) {
 	b.file.Doc = stripDoc(head.Doc)
 	b.file.Span = b.spanOf(head.Pos, head.EndPos)
 
-	name, ok := b.unquoteAt(&head.Name, "invalid schema name")
-	if !ok {
+	name, err := b.unquoteAt(&head.Name, "invalid schema name")
+	if err != nil {
 		b.file.SchemaNameFailed = true
 		return
 	}
-	// The grammar admits an empty STRING; the language does not admit an
-	// empty name, and a nameless schema cannot be registered.
-	if name == "" {
-		b.reportf(diag.E_INVALID_NAME, b.file.NameSpan, "schema name cannot be empty")
+	// The grammar admits any STRING; the language admits an identifier.
+	if !IsIdentifier(name) {
+		b.reportf(diag.E_INVALID_NAME, b.file.NameSpan,
+			"schema name %s is not an identifier: it must begin with an ASCII letter and hold only ASCII letters, digits and underscores",
+			diag.QuoteValue(name))
 		b.file.SchemaNameFailed = true
 		return
 	}
@@ -233,7 +259,7 @@ func (b *builder) parseImports(plex *lexer.PeekingLexer) {
 		}
 		imp, err := tryParse(b.ps.imp, plex)
 		if err != nil {
-			b.failed(plex, err, diag.Error, "in an import declaration", func(past int) {
+			b.failed(plex, err, diag.Error, "in an import declaration", func(past int, _ bool) {
 				b.resync(plex, past, true, func(t *lexer.Token) bool {
 					return declStart(b.ps.tok, t)
 				})
@@ -245,15 +271,13 @@ func (b *builder) parseImports(plex *lexer.PeekingLexer) {
 }
 
 func (b *builder) addImport(imp *importNode) {
-	path, ok := b.unquoteAt(&imp.Path, "invalid import path")
-	if !ok {
-		return
-	}
+	path, err := b.unquoteAt(&imp.Path, "invalid import path")
 	n := &Import{
-		Path:     path,
-		PathRaw:  imp.Path.Raw,
-		PathSpan: b.spanOf(imp.Path.Pos, imp.Path.EndPos),
-		Span:     b.spanOf(imp.Pos, imp.EndPos),
+		Path:        path,
+		PathRefused: err != nil,
+		PathRaw:     imp.Path.Raw,
+		PathSpan:    b.spanOf(imp.Path.Pos, imp.Path.EndPos),
+		Span:        b.spanOf(imp.Pos, imp.EndPos),
 	}
 	if imp.Alias != nil {
 		n.HasAlias = true
@@ -278,7 +302,7 @@ func (b *builder) parseDecls(plex *lexer.PeekingLexer) {
 		}
 		head, headErr := tryParse(b.ps.typeHead, plex)
 		if headErr != nil {
-			b.failed(plex, deeperErr(dtErr, headErr), diag.Error, "in a declaration", func(past int) {
+			b.failed(plex, deeperErr(dtErr, headErr), diag.Error, "in a declaration", func(past int, _ bool) {
 				b.resync(plex, past, true, func(t *lexer.Token) bool { return declStart(b.ps.tok, t) })
 			})
 			continue
@@ -320,21 +344,27 @@ func (b *builder) parseTypeBody(plex *lexer.PeekingLexer, head *typeHeadNode) {
 // body's end offset. A member that fails costs only itself: the loop reports
 // one diagnostic and re-syncs to the next member start.
 func (b *builder) parseMembers(plex *lexer.PeekingLexer, nt *TypeDecl) int {
+	var skipped skipScan
 	for {
 		t := plex.Peek()
 		if t.EOF() {
-			b.report(diag.Error, diag.E_SYNTAX, b.pointAt(t.Pos), "unexpected end of input in a type body")
+			b.reportUnparsed(diag.Error, b.pointAt(t.Pos), "unexpected end of input in a type body")
+			nt.LostMember = true
 			return len(b.src)
 		}
 		if t.Type == b.ps.tok.rbrace {
+			nt.LostMember = nt.LostMember || skipped.end()
 			plex.Next()
 			return t.Pos.Offset + 1
 		}
 		m, err := tryParse(b.ps.member, plex)
 		if err != nil {
-			b.failed(plex, err, diag.Error, "in a type body", func(past int) { b.resyncMember(plex, past) })
+			from := t.Pos.Offset
+			b.failed(plex, err, diag.Error, "in a type body", func(past int, ends bool) { b.resyncMember(plex, past, ends) })
+			nt.LostMember = nt.LostMember || b.scanSkip(&skipped, from, plex.Peek().Pos.Offset)
 			continue
 		}
+		nt.LostMember = nt.LostMember || skipped.end()
 		b.addMember(nt, m)
 	}
 }
@@ -344,10 +374,12 @@ func (b *builder) addMember(nt *TypeDecl, m *memberNode) {
 	case m.Inv != nil:
 		b.addInvariant(nt, m.Inv)
 	case m.TAnn != nil:
-		nt.Annotations = append(nt.Annotations, b.annotation(
+		if na := b.annotation(
 			m.TAnn.Name, m.TAnn.Args, stripDoc(m.TAnn.Doc),
 			b.spanOf(m.TAnn.Pos, m.TAnn.EndPos), 0,
-		))
+		); na != nil {
+			nt.Annotations = append(nt.Annotations, na)
+		}
 	case m.Assoc != nil:
 		b.addAssociation(nt, m.Assoc)
 	case m.Comp != nil:
@@ -368,7 +400,6 @@ func (b *builder) addAssociation(nt *TypeDecl, a *assocNode) {
 	}
 	b.checkRelationName(rel.Name, rel.NameSpan)
 	rel.Optional, rel.Many = multiplicityOf(a.Mult)
-	b.rejectReverse(a.Reverse)
 	if a.Body != nil {
 		for i := range a.Body.Props {
 			rel.Properties = append(rel.Properties, b.edgeProp(&a.Body.Props[i]))
@@ -388,20 +419,7 @@ func (b *builder) addComposition(nt *TypeDecl, c *compNode) {
 	}
 	b.checkRelationName(rel.Name, rel.NameSpan)
 	rel.Optional, rel.Many = multiplicityOf(c.Mult)
-	b.rejectReverse(c.Reverse)
 	nt.Relations = append(nt.Relations, rel)
-}
-
-// rejectReverse names the removed reverse clause at its own span. The
-// grammar keeps the recognizer for exactly this diagnostic: without it, a
-// schema carrying the clause draws a bare unexpected-token error.
-func (b *builder) rejectReverse(rev *reverseNode) {
-	if rev == nil {
-		return
-	}
-	b.reportf(diag.E_REVERSE_CLAUSE_REMOVED, b.spanOf(rev.Name.Pos, rev.Name.EndPos),
-		"the reverse clause was removed in v0.15.0; delete %q and its multiplicity (see docs/VERSIONING.md)",
-		"/ "+rev.Name.value())
 }
 
 func (b *builder) edgeProp(p *relPropNode) *Property {
@@ -457,17 +475,24 @@ func (b *builder) addProp(nt *TypeDecl, p *propNode) {
 	for i := range p.Anns {
 		a := &p.Anns[i]
 		detached := 0
-		if b.positionAt(a.Pos.Offset).Line > nameLine {
+		if b.startsLine(a.Pos.Offset) {
 			detached = nameLine
 		}
-		np.Annotations = append(np.Annotations, b.annotation(
-			a.Name, a.Args, "", b.spanOf(a.Pos, a.EndPos), detached,
-		))
+		if na := b.annotation(a.Name, a.Args, "", b.spanOf(a.Pos, a.EndPos), detached); na != nil {
+			np.Annotations = append(np.Annotations, na)
+		}
 	}
 	nt.Properties = append(nt.Properties, np)
 }
 
+// annotation builds one annotation, or returns nil for one whose argument list
+// did not parse: the list's E_SYNTAX is its one diagnostic, and a bare
+// annotation in the tree would draw a second, false one for having no
+// arguments.
 func (b *builder) annotation(name lcWordNode, args *argsNode, doc string, span location.Span, detached int) *Annotation {
+	if args == nil && b.parenFollows(name.EndPos.Offset) {
+		return nil
+	}
 	na := &Annotation{
 		Name:             name.Value,
 		NameSpan:         b.spanOf(name.Pos, name.EndPos),
@@ -487,8 +512,10 @@ func (b *builder) annotation(name lcWordNode, args *argsNode, doc string, span l
 
 // arg classifies one annotation argument. A quoted string that will not
 // unquote degrades to a literal carrying its raw spelling as Text, with Raw
-// empty, and draws no diagnostic at all — no check owns an annotation
-// argument. The value is preserved as written so a later phase can decide.
+// empty, and draws no diagnostic here — no check of this package owns an
+// annotation argument, though text the source rules refuse is reported at its
+// bytes; schema's annotation rules judge it. The value is
+// preserved as written so a later phase can decide.
 func (b *builder) arg(a *argNode) Arg {
 	out := Arg{Span: b.spanOf(a.Pos, a.EndPos)}
 	switch {
@@ -512,25 +539,30 @@ func (b *builder) addInvariant(nt *TypeDecl, inv *invNode) {
 	// two-value form is what errcheck's check-type-assertions requires.
 	res, ok := inv.Expr.(exprResult)
 	if !ok {
-		b.report(diag.Error, diag.E_SYNTAX, b.pointAt(inv.Pos), "invariant missing expression")
+		b.reportUnparsed(diag.Error, b.pointAt(inv.Pos), "invariant missing expression")
 		return
 	}
-	// The message decides whether this invariant is kept at all, so it is
+	// The message decides whether an invariant is built at all, so it is
 	// resolved before the expression's own literal diagnostics are reported:
-	// an invariant being discarded must not ask the author to fix a literal
-	// inside it, which is a diagnostic the generated parser never reaches.
-	msg, ok := b.unquoteAt(&inv.Msg, "invalid invariant message")
-	if !ok {
-		return
+	// a message that will not unquote must not ask the author to fix a
+	// literal inside the expression too. A message the source rules refuse at
+	// the byte is no such failure, and the expression is reported beside it.
+	b.file.Expressions = append(b.file.Expressions, b.spanFromOffsets(res.Start, res.End))
+	msg, err := b.unquoteAt(&inv.Msg, "invalid invariant message")
+	if err == nil || errors.Is(err, errRefusedText) {
+		for _, d := range res.Diags {
+			b.report(diag.Error, diag.E_INVALID_INVARIANT, b.spanFromOffsets(d.Start, d.End), d.Msg)
+		}
 	}
-	for _, d := range res.Diags {
-		b.report(diag.Error, diag.E_INVALID_INVARIANT, b.spanFromOffsets(d.Start, d.End), d.Msg)
+	if err != nil {
+		return
 	}
 	ni := &Invariant{
 		MessageRaw:  inv.Msg.Raw,
 		MessageSpan: b.spanOf(inv.Msg.Pos, inv.Msg.EndPos),
 		Expr:        res.E,
-		ExprSpan:    b.spanFromOffsets(res.Start, res.End),
+		Text:        res.Text,
+		NoValue:     res.NoValue,
 		Doc:         stripDoc(inv.Doc),
 		Span:        b.spanOf(inv.Pos, inv.EndPos),
 	}
@@ -594,11 +626,18 @@ func (b *builder) resync(plex *lexer.PeekingLexer, past int, atLeastOne bool, st
 	}
 }
 
-// resyncMember re-syncs inside a type body, stopping at the closing brace
-// without consuming it or at the next member start. A member start is believed
-// only at a marker or at a line's first token, because every name a failed
-// member owns sits mid-line behind the token that failed.
-func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int) {
+// resyncMember re-syncs inside a type body: at past when ends says the failed
+// member ends there, so what follows is read as it stands. Else it stops at the
+// closing brace without consuming it or at the next member start, believed at a
+// marker and at a line's first token: any other name sits mid-line behind the
+// token that failed.
+func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int, ends bool) {
+	if ends {
+		for t := plex.Peek(); !t.EOF() && t.Pos.Offset < past; t = plex.Peek() {
+			plex.Next()
+		}
+		return
+	}
 	lb, rb := b.ps.tok.lbrace, b.ps.tok.rbrace
 	depth, consumed := 0, 0
 	for {
@@ -625,9 +664,88 @@ func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int) {
 	}
 }
 
+// skipScan carries what recovery skipped in one type body across consecutive
+// skips. Recovery stops at a member start even inside an open parenthesis, so
+// one argument list can be skipped in several pieces.
+type skipScan struct {
+	depth     int  // parentheses the skipped text left open
+	insideAt  int  // the least depth of a member start inside them, 0 for none
+	annotated bool // the last token that is no space or line comment was "@"
+}
+
+// scanSkip reports whether the text [from, to) that recovery skipped may hold
+// a member: a token that can begin one, or an upper-case word such as a
+// misspelled modifier, outside parentheses. An annotation's name, which the
+// grammar reads past spaces and line comments, a comment and the content of a
+// "(...)" that closes hold none.
+func (b *builder) scanSkip(s *skipScan, from, to int) bool {
+	tok := b.ps.tok
+	i, _ := slices.BinarySearchFunc(b.toks, from, func(t lexer.Token, target int) int {
+		return t.Pos.Offset - target
+	})
+	for ; i < len(b.toks) && b.toks[i].Pos.Offset < to; i++ {
+		t := &b.toks[i]
+		if t.Type == tok.ws || t.Type == tok.slComment {
+			continue
+		}
+		name := s.annotated
+		s.annotated = false
+		switch {
+		case t.Type == tok.docComment:
+		case t.Type == tok.lpar:
+			s.depth++
+		case t.Type == tok.rpar:
+			if s.depth > 0 {
+				s.depth--
+				if s.insideAt > s.depth {
+					s.insideAt = 0
+				}
+			}
+		case t.Value == "@":
+			s.annotated = true
+		case name && (t.Type == tok.lcWord || t.Type == tok.ucWord):
+		case t.Type == tok.ucWord || memberStart(tok, t):
+			if s.depth == 0 {
+				return true
+			}
+			if s.insideAt == 0 || s.depth < s.insideAt {
+				s.insideAt = s.depth
+			}
+		}
+	}
+	return false
+}
+
+// end closes the skipped text where parsing resumes or the body ends: a
+// parenthesis still open there may have swallowed a member its author wrote.
+func (s *skipScan) end() bool {
+	lost := s.insideAt > 0
+	*s = skipScan{}
+	return lost
+}
+
+// parenFollows reports whether the first token at or after offset, past
+// whitespace and comments, is "(".
+func (b *builder) parenFollows(offset int) bool {
+	tok := b.ps.tok
+	i, _ := slices.BinarySearchFunc(b.toks, offset, func(t lexer.Token, target int) int {
+		return t.Pos.Offset - target
+	})
+	for ; i < len(b.toks); i++ {
+		switch b.toks[i].Type {
+		case tok.ws, tok.slComment, tok.docComment:
+			continue
+		case tok.lpar:
+			return true
+		}
+		return false
+	}
+	return false
+}
+
 // startsLine reports whether only whitespace precedes offset on its own line.
 // Recovery uses it to tell a member the author began from a name inside the one
-// that just failed.
+// that just failed, and addProp to find an annotation that begins a line.
 func (b *builder) startsLine(offset int) bool {
 	if offset <= 0 || offset > len(b.src) {
 		return true
@@ -636,7 +754,18 @@ func (b *builder) startsLine(offset int) bool {
 	if !atStart {
 		line--
 	}
-	return strings.TrimSpace(b.src[b.lineStarts[line]:offset]) == ""
+	// Backward from offset, so a call reads only the blanks before it: a long
+	// indentation read once per annotation made a line of them quadratic.
+	head := b.src[b.lineStarts[line]:offset]
+	for head != "" {
+		r, size := utf8.DecodeLastRuneInString(head)
+		b.counted += size
+		if !unicode.IsSpace(r) {
+			return false
+		}
+		head = head[:len(head)-size]
+	}
+	return true
 }
 
 // declStart reports whether t can begin a declaration. "import" is one: an
@@ -695,46 +824,54 @@ func deeperErr(a, c error) error {
 // re-syncs first, because the extent recovery skipped is the extent the failed
 // construct covers, and only then does the whole of a malformed construct
 // become visible. what names the construct, for the diagnostic.
-func (b *builder) failed(plex *lexer.PeekingLexer, err error, sev diag.Severity, what string, resync func(past int)) {
+func (b *builder) failed(plex *lexer.PeekingLexer, err error, sev diag.Severity, what string, resync func(past int, ends bool)) {
 	from := plex.Peek().Pos.Offset
 	resync(resumeFloor(err, from))
 	b.syntaxErr(sev, err, what, from, plex.Peek().Pos.Offset)
 }
 
-// resumeFloor returns the byte the failed parse reached. Recovery that restarts
-// before it re-parses text the failed construct already owns and reports the
-// same defect a second time. A participle error carrying no position falls back
-// to from, which bounds nothing and leaves the old behaviour.
-func resumeFloor(err error, from int) int {
-	if pe, ok := errors.AsType[participle.Error](err); ok {
-		return pe.Position().Offset
+// resumeFloor returns the byte the failed parse reached, and whether the
+// failed construct is known to end there. Recovery that restarts before it
+// re-parses text the failed construct already owns and reports the same defect
+// a second time. A participle error carrying no position falls back to from,
+// which bounds nothing.
+func resumeFloor(err error, from int) (past int, ends bool) {
+	if ee, ok := errors.AsType[*exprError](err); ok && ee.reach > ee.pos.Offset {
+		return ee.reach, ee.ends
 	}
-	return from
+	if pe, ok := errors.AsType[participle.Error](err); ok {
+		return pe.Position().Offset, false
+	}
+	return from, false
 }
 
 // syntaxErr turns a participle failure into one diagnostic. A malformed
-// numeric literal anywhere in [from, to) owns the diagnosis; see the package
-// doc for the construct rule and for why what replaces participle's own
-// expected-set.
+// numeric literal anywhere in [from, to) owns the diagnosis, and after it a
+// List nested past the bound; see the package doc for the construct rule and
+// for why what replaces participle's own expected-set.
 func (b *builder) syntaxErr(sev diag.Severity, err error, what string, from, to int) {
 	if bad := b.firstInvalidNumber(from, to); bad != nil {
-		b.report(sev, diag.E_SYNTAX, b.tokenSpan(bad), InvalidNumberMessage(bad.Value))
+		b.reportUnparsed(sev, b.tokenSpan(bad), InvalidNumberMessage(bad.Value))
+		return
+	}
+	if deep := b.firstDeepList(from, to); deep != nil {
+		b.reportUnparsed(sev, b.tokenSpan(deep), fmt.Sprintf("List nests deeper than %d levels", MaxNesting))
 		return
 	}
 	if ut, ok := errors.AsType[*participle.UnexpectedTokenError](err); ok {
 		start := ut.Unexpected.Pos.Offset
 		span := b.spanFromOffsets(start, start+len(ut.Unexpected.Value))
-		b.report(sev, diag.E_SYNTAX, span, fmt.Sprintf("unexpected token %q %s", ut.Unexpected, what))
+		b.reportUnparsed(sev, span, fmt.Sprintf("unexpected token %q %s", ut.Unexpected, what))
 		return
 	}
 	if pe, ok := errors.AsType[participle.Error](err); ok {
 		at := pe.Position().Offset
-		b.report(sev, diag.E_SYNTAX, b.tokenSpanAt(at), pe.Message())
+		b.reportUnparsed(sev, b.tokenSpanAt(at), pe.Message())
 		return
 	}
 	// An error carrying no position of its own: report it on the construct's
 	// first token, since blaming byte 0 points at an unrelated line.
-	b.report(sev, diag.E_SYNTAX, b.tokenSpanAt(from), err.Error())
+	b.reportUnparsed(sev, b.tokenSpanAt(from), err.Error())
 }
 
 // tokenSpanAt returns the extent of the token starting at offset, or a
@@ -775,6 +912,14 @@ func (b *builder) report(sev diag.Severity, code diag.Code, span location.Span, 
 	b.issues = append(b.issues, diag.NewIssue(sev, code, msg).WithSpan(span).Build())
 }
 
+// reportUnparsed reports E_SYNTAX for text the grammar does not match, and
+// records the issue for [File.Unparsed].
+func (b *builder) reportUnparsed(sev diag.Severity, span location.Span, msg string) {
+	issue := diag.NewIssue(sev, diag.E_SYNTAX, msg).WithSpan(span).Build()
+	b.issues = append(b.issues, issue)
+	b.unparsed = append(b.unparsed, issue)
+}
+
 // reportf reports an error-severity diagnostic. Every formatted diagnostic
 // this package emits is an error; the warning and fatal cases go through
 // report, which is also where any computed text reaches a fatal.
@@ -785,7 +930,7 @@ func (b *builder) reportf(code diag.Code, span location.Span, format string, arg
 // compareIssues orders diagnostics by position, then by code, so a parse of
 // the same source always reports them in the same order.
 func compareIssues(a, c diag.Issue) int {
-	if d := location.Compare(a.Span(), c.Span()); d != 0 {
+	if d := a.Span().Compare(c.Span()); d != 0 {
 		return d
 	}
 	return strings.Compare(a.Code().String(), c.Code().String())
@@ -801,17 +946,18 @@ func (b *builder) spanOf(start, end lexer.Position) location.Span {
 }
 
 // spanFromOffsets builds a span from byte offsets, deriving line and column
-// from the source text. It forces start before end because
-// location.RangeWithBytes panics on an inverted range and recovery can leave an
-// end behind its start.
+// from the source text. It forces start before end: recovery can leave an end
+// behind its start, and no span of this package ends before it starts.
 func (b *builder) spanFromOffsets(start, end int) location.Span {
 	s, e := b.positionAt(start), b.positionAt(end)
 	if e.Offset < s.Offset {
 		e = s
 	}
-	return location.RangeWithBytes(b.sourceID,
-		s.Line, s.Column, s.Offset,
-		e.Line, e.Column, e.Offset)
+	return location.Span{
+		Source: b.sourceID,
+		Start:  location.Position{Line: s.Line, Column: s.Column, Offset: s.Offset},
+		End:    location.Position{Line: e.Line, Column: e.Column, Offset: e.Offset},
+	}
 }
 
 func (b *builder) pointAt(pos lexer.Position) location.Span {
@@ -862,8 +1008,51 @@ func (b *builder) positionAt(offset int) lexer.Position {
 	return lexer.Position{
 		Offset: offset,
 		Line:   line + 1,
-		Column: 1 + utf8.RuneCountInString(b.src[b.lineStarts[line]:offset]),
+		Column: 1 + b.runesBefore(offset) - b.runesBefore(b.lineStarts[line]),
 	}
+}
+
+// runeStride is the bytes between the offsets two of [builder.runeMarks]'
+// marks are taken at; each mark then moves back to a character's start.
+const runeStride = 8
+
+// runeMark returns mark i: the character boundary at or before byte
+// i*runeStride, as positionAt moves an offset.
+func (b *builder) runeMark(i int) int {
+	at := i * runeStride
+	if start := validRuneStartAt(b.src, at); start >= 0 {
+		return start
+	}
+	return at
+}
+
+// runesBefore returns the number of runes in the source before offset, a
+// character boundary: the count at the mark at or below it, and the runes
+// between the two. A byte that is not valid UTF-8 is one rune, as the lexer's
+// column counter counts it.
+func (b *builder) runesBefore(offset int) int {
+	if b.runeMarks == nil {
+		b.markRunes()
+	}
+	i := offset / runeStride
+	return b.runeMarks[i] + b.runesBetween(b.runeMark(i), offset)
+}
+
+// markRunes counts the source's runes once, recording the count at each mark.
+// Marks are character boundaries, so the counts between them add up.
+func (b *builder) markRunes() {
+	b.runeMarks = make([]int, len(b.src)/runeStride+1)
+	prev := 0
+	for i := 1; i < len(b.runeMarks); i++ {
+		mark := b.runeMark(i)
+		b.runeMarks[i] = b.runeMarks[i-1] + b.runesBetween(prev, mark)
+		prev = mark
+	}
+}
+
+func (b *builder) runesBetween(start, end int) int {
+	b.counted += end - start
+	return utf8.RuneCountInString(b.src[start:end])
 }
 
 // ---- small helpers ----

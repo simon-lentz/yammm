@@ -3,22 +3,16 @@ package docs_test
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	csvadapter "github.com/simon-lentz/yammm/adapter/csv"
-	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
-	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/format"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/snapshot"
+	"github.com/simon-lentz/yammm/schema/cypher"
 )
 
 // The Go snippets in API.md are prose: nothing compiles them, so a signature
@@ -30,7 +24,7 @@ import (
 // These tests close that gap for the neo4j diff and introspection surface,
 // whose call shapes appear in three places that must agree: docs/API.md
 // ("Constraint Diffing", "Index Diffing", "Introspection Queries"), the package
-// documentation in adapter/neo4j/doc.go ("Diff Scope and Name Blocking"), and
+// documentation in neo4j/doc.go ("Diff Scope"), and
 // claude-plugin/skills/yammm/references/adapters.md ("Diffing Against a Live
 // Database"). A change here that breaks compilation is the signal to update all
 // three.
@@ -45,32 +39,31 @@ type Document {
 }
 `
 
-func loadProbeSchema(t *testing.T, ctx context.Context) *schema.Schema {
+func loadProbeSchema(t *testing.T, ctx context.Context) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(ctx, probeSchema, "probe.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(ctx, probeSchema, "probe.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("loading probe schema: %v", err)
 	}
 	return s
 }
 
 // TestDocumentedDiffCallShapes pins the diff call shapes the documentation
-// shows: ownership computed once via OwnedLabels and passed to both halves,
-// each half taking the other's remote objects as the variadic blocker list, and
-// six result buckets on each. It is a compile-time assertion first — the
-// runtime assertions only guard against the entry points silently returning
+// shows: one Diff over the mapping, the schema and both kinds of remote rows,
+// and six result buckets on each half. It is a compile-time assertion first —
+// the runtime assertions only guard against the entry points silently returning
 // nothing to classify.
 func TestDocumentedDiffCallShapes(t *testing.T) {
 	ctx := context.Background()
 	s := loadProbeSchema(t, ctx)
-	adapter := neo4j.New()
+	c := cypher.Config{}
 
-	desiredConstraints, cResult := adapter.ConstraintsStructured(ctx, s)
-	if err := cResult.Err(); err != nil {
+	desiredConstraints, genErr := c.Constraints(s)
+	if err := genErr; err != nil {
 		t.Fatalf("generating constraints: %v", err)
 	}
-	desiredIndexes, iResult := adapter.IndexesStructured(ctx, s)
-	if err := iResult.Err(); err != nil {
+	desiredIndexes, genErr2 := c.Indexes(s)
+	if err := genErr2; err != nil {
 		t.Fatalf("generating indexes: %v", err)
 	}
 
@@ -79,14 +72,15 @@ func TestDocumentedDiffCallShapes(t *testing.T) {
 	var actualConstraints []neo4j.RemoteConstraint
 	var actualIndexes []neo4j.RemoteIndex
 
-	owned := adapter.OwnedLabels(ctx, s)
-
-	cDiff := adapter.DiffConstraints(desiredConstraints, actualConstraints, owned, actualIndexes...)
-	iDiff := adapter.DiffIndexes(desiredIndexes, actualIndexes, owned, actualConstraints...)
+	plan, diffErr := neo4j.Diff(c, s, actualConstraints, actualIndexes)
+	if err := diffErr; err != nil {
+		t.Fatalf("planning: %v", err)
+	}
+	cDiff, iDiff := plan.Constraints, plan.Indexes
+	owned := c.OwnedLabels(s)
 
 	// Every bucket the documentation names, on both results.
-	cBuckets := len(cDiff.Match) + len(cDiff.Drift) + len(cDiff.Create) + len(cDiff.Drop) +
-		len(cDiff.Unverified) + cDiff.Excluded
+	cBuckets := len(cDiff.Match) + len(cDiff.Drift) + len(cDiff.Create) + len(cDiff.Drop) + cDiff.Excluded
 	iBuckets := len(iDiff.Match) + len(iDiff.Drift) + len(iDiff.Create) + len(iDiff.Drop) +
 		len(iDiff.Unverified) + iDiff.Excluded
 
@@ -111,7 +105,7 @@ func TestDocumentedDiffCallShapes(t *testing.T) {
 	// OwnedLabels accessors, which a caller reporting on a drop or drift needs
 	// to resolve a remote object's labels the way the diff did.
 	if _, ok := owned.LabelOf([]string{"Probe__Document"}); !ok {
-		t.Error("OwnedLabels does not own the label the adapter emits for Document")
+		t.Error("OwnedLabels does not own the label the mapping gives Document")
 	}
 	if !owned.Contains("Probe__Document") {
 		t.Error("OwnedLabels.Contains disagrees with LabelOf")
@@ -132,8 +126,8 @@ func TestDocumentedRemoteIndexSurface(t *testing.T) {
 		OwningConstraint: "",
 	}
 
-	// An unreported state counts as online, so older servers and hand-built
-	// records do not read as drift.
+	// An unreported state counts as online, so a hand-built record does not
+	// read as drift.
 	if !ri.IsOnline() {
 		t.Error("IsOnline is false for an unreported state")
 	}
@@ -150,64 +144,28 @@ func TestDocumentedRemoteIndexSurface(t *testing.T) {
 // exact projection is documented because a caller running it against a server
 // that does not support a column fails, so the column list is a contract.
 func TestDocumentedIntrospectionQueries(t *testing.T) {
-	if got, want := neo4j.IntrospectConstraintsQuery(), "SHOW CONSTRAINTS YIELD *"; got != want {
-		t.Errorf("IntrospectConstraintsQuery() = %q, documented as %q", got, want)
+	if got, want := neo4j.ShowConstraints, "SHOW CONSTRAINTS YIELD name, type, entityType, labelsOrTypes, properties, propertyType, createStatement"; got != want {
+		t.Errorf("ShowConstraints = %q, documented as %q", got, want)
 	}
 
-	indexQuery := neo4j.IntrospectIndexesQuery()
+	indexQuery := neo4j.ShowIndexes
 	for _, column := range []string{
 		"name", "type", "entityType", "labelsOrTypes",
 		"properties", "options", "state", "owningConstraint",
 	} {
 		if !strings.Contains(indexQuery, column) {
-			t.Errorf("IntrospectIndexesQuery() omits the documented column %q: %s", column, indexQuery)
+			t.Errorf("ShowIndexes omits the documented column %q: %s", column, indexQuery)
 		}
 	}
-	// Constraint-backing indexes are deliberately returned; only LOOKUP indexes
-	// are filtered out. A reinstated owningConstraint filter would silently
-	// remove the rows the diff needs to detect a blocked CREATE INDEX.
-	if !strings.Contains(indexQuery, "type <> 'LOOKUP'") {
-		t.Errorf("IntrospectIndexesQuery() does not filter LOOKUP indexes: %s", indexQuery)
+	// Constraint-backing and LOOKUP indexes are deliberately returned: a filter
+	// on either would silently remove rows the diff needs to detect a blocked
+	// create.
+	if strings.Contains(indexQuery, "WHERE") {
+		t.Errorf("ShowIndexes filters the rows API.md documents as every index: %s", indexQuery)
 	}
 	if strings.Contains(indexQuery, "owningConstraint IS NULL") {
-		t.Errorf("IntrospectIndexesQuery() filters out constraint-backing indexes, "+
+		t.Errorf("ShowIndexes filters out constraint-backing indexes, "+
 			"which the documented diff behavior depends on receiving: %s", indexQuery)
-	}
-}
-
-// TestDocumentedScanFilterShape compiles API.md's "Pre-open filtering" example.
-// The snippet is prose that no other gate reads, so a signature change to
-// WithScanFilter, ScanCandidate or ScanDirWith would leave it stating a call
-// that no longer exists.
-func TestDocumentedScanFilterShape(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.ys"), []byte("{}"), 0o600); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-	recent := snapshot.WithScanFilter(func(c snapshot.ScanCandidate) bool {
-		info, err := c.Info()
-		return err == nil && !info.ModTime().Before(cutoff)
-	})
-
-	var seen int
-	for entry, err := range snapshot.ScanDirWith(t.Context(), dir, recent) {
-		if err != nil {
-			t.Fatalf("ScanDirWith: %v", err)
-		}
-		seen++
-		if entry.ModTime.IsZero() {
-			t.Error("the documented entry carries no ModTime")
-		}
-	}
-	if seen != 1 {
-		t.Errorf("the documented filter admitted %d entries, want 1", seen)
-	}
-
-	entries, result := snapshot.ScanDirSliceWith(t.Context(), dir, recent)
-	if result.HasErrors() || len(entries) != 1 {
-		t.Errorf("ScanDirSliceWith: %d entries, result %v", len(entries), result.Err())
 	}
 }
 
@@ -230,28 +188,6 @@ func TestDocumentedSchemaIdentity(t *testing.T) {
 	}
 }
 
-// TestDocumentedBuilderExample runs API.md's headline builder chain verbatim.
-// The documented example omitted a primary key and could never have built; the
-// assertion is that the corrected one does.
-func TestDocumentedBuilderExample(t *testing.T) {
-	t.Parallel()
-	s, result := schema.NewBuilder().
-		WithName("MySchema").
-		WithSourceID(location.MustNewSourceID("test://my-schema.yammm")).
-		AddType("Person").
-		WithPrimaryKey("name", schema.NewStringConstraint()).
-		WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
-		Done().
-		AddType("Car").
-		WithPrimaryKey("vin", schema.NewStringConstraint()).
-		WithRelation("OWNER", schema.NewTypeRef("", "Person", location.Span{}), false, false).
-		Done().
-		Build()
-	if err := result.Err(); err != nil || s == nil {
-		t.Fatalf("the documented builder example does not build: %v", err)
-	}
-}
-
 // TestDocumentedRendererCallShapes pins the whole diag rendering surface.
 // API.md documented FormatIssue and FormatIssues, removed in v0.12.0, and never
 // mentioned FormatResultJSON, which is the only structured renderer.
@@ -263,7 +199,7 @@ func TestDocumentedRendererCallShapes(t *testing.T) {
 		diag.WithDistinguishFatal(true),
 		diag.WithModuleRoot("/project"),
 	)
-	res := diag.OK()
+	var res diag.Result
 	_ = r.FormatResult(res)
 	_ = r.FormatResultJSON(res)
 
@@ -271,8 +207,8 @@ func TestDocumentedRendererCallShapes(t *testing.T) {
 	_, _, _ = res.Len(), res.DroppedCount(), res.TruncationNote()
 	_ = res.HasCode(diag.E_SYNTAX)
 
-	// ContextualError's field types, as declared inside package diag.
-	_ = diag.ContextualError{Result: diag.OK(), Tag: "t"}
+	// ResultError's field type, as declared inside package diag.
+	_ = diag.ResultError{Result: res}
 }
 
 // TestDocumentedKeyFunctions pins the graph key surface API.md documents, in
@@ -286,63 +222,13 @@ func TestDocumentedKeyFunctions(t *testing.T) {
 	if got := graph.FormatKey("us", 12345); got != `["us",12345]` {
 		t.Errorf("FormatKey returned %q; the documented form is [\"us\",12345]", got)
 	}
-	parts, err := graph.ParseKeyStrings(`["us","ca"]`)
+	parts, err := graph.ParseKey(`["us","ca"]`)
 	if err != nil {
-		t.Fatalf("ParseKeyStrings: %v", err)
+		t.Fatalf("ParseKey: %v", err)
 	}
 	if len(parts) != 2 || parts[0] != "us" || parts[1] != "ca" {
-		t.Errorf("ParseKeyStrings returned %v; the documented round trip is [us ca]", parts)
+		t.Errorf("ParseKey returned %v; the documented round trip is [us ca]", parts)
 	}
-}
-
-// TestDocumentedAdapterParseSurface pins the parse and write shapes of the two
-// adapters whose documented surface had drifted: adapter/json documented three
-// removed methods, adapter/csv one.
-func TestDocumentedAdapterParseSurface(t *testing.T) {
-	t.Parallel()
-	_ = (*jsonadapter.Adapter).ParseObject
-	_ = (*jsonadapter.Adapter).MarshalObject
-	_ = (*jsonadapter.Adapter).WriteObject
-	_ = (*csvadapter.Adapter).ParseTyped
-	_ = (*csvadapter.Adapter).ParseWithTypeColumn
-
-	// Pinned as typed values, not bare method values. A bare `_ = (*T).M`
-	// compiles under ANY signature, so it could not see adapter/csv's write
-	// surface lose its vestigial variadic — the Serialization fence shows these
-	// calls, and nothing compiled it. The json and neo4j writers keep their
-	// write options, which is why only csv is pinned this way.
-	var (
-		marshalSnapshot func(*csvadapter.Adapter, context.Context, *graph.Snapshot) (map[string][]byte, error)
-		writeSnapshot   func(*csvadapter.Adapter, context.Context, func(string) (io.Writer, error), *graph.Snapshot) error
-	)
-	marshalSnapshot = (*csvadapter.Adapter).MarshalSnapshot
-	writeSnapshot = (*csvadapter.Adapter).WriteSnapshot
-	_, _ = marshalSnapshot, writeSnapshot
-}
-
-// TestDocumentedFormatSurface pins the format package facts the Formatting
-// section states: the entry point's arity and the wrap threshold's value.
-func TestDocumentedFormatSurface(t *testing.T) {
-	t.Parallel()
-	if format.LineWidthThreshold != 100 {
-		t.Errorf("LineWidthThreshold is %d; the documented value is 100", format.LineWidthThreshold)
-	}
-	formatted, err := format.TokenStream("schema \"S\"\n")
-	if err != nil || formatted == "" {
-		t.Fatalf("the documented TokenStream shape: %v", err)
-	}
-	// The documented signatures, held as typed values so a shape change fails
-	// here rather than only in the prose.
-	var (
-		wrap, align, indent func(string) string
-		width               func(string) int
-		notPreserved        error
-		syntaxIssue         func(*format.SyntaxError) diag.Issue
-	)
-	wrap, align, indent, width = format.WrapLongLines, format.AlignColumns, format.NormalizeIndentation, format.DisplayWidth
-	notPreserved = format.ErrNotPreserved
-	syntaxIssue = func(e *format.SyntaxError) diag.Issue { return e.Issue }
-	_, _, _, _, _, _ = wrap, align, indent, width, notPreserved, syntaxIssue
 }
 
 // TestDocumentedModuleRootDiscovery pins the module-root discovery surface the
@@ -357,11 +243,10 @@ func TestDocumentedModuleRootDiscovery(t *testing.T) {
 	// The three documented signatures, held as typed values so a shape change
 	// fails here rather than only in the prose.
 	var (
-		find         func(string) (string, bool, error)
-		buildIssue   func(error) diag.Issue
-		isResolution func(string) bool
+		find       func(string) (string, bool, error)
+		buildIssue func(error) diag.Issue
 	)
-	find, buildIssue, isResolution = schema.FindModuleRoot, schema.ModuleRootIssue, diag.IsImportResolutionCode
+	find, buildIssue = schema.FindModuleRoot, schema.ModuleRootIssue
 
 	dir := t.TempDir()
 	root, found, err := find(dir)
@@ -390,12 +275,7 @@ func TestDocumentedModuleRootDiscovery(t *testing.T) {
 		t.Errorf("ModuleRootIssue produced %v, want E_LOAD_MODULE_ROOT_MALFORMED", code)
 	}
 
-	// The family predicate and the origin vocabulary the section enumerates.
-	for _, code := range []diag.Code{diag.E_IMPORT_RESOLVE, diag.E_PATH_ESCAPE, diag.E_IMPORT_CYCLE} {
-		if !isResolution(code.String()) {
-			t.Errorf("%s is documented as a member of the import-resolution family", code)
-		}
-	}
+	// The origin vocabulary the section enumerates.
 	for _, origin := range []string{
 		diag.ModuleRootExplicit, diag.ModuleRootDiscovered,
 		diag.ModuleRootSynthetic, diag.ModuleRootDefault, diag.ModuleRootNone,

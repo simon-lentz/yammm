@@ -1,0 +1,170 @@
+package neo4j
+
+import (
+	"testing"
+
+	"github.com/simon-lentz/yammm/schema/cypher"
+)
+
+// blockingProbe plans one desired UNIQUE constraint on
+// (probe__Doc, title) against a single remote index.
+func blockingProbe(t *testing.T, ri RemoteIndex) ConstraintDiff {
+	t.Helper()
+	desired := []cypher.Constraint{{
+		Name:       "probe__Doc_title_unique",
+		Kind:       cypher.ConstraintUnique,
+		Label:      "probe__Doc",
+		Properties: []string{"title"},
+	}}
+	return diff(cypher.Config{}, desired, nil, nil, []RemoteIndex{ri}, ownedSet("probe__Doc")).Constraints
+}
+
+// TestConstraintDiff_OnlyARangeNodeIndexBlocks pins the rule measured against
+// both server generations: a uniqueness constraint backs itself with a RANGE
+// index and the server refuses only a duplicate of that one. Every other index
+// kind, and any relationship index, is an object it is created beside.
+func TestConstraintDiff_OnlyARangeNodeIndexBlocks(t *testing.T) {
+	t.Parallel()
+	base := RemoteIndex{
+		Name:          "other_idx",
+		EntityType:    "NODE",
+		LabelsOrTypes: []string{"probe__Doc"},
+		Properties:    []string{"title"},
+		State:         "ONLINE",
+	}
+
+	for _, tc := range []struct {
+		name      string
+		mutate    func(RemoteIndex) RemoteIndex
+		wantDrift bool
+	}{
+		{"RANGE node index blocks", func(r RemoteIndex) RemoteIndex { r.Type = "RANGE"; return r }, true},
+		{"an unreported type is read permissively", func(r RemoteIndex) RemoteIndex { r.Type = ""; return r }, true},
+		{"TEXT does not block", func(r RemoteIndex) RemoteIndex { r.Type = "TEXT"; return r }, false},
+		{"POINT does not block", func(r RemoteIndex) RemoteIndex { r.Type = "POINT"; return r }, false},
+		{"FULLTEXT does not block", func(r RemoteIndex) RemoteIndex { r.Type = "FULLTEXT"; return r }, false},
+		{"VECTOR does not block", func(r RemoteIndex) RemoteIndex { r.Type = "VECTOR"; return r }, false},
+		{
+			"a RELATIONSHIP index spelled like the label does not block",
+			func(r RemoteIndex) RemoteIndex { r.Type = "RANGE"; r.EntityType = "RELATIONSHIP"; return r },
+			false,
+		},
+		{
+			"a multi-label index serves no single-label constraint",
+			func(r RemoteIndex) RemoteIndex {
+				r.Type = "RANGE"
+				r.LabelsOrTypes = []string{"probe__Doc", "probe__Other"}
+				return r
+			},
+			false,
+		},
+		{
+			"a backing index is not an independent blocker",
+			func(r RemoteIndex) RemoteIndex { r.Type = "RANGE"; r.OwningConstraint = "some_constraint"; return r },
+			false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			plan := blockingProbe(t, tc.mutate(base))
+			gotDrift := len(plan.Drift) > 0
+			if gotDrift != tc.wantDrift {
+				t.Errorf("Drift=%d Create=%d; want blocking=%v",
+					len(plan.Drift), len(plan.Create), tc.wantDrift)
+			}
+			if !tc.wantDrift && len(plan.Create) != 1 {
+				t.Errorf("Create=%d, want the constraint planned for creation", len(plan.Create))
+			}
+		})
+	}
+}
+
+// TestConstraintDiff_FulltextOnASolePrimaryKeyConverges drives the schema
+// shape docs/SPEC.md blesses through schema/cypher's own generators, because that
+// is the path on which the two of them contradicted each other: the index
+// emitter produced a FULLTEXT index for `title String primary @fulltext` and
+// the constraint diff then reported the UNIQUE constraint it emits for the same
+// property as blocked by it, forever.
+func TestConstraintDiff_FulltextOnASolePrimaryKeyConverges(t *testing.T) {
+	t.Parallel()
+	a := cypher.Config{}
+	s := loadSchema(t, "fulltext_pk.yammm")
+
+	indexes, err := a.Indexes(s)
+	if err != nil {
+		t.Fatalf("Indexes: %s", err)
+	}
+	constraints, genErr := a.Constraints(s)
+	if genErr != nil {
+		t.Fatalf("Constraints: %s", genErr)
+	}
+
+	var remote []RemoteIndex
+	var sawFulltext bool
+	for _, idx := range indexes {
+		typ := idx.Kind.String()
+		if typ == "FULLTEXT" {
+			sawFulltext = true
+		}
+		remote = append(remote, RemoteIndex{
+			Name: idx.Name, Type: typ, EntityType: "NODE",
+			LabelsOrTypes: []string{idx.Label}, Properties: idx.Properties, State: "ONLINE",
+		})
+	}
+	if !sawFulltext {
+		t.Fatal("the fixture emitted no FULLTEXT index, so it cannot exercise the collision")
+	}
+
+	plan := diff(a, constraints, nil, nil, remote, a.OwnedLabels(s)).Constraints
+	for _, d := range plan.Drift {
+		t.Errorf("a schema the SPEC blesses reports permanent drift: %s -> %s", d.Desired.Name, d.Reason)
+	}
+	if len(plan.Create) != len(constraints) {
+		t.Errorf("Create=%d, want all %d constraints planned", len(plan.Create), len(constraints))
+	}
+}
+
+// TestConstraintDiff_CompositeIndexBlocksInDeclaredOrderOnly pins what both
+// server generations do with a composite backing index: property order is
+// significant for an index, so a RANGE index over the constraint's properties
+// in another order is an object the constraint is created beside, not a
+// blocker. Sorting the definition key would report Drift the server never
+// raises, on every run.
+func TestConstraintDiff_CompositeIndexBlocksInDeclaredOrderOnly(t *testing.T) {
+	t.Parallel()
+	desired := []cypher.Constraint{{
+		Name:       "probe__Doc_title_year_unique",
+		Kind:       cypher.ConstraintUnique,
+		Label:      "probe__Doc",
+		Properties: []string{"title", "year"},
+	}}
+	index := func(props ...string) RemoteIndex {
+		return RemoteIndex{
+			Name:          "other_idx",
+			EntityType:    "NODE",
+			Type:          "RANGE",
+			LabelsOrTypes: []string{"probe__Doc"},
+			Properties:    props,
+			State:         "ONLINE",
+		}
+	}
+	for _, tc := range []struct {
+		name      string
+		index     RemoteIndex
+		wantDrift bool
+	}{
+		{"the same order blocks", index("title", "year"), true},
+		{"the reversed order does not", index("year", "title"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			plan := diff(cypher.Config{}, desired, nil, nil, []RemoteIndex{tc.index}, ownedSet("probe__Doc")).Constraints
+			if gotDrift := len(plan.Drift) > 0; gotDrift != tc.wantDrift {
+				t.Errorf("Drift=%d Create=%d; want blocking=%v", len(plan.Drift), len(plan.Create), tc.wantDrift)
+			}
+			if !tc.wantDrift && len(plan.Create) != 1 {
+				t.Errorf("Create=%d, want the constraint planned for creation", len(plan.Create))
+			}
+		})
+	}
+}

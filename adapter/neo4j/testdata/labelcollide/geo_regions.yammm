@@ -1,6 +1,0 @@
-schema "geo_regions"
-
-type Region {
-    code String primary
-    name String required
-}

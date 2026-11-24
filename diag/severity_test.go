@@ -12,6 +12,7 @@ func TestSeverity_String(t *testing.T) {
 		{Warning, "warning"},
 		{Info, "info"},
 		{Hint, "hint"},
+		{Severity(0), "unknown"},   // the zero Severity names none
 		{Severity(255), "unknown"}, // Invalid severity
 	}
 
@@ -24,7 +25,7 @@ func TestSeverity_String(t *testing.T) {
 	}
 }
 
-func TestSeverity_IsFailure(t *testing.T) {
+func TestSeverity_isFailure(t *testing.T) {
 	tests := []struct {
 		severity Severity
 		want     bool
@@ -34,18 +35,19 @@ func TestSeverity_IsFailure(t *testing.T) {
 		{Warning, false},
 		{Info, false},
 		{Hint, false},
+		{Severity(0), false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.severity.String(), func(t *testing.T) {
-			if got := tt.severity.IsFailure(); got != tt.want {
-				t.Errorf("%s.IsFailure() = %v; want %v", tt.severity, got, tt.want)
+			if got := tt.severity.isFailure(); got != tt.want {
+				t.Errorf("%s.isFailure() = %v; want %v", tt.severity, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestSeverity_IsMoreSevereThan(t *testing.T) {
+func TestSeverity_isMoreSevereThan(t *testing.T) {
 	tests := []struct {
 		name  string
 		s     Severity
@@ -76,46 +78,8 @@ func TestSeverity_IsMoreSevereThan(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.s.IsMoreSevereThan(tt.other); got != tt.want {
-				t.Errorf("%s.IsMoreSevereThan(%s) = %v; want %v", tt.s, tt.other, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSeverity_IsAtLeastAsSevereAs(t *testing.T) {
-	tests := []struct {
-		name  string
-		s     Severity
-		other Severity
-		want  bool
-	}{
-		// Same severity - should be true
-		{"Fatal at least as severe as Fatal", Fatal, Fatal, true},
-		{"Error at least as severe as Error", Error, Error, true},
-		{"Warning at least as severe as Warning", Warning, Warning, true},
-		{"Info at least as severe as Info", Info, Info, true},
-		{"Hint at least as severe as Hint", Hint, Hint, true},
-
-		// More severe - should be true
-		{"Fatal at least as severe as Error", Fatal, Error, true},
-		{"Fatal at least as severe as Hint", Fatal, Hint, true},
-		{"Error at least as severe as Warning", Error, Warning, true},
-		{"Warning at least as severe as Info", Warning, Info, true},
-		{"Info at least as severe as Hint", Info, Hint, true},
-
-		// Less severe - should be false
-		{"Error not at least as severe as Fatal", Error, Fatal, false},
-		{"Warning not at least as severe as Error", Warning, Error, false},
-		{"Info not at least as severe as Warning", Info, Warning, false},
-		{"Hint not at least as severe as Info", Hint, Info, false},
-		{"Hint not at least as severe as Fatal", Hint, Fatal, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.s.IsAtLeastAsSevereAs(tt.other); got != tt.want {
-				t.Errorf("%s.IsAtLeastAsSevereAs(%s) = %v; want %v", tt.s, tt.other, got, tt.want)
+			if got := tt.s.isMoreSevereThan(tt.other); got != tt.want {
+				t.Errorf("%s.isMoreSevereThan(%s) = %v; want %v", tt.s, tt.other, got, tt.want)
 			}
 		})
 	}

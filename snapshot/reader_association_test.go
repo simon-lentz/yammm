@@ -2,21 +2,24 @@ package snapshot_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // The reader holds every association record, and every root or root duplicate,
-// to the rules graph.RebuildSnapshot holds its parts to, in the walk Verify and
-// Load share. Each refusal case hand-edits a Marshal-produced document and
-// asserts the refusal of the fault it names.
+// to the rules Graph.Add builds them by, in the walk Verify and Load share. Each
+// refusal case hand-edits a Marshal-produced document and asserts the refusal of
+// the fault it names.
 
 const readerSchema = `schema "rd"
 
@@ -51,16 +54,16 @@ type Person {
 }
 `
 
-func loadReaderSchema(t *testing.T) *schema.Schema {
+func loadReaderSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), readerSchema, "rd.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), readerSchema, "rd.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
 
-func readerDoc(t *testing.T, s *schema.Schema, rows ...map[string]any) string {
+func readerDoc(t *testing.T, s schema.Schema, rows ...map[string]any) string {
 	t.Helper()
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -72,15 +75,17 @@ func readerDoc(t *testing.T, s *schema.Schema, rows ...map[string]any) string {
 				props[k] = val
 			}
 		}
-		vi, res := v.ValidateOne(context.Background(), typ, instance.RawInstance{Properties: props})
-		if res.HasErrors() {
-			t.Fatalf("validate %s: %s", typ, res)
+		vi, err := v.ValidateOne(context.Background(), typ, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatalf("validate %s: %s", typ, err)
 		}
-		g.Add(context.Background(), vi)
+		if err := g.Add(context.Background(), vi); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+			t.Errorf("Add: %v", err)
+		}
 	}
-	data, res := snapshot.Marshal(context.Background(), g.Snapshot())
-	if res.HasErrors() {
-		t.Fatalf("marshal: %s", res)
+	data, err := snapshot.Marshal(context.Background(), g.Snapshot())
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 	return string(data)
 }
@@ -107,10 +112,14 @@ func tableRow(t *testing.T, doc, name string) int {
 }
 
 // readBoth returns Verify's and Load's results for doc.
-func readBoth(t *testing.T, s *schema.Schema, doc string) map[string]diag.Result {
+func readBoth(t *testing.T, s schema.Schema, doc string) map[string]diag.Result {
 	t.Helper()
-	_, l := snapshot.Load(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
-	return map[string]diag.Result{"Verify": snapshot.Verify(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false)), "Load": l}
+	_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
+	return map[string]diag.Result{"Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	}), "Load": l}
 }
 
 func requireReaderRule(t *testing.T, name string, got map[string]diag.Result, code diag.Code, phrase string) {
@@ -118,7 +127,7 @@ func requireReaderRule(t *testing.T, name string, got map[string]diag.Result, co
 	for surface, res := range got {
 		found := false
 		for issue := range res.Issues() {
-			if issue.Code() == code && issue.Severity().IsFailure() && strings.Contains(issue.Message(), phrase) {
+			if issue.Code() == code && (issue.Severity() == diag.Fatal || issue.Severity() == diag.Error) && strings.Contains(issue.Message(), phrase) {
 				found = true
 			}
 		}
@@ -130,16 +139,16 @@ func requireReaderRule(t *testing.T, name string, got map[string]diag.Result, co
 
 // personDoc holds p1 with an unresolved WORKS_AT and KNOWS record, and an edge
 // to p0 under BOSS, so each record can be edited alone.
-func personDoc(t *testing.T, s *schema.Schema) string {
+func personDoc(t *testing.T, s schema.Schema) string {
 	t.Helper()
 	return readerDoc(t, s,
 		map[string]any{"$type": "Company", "id": "c1"},
 		map[string]any{"$type": "Office", "id": "o1"},
-		map[string]any{"$type": "Person", "id": "p0", "BOSS": map[string]any{"_target_id": "p0"}, "FRIENDS": []any{map[string]any{"_target_id": "p0"}}},
+		map[string]any{"$type": "Person", "id": "p0", "boss": map[string]any{"_target_id": "p0"}, "friends": []any{map[string]any{"_target_id": "p0"}}},
 		map[string]any{
-			"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"},
-			"FRIENDS":  []any{map[string]any{"_target_id": "p0"}},
-			"WORKS_AT": map[string]any{"_target_id": "c9"}, "KNOWS": []any{map[string]any{"_target_id": "p8"}},
+			"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p0"},
+			"friends":  []any{map[string]any{"_target_id": "p0"}},
+			"works_at": map[string]any{"_target_id": "c9"}, "knows": []any{map[string]any{"_target_id": "p8"}},
 		},
 	)
 }
@@ -149,7 +158,7 @@ func TestReader_RefusesAnUnresolvedRecordTheGraphCannotStage(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := personDoc(t, s)
 	for name, res := range readBoth(t, s, doc) {
-		if res.HasErrors() {
+		if diagtest.Err(res) != nil {
 			t.Fatalf("control, %s: the clean document was refused: %s", name, res)
 		}
 	}
@@ -170,18 +179,18 @@ func TestReader_RefusesAnUnresolvedRecordTheGraphCannotStage(t *testing.T) {
 	}
 }
 
-// A (one) association holding two records is reported once, and the count
-// folds two spellings of one source instant.
-func TestReader_CountsAOneOnceByItsCanonicalSource(t *testing.T) {
+// A (one) association holding two records is reported once, the record counted
+// at the source key it states.
+func TestReader_CountsAOneOnceAtItsSource(t *testing.T) {
 	t.Parallel()
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
 		map[string]any{"$type": "Company", "id": "c1"},
-		map[string]any{"$type": "Event", "at": canonicalStamp, "HOST": map[string]any{"_target_id": "c1"}},
-		map[string]any{"$type": "Event", "at": "2021-01-01T00:00:00Z", "HOST": map[string]any{"_target_id": "c9"}},
+		map[string]any{"$type": "Event", "at": canonicalStamp, "host": map[string]any{"_target_id": "c1"}},
+		map[string]any{"$type": "Event", "at": "2021-01-01T00:00:00Z", "host": map[string]any{"_target_id": "c9"}},
 	)
-	respelled := editOnce(t, doc, `"source_key":["2021-01-01T00:00:00Z"]`, `"source_key":["`+rawStamp+`"]`)
-	for surface, res := range readBoth(t, s, respelled) {
+	moved := editOnce(t, doc, `"source_key":["2021-01-01T00:00:00Z"]`, `"source_key":["`+canonicalStamp+`"]`)
+	for surface, res := range readBoth(t, s, moved) {
 		n := 0
 		for issue := range res.Issues() {
 			if issue.Code() == diag.E_GRAPH_CARDINALITY {
@@ -200,15 +209,26 @@ func TestReader_AcceptsAnEmptyRecord(t *testing.T) {
 	t.Parallel()
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
-		map[string]any{"$type": "Person", "id": "p0", "BOSS": map[string]any{"_target_id": "p0"}, "FRIENDS": []any{}},
+		map[string]any{"$type": "Person", "id": "p0", "boss": map[string]any{"_target_id": "p0"}, "friends": []any{}},
 	)
 	if !strings.Contains(doc, `"reason":"empty"`) {
 		t.Fatalf("fixture is vacuous: no empty record in %s", doc)
 	}
 	for surface, res := range readBoth(t, s, doc) {
-		if res.HasErrors() {
+		if diagtest.Err(res) != nil {
 			t.Errorf("%s refused an empty record Graph.Add made: %s", surface, res)
 		}
+	}
+	snap, err := snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
+	if err != nil {
+		t.Fatalf("unmarshal: %s", err)
+	}
+	var reasons []graph.UnresolvedReason
+	for u := range snap.Unresolved() {
+		reasons = append(reasons, u.Reason())
+	}
+	if !slices.Equal(reasons, []graph.UnresolvedReason{graph.ReasonEmpty}) {
+		t.Errorf("reasons after Unmarshal = %v, want [empty]", reasons)
 	}
 }
 
@@ -219,10 +239,10 @@ func TestReader_RefusesARootDuplicateOfAnIneligibleType(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
 		map[string]any{
-			"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p1"}, "FRIENDS": []any{map[string]any{"_target_id": "p1"}},
-			"TAGS": []any{map[string]any{"label": "a"}},
+			"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"}, "friends": []any{map[string]any{"_target_id": "p1"}},
+			"tags": []any{map[string]any{"label": "a"}},
 		},
-		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p1"}, "FRIENDS": []any{map[string]any{"_target_id": "p1"}}},
+		map[string]any{"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"}, "friends": []any{map[string]any{"_target_id": "p1"}}},
 	)
 	person, tag := tableRow(t, doc, "Person"), tableRow(t, doc, "Tag")
 	edited := editOnce(t, doc, fmt.Sprintf(`"duplicates":[{"type":%d`, person), fmt.Sprintf(`"duplicates":[{"type":%d`, tag))
@@ -236,8 +256,8 @@ func TestReader_RefusesChildrenUnderAnUndeclaredComposition(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
 		map[string]any{
-			"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p1"}, "FRIENDS": []any{map[string]any{"_target_id": "p1"}},
-			"TAGS": []any{map[string]any{"label": "a"}},
+			"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"}, "friends": []any{map[string]any{"_target_id": "p1"}},
+			"tags": []any{map[string]any{"label": "a"}},
 		},
 	)
 	requireReaderRule(t, "an undeclared name", readBoth(t, s, editOnce(t, doc, `"TAGS":[`, `"NOPE":[`)),
@@ -251,7 +271,9 @@ func TestReader_TakesRequiredFromTheSchema(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := personDoc(t, s)
 	count := func(d string) int {
-		_, res := snapshot.Load(context.Background(), []byte(d), s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(context.Background(), []byte(d), s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+		})
 		n := 0
 		for issue := range res.Issues() {
 			if issue.Code() == diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
@@ -273,9 +295,9 @@ func TestReader_TakesRequiredFromTheSchema(t *testing.T) {
 // keyless abstract type is keyless.
 func TestReader_JudgesARootTypeInAddsOrder(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"o\"\n\nabstract type A {\n\tname String\n}\n\ntype B {\n\tid String primary\n}\n", "o.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), "schema \"o\"\n\nabstract type A {\n\tname String\n}\n\ntype B {\n\tid String primary\n}\n", "o.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	doc := readerDoc(t, s, map[string]any{"$type": "B", "id": "b1"})
 	got := readBoth(t, s, editOnce(t, doc, `"name":"B"`, `"name":"A"`))
@@ -288,8 +310,9 @@ func TestReader_JudgesARootTypeInAddsOrder(t *testing.T) {
 }
 
 // A stored key or a record's target key whose component is a JSON array or
-// object, or a number no float64 holds, is one graph.ParseKey cannot read back. Every read refuses it, the
-// schema-less Info included.
+// object, a number no float64 holds, or a number graph.ParseKey reads back as
+// another rendering is one graph.ParseKey cannot read back as written. Every
+// read refuses it, the schema-less Info included.
 func TestReader_RefusesAKeyComponentParseKeyCannotRead(t *testing.T) {
 	t.Parallel()
 	s := loadReaderSchema(t)
@@ -298,10 +321,15 @@ func TestReader_RefusesAKeyComponentParseKeyCannotRead(t *testing.T) {
 		{"an instance key", `"key":["c1"]`, `"key":[["c1"]]`, "whose component 0 is not a scalar"},
 		{"a record's target key", `"target_key":["c9"]`, `"target_key":[{"id":"c9"}]`, "whose component 0 is not a scalar"},
 		{"a number no float64 holds", `"key":["c1"]`, `"key":[1e400]`, "whose component 0 is not a scalar"},
+		{"a number past int64", `"key":["c1"]`, `"key":[18446744073709551615]`, "whose component 0 is not a scalar"},
+		{"a whole number spelled 1.0", `"key":["c1"]`, `"key":[1.0]`, "whose component 0 is not a scalar"},
+		{"a target key number past int64", `"target_key":["c9"]`, `"target_key":[18446744073709551615]`, "whose component 0 is not a scalar"},
 	} {
 		edited := editOnce(t, doc, c.from, c.to)
 		requireReaderRule(t, c.name, readBoth(t, s, edited), diag.E_SNAPSHOT_MALFORMED, c.phrase)
-		_, info := snapshot.Info(t.Context(), []byte(edited))
+		_, info := diagtest.Issues(t, func() (*snapshot.Info, error) {
+			return snapshot.Stat(t.Context(), []byte(edited))
+		})
 		if !info.HasCode(diag.E_SNAPSHOT_MALFORMED) || !strings.Contains(info.String(), c.phrase) {
 			t.Errorf("%s, Info: %s, want the component refused", c.name, info)
 		}

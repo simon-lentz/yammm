@@ -1,0 +1,81 @@
+{
+  "name": "\"composite_test\"",
+  "span": {
+    "s": 0,
+    "e": 23
+  },
+  "types": [
+    {
+      "name": "Record",
+      "name_span": {
+        "s": 30,
+        "e": 36
+      },
+      "props": [
+        {
+          "name": "schema_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 53,
+              "e": 59
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 43,
+            "e": 67
+          }
+        },
+        {
+          "name": "record_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 82,
+              "e": 88
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 72,
+            "e": 96
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 111,
+              "e": 117
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 101,
+            "e": 126
+          }
+        },
+        {
+          "name": "value",
+          "constraint": {
+            "kind": "Float",
+            "span": {
+              "s": 141,
+              "e": 146
+            }
+          },
+          "span": {
+            "s": 131,
+            "e": 146
+          }
+        }
+      ],
+      "span": {
+        "s": 25,
+        "e": 148
+      }
+    }
+  ]
+}

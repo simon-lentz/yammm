@@ -13,7 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
-// diagnosticDocument is the part of the --format json diagnostic wire these
+// diagnosticDocument is the part of the --json diagnostic wire these
 // tests read.
 type diagnosticDocument struct {
 	Issues []documentIssue `json:"issues"`
@@ -32,6 +32,15 @@ type documentIssue struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
 	} `json:"details"`
+	Related []struct {
+		Message string `json:"message"`
+		Span    *struct {
+			Source string `json:"source"`
+			Start  struct {
+				Line int `json:"line"`
+			} `json:"start"`
+		} `json:"span"`
+	} `json:"related"`
 }
 
 // detail returns the value of the issue's detail named key.
@@ -71,16 +80,16 @@ func TestRun_JSONFailureIsInTheDocument(t *testing.T) {
 		code int
 		want string
 	}{
-		{"export, unsupported target", []string{"export", "--to", "xml", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage, "xml"},
+		{"gen, unsupported target", []string{"gen", "--to", "jsonschema", "testdata/valid.yammm"}, cli.ExitUsage, `"jsonschema": must be go, cypher or md`},
 		{"check, wrong arity", []string{"check", "testdata/valid.yammm"}, cli.ExitUsage, "arg"},
 		{"snapshot info, unreadable file", []string{"snapshot", "info", missing}, cli.ExitRuntime, "nonexistent.ys"},
-		{"fmt, contradictory flags", []string{"fmt", "--check", "--write", "testdata/valid.yammm"}, cli.ExitUsage, "mutually exclusive"},
+		{"fmt, a flag -l replaced", []string{"fmt", "--check", "testdata/valid.yammm"}, cli.ExitUsage, "unknown flag: --check"},
 		{"snapshot, no subcommand", []string{"snapshot"}, cli.ExitUsage, "requires a subcommand"},
 		{"an unknown command", []string{"nosuchcommand"}, cli.ExitUsage, "nosuchcommand"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			code, _, stderr := runCLI(t, append([]string{"--format", "json"}, tt.args...)...)
+			code, _, stderr := runCLI(t, append([]string{"--json"}, tt.args...)...)
 			if code != tt.code {
 				t.Errorf("exit code = %d, want %d", code, tt.code)
 			}
@@ -102,13 +111,13 @@ func TestRun_JSONFailureIsInTheDocument(t *testing.T) {
 	}
 }
 
-// TestRun_JSONFailureFindsTheFormatAnywhere asserts --format json is honoured
+// TestRun_JSONFailureFindsTheFormatAnywhere asserts --json is honoured
 // wherever it sits on the command line, including after a flag or a command
 // cobra does not know and so parses no further.
 func TestRun_JSONFailureFindsTheFormatAnywhere(t *testing.T) {
 	for _, args := range [][]string{
-		{"validate", "--nosuchflag", "testdata/valid.yammm", "--format", "json"},
-		{"nosuchcommand", "--format=json"},
+		{"validate", "--nosuchflag", "testdata/valid.yammm", "--json"},
+		{"nosuchcommand", "--json"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			code, _, stderr := runCLI(t, args...)
@@ -125,7 +134,7 @@ func TestRun_JSONFailureFindsTheFormatAnywhere(t *testing.T) {
 
 // TestRun_FmtSyntaxErrorIsADiagnostic asserts fmt reports a syntax error the
 // way validate does: a positioned E_SYNTAX diagnostic naming the file, in text
-// and inside the one document under --format json.
+// and inside the one document under --json.
 func TestRun_FmtSyntaxErrorIsADiagnostic(t *testing.T) {
 	broken := filepath.Join(t.TempDir(), "broken.yammm")
 	if err := os.WriteFile(broken, []byte("schema \"test\"\ntype Person {\n\n"), 0o600); err != nil {
@@ -133,7 +142,7 @@ func TestRun_FmtSyntaxErrorIsADiagnostic(t *testing.T) {
 	}
 
 	t.Run("text", func(t *testing.T) {
-		code, _, stderr := runCLI(t, "fmt", "--check", broken)
+		code, _, stderr := runCLI(t, "fmt", "-l", broken)
 		if code != cli.ExitValidation {
 			t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
 		}
@@ -143,7 +152,7 @@ func TestRun_FmtSyntaxErrorIsADiagnostic(t *testing.T) {
 	})
 
 	t.Run("json", func(t *testing.T) {
-		code, _, stderr := runCLI(t, "--format", "json", "fmt", "--check", broken)
+		code, _, stderr := runCLI(t, "--json", "fmt", "-l", broken)
 		if code != cli.ExitValidation {
 			t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
 		}
@@ -186,8 +195,7 @@ var diagnosticCountLine = regexp.MustCompile(`\d+ error\(s\)|^error: {2,}`)
 // "error: " line says something: no line is the bare prefix, and none is a
 // line of a diagnostic result's String rendering printed as a message.
 func TestRun_FailureLinesCarryAMessage(t *testing.T) {
-	code, _, stderr := runCLI(t, "export", "--to", "cypher", "--prefix", "1bad ",
-		"testdata/valid.yammm", "testdata/data.json")
+	code, _, stderr := runCLI(t, "gen", "--to", "cypher", "--prefix", "1bad ", "testdata/valid.yammm")
 	// The label is the input's fault: a validation or a usage failure, never
 	// success and never an I/O failure, and the report names it.
 	if code != cli.ExitValidation && code != cli.ExitUsage {

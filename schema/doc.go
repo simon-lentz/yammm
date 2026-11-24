@@ -4,13 +4,12 @@
 //
 // This package implements the schema layer, which is responsible for:
 //   - Loading and parsing schema definitions from *.yammm files
-//   - Building schemas programmatically using the [Builder] API
 //   - Providing an immutable, thread-safe schema representation
 //   - Supporting cross-schema imports and inheritance
 //
 // # Key Types
 //
-// The schema object model consists of:
+// The schema object model's key types:
 //
 //   - [Schema]: Top-level container with types, data types, and imports
 //   - [Type]: Named type with properties, relations, invariants, and inheritance
@@ -27,56 +26,54 @@
 //
 // Editor tooling reads the curated annotation registry through
 // [AnnotationSpecs] and [VectorSimilarityFunctions] rather than hard-coding
-// names, so it cannot offer an annotation or keyword the loader rejects.
+// names, so it offers only names and keywords the loader knows. It filters names by
+// placement and keywords by annotation name, so @vector's keywords are offered at
+// @@vector( too. It can still offer an annotation a property's type refuses, such as
+// @vector on a String.
 //
 // # Loading Schemas
 //
 // Schemas are loaded using the Load family of functions:
 //
 //	// Load from file
-//	s, result := schema.Load(ctx, "schema.yammm")
+//	s, err := schema.Load(ctx, "schema.yammm")
 //
 //	// Load from string (imports disallowed)
-//	s, result := schema.LoadString(ctx, source, "schema.yammm")
+//	s, err := schema.LoadString(ctx, source, "schema.yammm")
 //
 //	// Load from in-memory sources with an explicit entry point (useful for
 //	// LSP, and for a generated package's embedded sources)
-//	s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot)
+//	s, err := schema.LoadSourcesWithEntry(ctx, sources, entryPath, schema.WithModuleRoot(moduleRoot))
 //
-// A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish: an I/O failure, a cancellation, or
-// input a load cannot begin from, such as no sources, a source key the loader
+// A load that fails returns a zero Schema and, save for an option it does not
+// take (see Load Options), a *[diag.ResultError] holding its failures, read with errors.AsType and tested by code with errors.Is. A Fatal
+// failure, which [diag.Result.HasFatal] reports on the error's Result, is a
+// load that could not start or finish for one of these reasons: an I/O failure, a cancellation, an
+// internal fault (E_INTERNAL), or input a load cannot begin from, such as no sources, a source key the loader
 // refuses, two keys that name one source, or a source name that is not valid
-// UTF-8, or a source whose header cannot be parsed, which the parser reports
-// as a Fatal E_SYNTAX. An empty schema name is an Error, E_INVALID_NAME, with a
-// nil Schema. Check result.HasErrors() to determine semantic success.
+// UTF-8 or holds a character that does not print, or a source whose header cannot be parsed, which the parser reports
+// as a Fatal E_SYNTAX. A schema name with no value is an Error, E_SYNTAX, one
+// that is not an identifier an Error, E_INVALID_NAME, and a malformed yammm.mod marker an
+// Error, E_LOAD_MODULE_ROOT_MALFORMED, each with a zero Schema. The error holds
+// failures alone, at most 100 the load collected and a Fatal that ended the
+// load beside them: a warning, info or hint reaches the caller through
+// [WithWarnings] alone, every one of them.
 //
 // # Load Options
 //
-// Load functions accept [LoadOption] values to configure behavior:
+// The loads share one [Option] type, among them:
 //
-//   - [WithRegistry]: schema registry for cross-schema type resolution
 //   - [WithModuleRoot]: root directory for module-style imports
 //   - [WithSourcesOnly]: resolve imports only against the in-memory sources
 //   - [WithSyntheticRoot]: synthetic identities for in-memory sources
-//   - [WithIssueLimit]: maximum diagnostic issues to collect (default 100)
 //   - [WithImportsAllowed]: with false, refuse import declarations
-//   - [WithLogger]: structured logger for diagnostics
+//   - [WithWarnings]: receive each issue below failure severity
 //
-// # Builder API
-//
-// [NewBuilder] provides programmatic schema construction:
-//
-//	s, result := schema.NewBuilder().
-//	    WithName("People").
-//	    AddType("Person").
-//	        WithPrimaryKey("id", schema.NewUUIDConstraint()).
-//	        WithProperty("name", schema.StringLenBetween(1, 100)).
-//	        WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
-//	        Done().
-//	    Build()
-//
-// The builder completes and seals the schema when [Builder.Build] is called.
+// A load refuses an option it does not take with an error, with no diagnostic
+// code, that names the option and the load: [LoadString] takes neither
+// [WithModuleRoot] nor [WithImportsAllowed], [Load] and [LoadString] take
+// neither [WithSourcesOnly] nor [WithSyntheticRoot], and [LoadSourcesWithEntry]
+// refuses [WithSyntheticRoot] beside [WithModuleRoot].
 //
 // # Constraint System
 //
@@ -87,62 +84,66 @@
 // [UUIDConstraint], [EnumConstraint], [PatternConstraint],
 // [VectorConstraint], [ListConstraint], and [AliasConstraint].
 //
-// The String, Integer, Float and List constraints have constructors for bounded
-// and unbounded variants (e.g., [NewStringConstraint], [StringLenBetween]); the
-// other kinds take no bounds. Use [ResolveAlias] to
-// unwrap alias chains.
-//
-// # Registry
-//
-// [Registry] provides thread-safe, append-only storage for cross-schema type
-// resolution. Register schemas after loading and pass the registry to
-// subsequent [Load] calls via [WithRegistry]:
-//
-//	reg := schema.NewRegistry()
-//	reg.Register(baseSchema)
-//	s, result := schema.Load(ctx, "derived.yammm", schema.WithRegistry(reg))
-//
-// # Shared-Registry Semantics
-//
-// Passing the same *Registry to multiple Load calls in one process is safe
-// and efficient (since v0.3.0). Two coordinated behaviors make shared-Registry
-// usage first-class:
-//
-//   - [Registry.Register] is idempotent for exact-match: registering the same
-//     SourceID twice with the same bytes, the entry's and every import's, and
-//     the same [StructuralHash] is a no-op. The bytes decide first, since the
-//     hash excludes annotations and documentation: changed bytes under one
-//     SourceID are an error naming the change, and matching bytes with
-//     divergent hashes an error reporting both hashes.
-//   - loadImport short-circuits cross-Load via the shared Registry: when an
-//     import's SourceID is already registered, the loader reuses the existing
-//     *Schema pointer and skips the parse, compile, and re-register pipeline.
-//     This is where cross-pipeline schema-caching actually pays off — the
-//     idempotence contract alone only makes the final re-register a no-op
-//     after an unnecessary parse has already happened.
-//
-// The default Load behavior (fresh Registry per call when WithRegistry is
-// absent) is unchanged. See [WithRegistry] for the top-level-reparse
-// asymmetry note and the SourceID-discipline caveat.
+// A load builds every constraint from its DSL form; a caller reads one through
+// its accessors and the Constraint interface. The zero value of a bounded
+// kind, such as FloatConstraint{}, is that kind with no bounds. Use
+// [ResolveAlias] to unwrap alias chains.
 //
 // # Structural Hash
 //
-// [StructuralHash] computes a deterministic SHA-256 hash over the rules that
+// [StructuralHash] computes a deterministic SHA-256 digest over the rules that
 // decide what instance data is valid, across the schema's whole import
-// closure — types, properties, relations, constraints and invariants, in
-// every member. Used by the snapshot package for compatibility verification.
+// closure. For every member of [Schema.Closure] it hashes the member's schema
+// name, its types with their properties, primary keys (a composite key in
+// key order, since an instance reads it as a list), relations, compositions,
+// supertypes, constraints, invariants and abstract and part markers, and its
+// data types. Each member is framed under its schema name, the entry schema
+// first and the rest ordered by name, so the order imports are declared in does
+// not enter the digest. A relation target is the pair (owning schema name, type
+// name). Closure membership is part of the identity, so the digest moves on a
+// change to an imported schema this schema never references. The snapshot
+// package uses the digest for compatibility verification.
 //
-// Annotations are deliberately EXCLUDED from the hash: they drive downstream
-// store DDL and write shape, not which instance data is valid, so a schema
-// that gains its first annotation still hashes identically and every persisted
-// snapshot header hash stays valid. See [StructuralHash] for the full rule.
+// Two schemas with one digest agree on every hashed rule in their closures.
+// The digest leaves out the following, and two such schemas can differ in each:
+//
+//   - Invariant names, documentation comments and source spans. An invariant's
+//     name is its failure message; its expression is hashed.
+//   - Annotations. They drive downstream store DDL and the write path's
+//     update, and never reject data, so a schema that gains its first
+//     annotation still hashes identically and every persisted snapshot header
+//     hash stays valid.
+//   - Source paths. A member is framed by its declared name, so embedded://
+//     and disk loads of one schema text agree.
+//   - The entry schema's name surface: its direct import set and its import
+//     aliases. One member set under two import graphs or two aliases hashes the
+//     same, though a type name one of them resolves, such as lb.T, can miss
+//     under the other. A snapshot names a type by its declaring schema's name
+//     and its own, so the snapshot reader resolves it through the member set
+//     alone.
+//   - Which member owns a supertype, and which data type a property names. A
+//     supertype hashes by its type name, and the subtype hashes the members it
+//     inherits. A property hashes its resolved constraint and never a data
+//     type's name. The member that declares a supertype or a data type hashes
+//     it in its own frame. So "K extends a.Base" and "K extends b.Base" hash the
+//     same when a and b declare Base alike, and a property typed a.Code, one
+//     typed b.Code and one typed String[3, 3] hash the same when each Code is
+//     String[3, 3]. Instance validity agrees in each case.
+//
+// So a test that compares a generated package's SchemaHash constant with
+// StructuralHash cannot see stale generated code after any change the digest
+// leaves out: the code embeds the schema sources and their documentation
+// comments. After a change to the name surface, a supertype's owner or a
+// property's data type, a field's Go type or a graph field can differ too.
 //
 // # Merged Views and Property Identity
 //
-// A property inherited from several ancestors carries the UNION of their
-// annotations, which no single declared property holds. Such an entry in
-// [Type.AllProperties] / [Type.AllPropertiesSlice] is therefore a synthesized
-// copy, not the *Property its declaring type holds in [Type.PropertiesSlice].
+// A property inherited from several direct supertypes, none of which descends from
+// another, carries the UNION of their merged views' annotations, so an annotation a
+// middle type dropped does not return. When that union differs from the annotations of the declaration
+// the entry is taken from, the entry in
+// [Type.AllProperties] is a synthesized copy, not
+// the Property its declaring type holds in [Type.Properties].
 //
 // [Property.Origin] bridges the two views: it returns the property as declared,
 // and p itself when nothing was merged. Any map keyed by declared properties
@@ -150,48 +151,52 @@
 //
 //	name, ok := dtFieldNames[p.Origin()]
 //
-// — or the synthesized entry misses the table and the consumer silently
-// degrades. Everything Origin discards is annotation state; name, constraint,
-// datatype reference, optionality, primary-key status, span, and declaring
-// scope are all preserved on the copy, so a consumer that reads only those
+// — or the synthesized entry misses the table: gogen returns an error there, and
+// markdown degrades with none. Everything Origin discards is annotation state; name, constraint,
+// datatype reference, optionality, primary-key status, doc comment, span, and
+// declaring scope are all preserved on the copy, so a consumer that reads only those
 // needs nothing.
 //
 // # Immutability
 //
-// All schema types are immutable after loading. This provides:
+// A loaded schema is immutable, and so is every value it hands out. This provides:
 //   - Thread-safety for concurrent access
 //   - Predictable behavior (no hidden mutations)
 //   - Safe sharing across goroutines
 //
-// Slice accessors return defensive copies. Use iterators (iter.Seq) for
-// zero-allocation traversal when possible.
+// An accessor over records, or over the references that name them, returns an
+// iterator, and an accessor over plain values returns a fresh slice.
 //
 // # Completion and Sealing
 //
-// Schemas undergo a completion phase that resolves all internal references:
-//   - Import declarations are resolved to their target schemas
+// Schemas undergo a completion phase that resolves their references and checks
+// what they declare, among its steps:
+//   - Import declarations record their targets' SourceIDs; the loader sets each
+//     target schema
 //   - Type inheritance is computed ([Type.SuperTypes])
+//   - Relation targets are resolved
 //   - Property collisions are detected across the inheritance hierarchy
 //   - Alias constraints are resolved to their underlying types
 //
 // After completion, schemas are sealed to prevent further mutation. The
-// [Load] family handles completion automatically. The [NewBuilder] API
-// completes the schema when [Builder.Build] is called.
+// [Load] family handles completion automatically.
 //
 // # Type Identity
 //
 // Types are identified by [TypeID], a tuple of (SourceID, name). This enables
 // cross-schema type resolution and proper handling of imported types.
-// Two types are equal if and only if they have the same TypeID.
+// Within one load, two handles name one type if and only if their TypeIDs are
+// equal, because a load holds one compile of each source. == on two [Type] handles
+// compares records, and a graph judges a record by the schema object, so two loads
+// of one source give equal TypeIDs and different records.
 //
 // # Thread Safety
 //
-// All schema types are immutable and safe for concurrent read access after
-// loading. [Registry] is safe for concurrent use (read-write).
+// A loaded schema is safe for concurrent reads.
 //
 // # Dependencies
 //
-//	schema  ──imports──▶  diag, location, schema/expr,
+//	schema  ──imports──▶  diag, internal/expr, internal/hostpath, location,
 //	                      internal/parse, internal/source,
 //	                      golang.org/x/text/unicode/norm
 package schema

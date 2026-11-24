@@ -57,7 +57,7 @@ linters:
     # - gochecknoinits # ban init() functions
     # - gochecknoglobals # ban globals
     - exhaustive # enum-style switch exhaustiveness (scoped to //exhaustive:enforce)
-    - depguard # import denylists: the testify freeze for new test code, and library-imports-no-adapter
+    - depguard # import denylists: the testify freeze for new test code, and library-imports-no-neo4j
     - testifylint # testify API misuse guards for the grandfathered call sites
     - usetesting # t.TempDir()/t.Context()/t.Chdir() over os equivalents in tests
   disable:
@@ -73,12 +73,12 @@ linters:
     rules:
       # depguard matches its own `files` globs against the absolute path, so a
       # tree negation there turns the rule off for a checkout under any
-      # directory named adapter, cmd or lsp. The exclusion path is
-      # module-relative.
-      - path: "^(adapter|cmd|lsp)/"
+      # directory named neo4j or cmd. An exclusion path is relative to this
+      # file's directory, the module root.
+      - path: "^(neo4j|cmd)/"
         linters:
           - depguard
-        text: "library-imports-no-adapter"
+        text: "library-imports-no-neo4j"
       # VS Code extension embeds npm packages that may contain Go files.
       - path: "node_modules/"
         text: ".*"
@@ -100,48 +100,37 @@ linters:
           - wrapcheck
           - gochecknoinits
           - gochecknoglobals
-      # LSP protocol types mirror the LSP spec; exported comments add no value.
-      - path: "lsp/internal/protocol/.*"
-        linters:
-          - revive
       # LSP workspace scheduler: background context stored for lifecycle, not request-scoped.
-      - path: "lsp/internal/workspace/.*"
+      - path: "^internal/lsp/internal/workspace/.*"
         linters:
           - revive
       # Diagnostic codes use E_* naming convention by design (stable identifiers).
       - path: "diag/code\\.go"
         linters:
           - revive
-      - path: "adapter/neo4j/errors\\.go"
+      - path: "^schema/cypher/errors\\.go"
         linters:
           - revive
-      - path: "adapter/csv/errors\\.go"
+      - path: "^neo4j/errors\\.go"
+        text: "var-naming: don't use ALL_CAPS"
         linters:
           - revive
-      # Package names matching domain concepts (not stdlib collisions).
+      # The package name parse is the standard library's text/template/parse.
+      # The package is internal, so no caller imports both.
       - path: "^internal/parse/.*"
         text: "avoid package names that conflict"
         linters:
           - revive
-      - path: "adapter/json/.*"
+      # The package name format is the standard library's go/format. The
+      # package is internal, so no caller imports both.
+      - path: "^internal/format/.*"
         text: "avoid package names that conflict"
         linters:
           - revive
-      - path: "adapter/csv/.*"
+      # The package name path is the standard library's path. A caller that
+      # needs both imports one of them under another name.
+      - path: "^instance/path/.*"
         text: "avoid package names that conflict"
-        linters:
-          - revive
-      # Package names matching domain concepts (not stdlib collisions).
-      - path: "format/.*"
-        linters:
-          - revive
-      - path: "internal/trace/.*"
-        linters:
-          - revive
-      - path: "schema/build/.*"
-        linters:
-          - revive
-      - path: "location/path/.*"
         linters:
           - revive
       # gosec G115 (integer overflow) fires on the uintptr->int file-descriptor
@@ -167,19 +156,13 @@ linters:
       # drops its testify import, delete it from its directory's entry (and
       # delete the whole entry when its alternation empties). Never add a
       # file here.
-      - path: "^adapter/csv/(coerce|parse|write)_test\\.go$"
+      - path: "^neo4j/(diff|introspect)_test\\.go$"
         linters:
           - depguard
-      - path: "^adapter/json/(adapter|write)_test\\.go$"
+      - path: "^cmd/yammm/(check|neo4j_diff|snapshot_info|snapshot_save|snapshot_update_metadata|snapshot_verify|validate)_test\\.go$"
         linters:
           - depguard
-      - path: "^adapter/internal/typetag/(validate)_test\\.go$"
-        linters:
-          - depguard
-      - path: "^adapter/neo4j/(diff|infer|introspect)_test\\.go$"
-        linters:
-          - depguard
-      - path: "^cmd/yammm/(check|export|neo4j_diff|snapshot_info|snapshot_save|snapshot_update_metadata|snapshot_verify|validate)_test\\.go$"
+      - path: "^cmd/yammm/internal/jsondata/(adapter)_test\\.go$"
         linters:
           - depguard
       - path: "^cmd/yammm-lsp/(main)_test\\.go$"
@@ -191,7 +174,7 @@ linters:
       - path: "^diag/(code_emission)_test\\.go$"
         linters:
           - depguard
-      - path: "^format/(format)_test\\.go$"
+      - path: "^internal/format/(format)_test\\.go$"
         linters:
           - depguard
       - path: "^graph/(import|result)_test\\.go$"
@@ -200,52 +183,46 @@ linters:
       - path: "^instance/(errors|options|raw|schema_builder|valid|validate_composition|validate_edge|validator)_test\\.go$"
         linters:
           - depguard
-      - path: "^instance/internal/eval/(builtins|checkers|evaluator|scope)_test\\.go$"
+      - path: "^instance/internal/eval/(builtins|evaluator|scope)_test\\.go$"
         linters:
           - depguard
-      - path: "^location/(provenance)_test\\.go$"
+      - path: "^internal/lsp/(completion|definition|format|helpers|hover|server|symbols|sync_handlers)_test\\.go$"
         linters:
           - depguard
-      - path: "^location/path/(builder|parse)_test\\.go$"
+      - path: "^internal/lsp/internal/analysis/(analyzer)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/(completion|definition|format|helpers|hover|server|symbols|sync_handlers)_test\\.go$"
+      - path: "^internal/lsp/internal/completion/(complete|context)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/analysis/(analyzer)_test\\.go$"
+      - path: "^internal/lsp/internal/definition/(resolve)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/completion/(complete|context)_test\\.go$"
+      - path: "^internal/lsp/internal/docstate/(brace|normalize)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/definition/(resolve)_test\\.go$"
+      - path: "^internal/lsp/internal/hover/(hover|render)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/docstate/(brace|normalize)_test\\.go$"
+      - path: "^internal/lsp/internal/lsputil/(posconv|uri)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/hover/(hover|render)_test\\.go$"
+      - path: "^internal/lsp/internal/markdown/(markdown)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/lsputil/(posconv|uri)_test\\.go$"
+      - path: "^internal/lsp/internal/protocol/(protocol)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/markdown/(markdown)_test\\.go$"
+      - path: "^internal/lsp/internal/symbols/(document|symbols)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/protocol/(protocol)_test\\.go$"
-        linters:
-          - depguard
-      - path: "^lsp/internal/symbols/(document|symbols)_test\\.go$"
-        linters:
-          - depguard
-      - path: "^lsp/internal/workspace/(deps|mapper|workspace)_test\\.go$"
+      - path: "^internal/lsp/internal/workspace/(deps|mapper|workspace)_test\\.go$"
         linters:
           - depguard
       - path: "^schema/(alias|builder|complete|constraint|cross_cycle|datatype|hash|import|invariant|load|parse|parser_coverage|property|registry|relation|schema|sources|type|typeid|typeref|validate_invariants)_test\\.go$"
         linters:
           - depguard
-      - path: "^schema/expr/(expr)_test\\.go$"
+      - path: "^internal/expr/(expr)_test\\.go$"
         linters:
           - depguard
       - path: "^schema/internal/exprcomp/(exprcomp)_test\\.go$"
@@ -257,22 +234,18 @@ linters:
   settings:
     depguard:
       rules:
-        library-imports-no-adapter:
+        library-imports-no-neo4j:
           files:
             - "!$test"
           deny:
-            - pkg: github.com/simon-lentz/yammm/adapter
-              desc: "library packages never depend on adapters (doc.go, Package Structure)"
+            - pkg: github.com/simon-lentz/yammm/neo4j
+              desc: "library packages never depend on the Neo4j write path (doc.go, Package Structure)"
+            - pkg: github.com/neo4j/neo4j-go-driver
+              desc: "only the neo4j package and the CLI hold the Neo4j driver (doc.go, Package Structure)"
         testify-freeze:
           deny:
             - pkg: github.com/stretchr/testify
               desc: "testify is frozen for new code — use the stdlib plus internal/yammmtest (cmp + goldens); grandfathered files are enumerated in linters.exclusions.rules and that list only shrinks"
-    wrapcheck:
-      # adapter/internal/refusal.New CONSTRUCTS an error, as errors.New and
-      # fmt.Errorf do, so returning its result is not an unwrapped pass-through
-      # of a foreign error. The entry appends to the linter's default list.
-      extra-ignore-sigs:
-        - refusal.New(
     testifylint:
       disable:
         # The DSL contract pins exact float results (parsed literals,
@@ -309,6 +282,15 @@ linters:
         - "(*encoding/json.Encoder).Encode"
     errchkjson:
       check-error-free-encoding: true
+    wrapcheck:
+      # A *diag.ResultError is the module's failure value: a caller reads it with
+      # errors.AsType and errors.Is, and its Error text is the failures' own
+      # rendering, so a call returns it as built, as go/scanner returns
+      # ErrorList.Err().
+      extra-ignore-sigs:
+        - "diag.Collector).Err() error"
+        - "cypher.Config).CheckLabels("
+        - "mapping.Labels).Check("
     paralleltest:
       ignore-missing: true
       ignore-missing-subtests: true

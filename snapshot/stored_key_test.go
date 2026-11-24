@@ -3,12 +3,16 @@ package snapshot_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -43,10 +47,11 @@ part type Part {
 }
 `
 
-// keyShape names one way a stored key can stand beside the key properties.
+// keyShape names one way a stored key can stand beside the key properties, and
+// whether a key of those values standing so is legal.
 type keyShape struct {
 	name  string
-	legal bool
+	legal func(vals []any) bool
 	// key and props build the instance from its declared key values.
 	key   func(vals []any) []any
 	props func(names []string, vals []any) map[string]any
@@ -61,8 +66,10 @@ func propsOf(names []string, vals []any) map[string]any {
 }
 
 const (
-	lowerUUID = "123e4567-e89b-12d3-a456-426614174000"
-	upperUUID = "123E4567-E89B-12D3-A456-426614174000"
+	lowerUUID      = "123e4567-e89b-12d3-a456-426614174000"
+	upperUUID      = "123E4567-E89B-12D3-A456-426614174000"
+	canonicalStamp = "2020-01-02T03:04:05Z"
+	rawStamp       = "2020-01-02T03:04:05+00:00"
 )
 
 // differ returns vals with its last component replaced by another valid value
@@ -101,21 +108,28 @@ func respell(vals []any) []any {
 
 func keyShapes() []keyShape {
 	same := func(vals []any) []any { return vals }
+	always := func([]any) bool { return true }
+	never := func([]any) bool { return false }
 	return []keyShape{
-		{"agree", true, same, propsOf},
-		{"respelled", true, respell, propsOf},
-		{"key_property_absent", false, same, func(names []string, vals []any) map[string]any {
+		{"agree", always, same, propsOf},
+		// A key holds one spelling of its value, the text its kind stores, so a
+		// key another spelling moves is refused; its property may spell it so.
+		{"respelled_key", func(vals []any) bool { return slices.Equal(respell(vals), vals) }, respell, propsOf},
+		{"respelled_property", always, same, func(names []string, vals []any) map[string]any {
+			return propsOf(names, respell(vals))
+		}},
+		{"key_property_absent", never, same, func(names []string, vals []any) map[string]any {
 			return propsOf(names[:len(names)-1], vals)
 		}},
-		{"key_property_null", false, same, func(names []string, vals []any) map[string]any {
+		{"key_property_null", never, same, func(names []string, vals []any) map[string]any {
 			m := propsOf(names, vals)
 			m[names[len(names)-1]] = nil
 			return m
 		}},
-		{"differs", false, differ, propsOf},
-		{"short", false, func(v []any) []any { return v[:len(v)-1] }, propsOf},
-		{"long", false, func(v []any) []any { return append(append([]any(nil), v...), "extra") }, propsOf},
-		{"empty", false, func([]any) []any { return nil }, propsOf},
+		{"differs", never, differ, propsOf},
+		{"short", never, func(v []any) []any { return v[:len(v)-1] }, propsOf},
+		{"long", never, func(v []any) []any { return append(append([]any(nil), v...), "extra") }, propsOf},
+		{"empty", never, func([]any) []any { return nil }, propsOf},
 	}
 }
 
@@ -147,38 +161,41 @@ func (c storedKeyCase) props() map[string]any { return c.shape.props(c.typ.names
 func (c storedKeyCase) String() string        { return c.typ.name + "/" + c.shape.name }
 func holderProps() map[string]any             { return map[string]any{"id": "h1"} }
 func holderKey() immutable.Key                { return immutable.WrapKey([]any{"h1"}) }
-func loadStoredKeySchema(t *testing.T) *schema.Schema {
+func loadStoredKeySchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), storedKeySchema, "keys.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), storedKeySchema, "keys.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
 
-func (c storedKeyCase) parts(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+func (c storedKeyCase) parts(t *testing.T, s schema.Schema) snapparts.Parts {
 	t.Helper()
 	id := mustTypeID(t, s, c.typ.name)
-	ip := graph.InstanceParts{TypeID: id, PrimaryKey: immutable.WrapKey(c.key()), Properties: immutable.WrapProperties(c.props())}
+	ip := snapparts.Instance{TypeID: id, PrimaryKey: immutable.WrapKey(c.key()), Properties: immutable.WrapProperties(c.props())}
 	if !c.typ.composed {
-		return graph.SnapshotParts{Types: []schema.TypeID{id}, Instances: []graph.InstanceParts{ip}}
+		return snapparts.Parts{Types: []schema.TypeID{id}, Instances: []snapparts.Instance{ip}}
 	}
 	holder := mustTypeID(t, s, "Holder")
-	return graph.SnapshotParts{Types: []schema.TypeID{holder}, Instances: []graph.InstanceParts{{
+	return snapparts.Parts{Types: []schema.TypeID{holder}, Instances: []snapparts.Instance{{
 		TypeID: holder, PrimaryKey: holderKey(), Properties: immutable.WrapProperties(holderProps()),
-		Composed: map[string][]graph.InstanceParts{"PARTS": {ip}},
+		Composed: map[string][]snapparts.Instance{"PARTS": {ip}},
 	}}}
 }
 
-func (c storedKeyCase) add(t *testing.T, s *schema.Schema) bool {
+// add offers a legal shape to Graph.Add as a validator states it: the key
+// properties' spelling is the input.
+func (c storedKeyCase) add(t *testing.T, s schema.Schema) bool {
 	t.Helper()
-	id := mustTypeID(t, s, c.typ.name)
-	inst := instance.NewValidInstance(c.typ.name, id, immutable.WrapKey(c.key()), immutable.WrapProperties(c.props()), nil, nil, nil)
+	props := c.props()
+	var inst instance.ValidInstance
 	if c.typ.composed {
-		inst = instance.NewValidInstance("Holder", mustTypeID(t, s, "Holder"), holderKey(), immutable.WrapProperties(holderProps()),
-			nil, map[string]immutable.Value{"PARTS": immutable.Wrap([]any{inst})}, nil)
+		inst = instancetest.Valid(t, s, "Holder", map[string]any{"id": "h1", "parts": []any{props}})
+	} else {
+		inst = instancetest.Valid(t, s, c.typ.name, props)
 	}
-	return graph.New(s).Add(context.Background(), inst).OK()
+	return graph.New(s).Add(context.Background(), inst) == nil
 }
 
 type keyWireItem struct {
@@ -196,23 +213,20 @@ type keyWireGroup struct {
 
 // keyWireFrame marshals a legal snapshot holding every type, whose header and
 // types table each wire case reuses with its own instances section.
-func keyWireFrame(t *testing.T, s *schema.Schema) (head, tail string, rows map[string]int) {
+func keyWireFrame(t *testing.T, s schema.Schema) (head, tail string, rows map[string]int) {
 	t.Helper()
 	var ids []schema.TypeID
-	var insts []graph.InstanceParts
+	var insts []snapparts.Instance
 	for _, kt := range keyedTypes() {
 		c := storedKeyCase{kt, keyShapes()[0]}
 		p := c.parts(t, s)
 		ids = append(ids, p.Types...)
 		insts = append(insts, p.Instances...)
 	}
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{Types: ids, Instances: insts})
-	if res.HasErrors() {
-		t.Fatalf("the legal frame was refused: %s", res)
-	}
-	data, mres := snapshot.Marshal(context.Background(), built)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	built := snappartstest.Loaded(t, s, snapparts.Parts{Types: ids, Instances: insts})
+	data, readErr := snapshot.Marshal(context.Background(), built)
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	var doc struct {
 		Types []struct{ Name string } `json:"types"`
@@ -254,14 +268,15 @@ func (c storedKeyCase) wire(t *testing.T, head, tail string, rows map[string]int
 	return []byte(head + string(body) + tail)
 }
 
-// TestStoredKey_EveryImplementationAgrees holds the key rule over the class of
-// key kinds (a String, a UUID and a Timestamp, both canonicalizing, and a
-// composite key ending in a Date)
-// at a root and at a composed child, crossed with every way a stored key can
-// stand beside its key properties. Graph.Add, graph.RebuildSnapshot,
-// snapshot.Load and snapshot.Verify each accept exactly the legal shapes; a key
-// property that is absent or null is refused whatever the stored key holds.
-func TestStoredKey_EveryImplementationAgrees(t *testing.T) {
+// TestStoredKey_TheReadersAcceptExactlyTheLegalShapes holds the key rule over the
+// class of key kinds (a String, a UUID and a Timestamp, both canonicalizing, and a
+// composite key ending in a Date) at a root and at a composed child, crossed with
+// every way a stored key can stand beside its key properties. snapshot.Load and
+// snapshot.Verify each accept exactly the legal shapes; a key property that is
+// absent or null is refused whatever the stored key holds, and so is a key
+// component its kind stores as other text. Graph.Add accepts each legal shape; a
+// validator states no other.
+func TestStoredKey_TheReadersAcceptExactlyTheLegalShapes(t *testing.T) {
 	t.Parallel()
 	s := loadStoredKeySchema(t)
 	head, tail, rows := keyWireFrame(t, s)
@@ -269,29 +284,26 @@ func TestStoredKey_EveryImplementationAgrees(t *testing.T) {
 	for _, kt := range keyedTypes() {
 		for _, shape := range keyShapes() {
 			c := storedKeyCase{kt, shape}
+			legal := shape.legal(kt.vals)
 			n++
 			t.Run(c.String(), func(t *testing.T) {
 				t.Parallel()
-				if got := c.add(t, s); got != shape.legal {
-					t.Errorf("Graph.Add accepted=%v, want %v", got, shape.legal)
-				}
-				_, rres := graph.RebuildSnapshot(s, c.parts(t, s))
-				if got := !rres.HasErrors(); got != shape.legal {
-					t.Errorf("RebuildSnapshot accepted=%v, want %v: %s", got, shape.legal, rres)
+				if legal && !c.add(t, s) {
+					t.Error("Graph.Add refused a legal shape")
 				}
 				data := c.wire(t, head, tail, rows)
-				_, lres := snapshot.Load(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
-				if got := !lres.HasErrors(); got != shape.legal {
-					t.Errorf("Load accepted=%v, want %v: %s", got, shape.legal, lres)
+				_, err := snapshot.Unmarshal(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
+				if got := err == nil; got != legal {
+					t.Errorf("Load accepted=%v, want %v: %s", got, legal, err)
 				}
-				vres := snapshot.Verify(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
-				if got := !vres.HasErrors(); got != shape.legal {
-					t.Errorf("Verify accepted=%v, want %v: %s", got, shape.legal, vres)
+				readErr := snapshot.Verify(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
+				if got := readErr == nil; got != legal {
+					t.Errorf("Verify accepted=%v, want %v: %s", got, legal, readErr)
 				}
 			})
 		}
 	}
-	if n != 40 {
-		t.Fatalf("the class holds %d cases, want 40", n)
+	if n != 45 {
+		t.Fatalf("the class holds %d cases, want 45", n)
 	}
 }

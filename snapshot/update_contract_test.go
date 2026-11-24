@@ -1,24 +1,27 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// headerDoc builds a minimal well-formed document whose header carries the
-// given version and features literal. The body is the shape Marshal produces,
-// so UpdateMetadata's body-offset resolution succeeds and the test isolates
-// the header validation it is written for.
-func headerDoc(s *schema.Schema, version int, featuresJSON string) []byte {
-	return fmt.Appendf(nil,
-		`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":%d,"integrity_hash":"","features":%s},"types":[{"schema":"test","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
-		version, schema.StructuralHash(s), schema.StructuralHashVersion, featuresJSON)
+// headerDoc builds a minimal well-formed, signed document whose header carries
+// the given version and features literal, so the test isolates the header
+// validation it is written for.
+func headerDoc(t *testing.T, s schema.Schema, version int, featuresJSON string) []byte {
+	t.Helper()
+	return rehashDocument(t, fmt.Appendf(nil,
+		`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_hash":%q,"schema_hash_algorithm":%d,"integrity_hash":"","features":%s},"types":[{"schema":"test","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
+		version, schema.StructuralHash(s), schema.StructuralHashVersion, featuresJSON))
 }
 
 // headerVersion reads the version field back out of a document.
@@ -43,11 +46,11 @@ func TestUpdateMetadata_PreservesInputVersion(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
 
-	data := headerDoc(s, 4, `[]`)
+	data := headerDoc(t, s, 4, `[]`)
 
-	out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-	if res.HasErrors() {
-		t.Fatalf("UpdateMetadata on a readable document: %v", res)
+	out, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	if err != nil {
+		t.Fatalf("UpdateMetadata on a readable document: %v", err)
 	}
 	if got := headerVersion(t, out); got != 4 {
 		t.Errorf("output version = %d, want 4 — the fast path must write the version it read", got)
@@ -64,9 +67,11 @@ func TestUpdateMetadata_RefusesUnsupportedVersion(t *testing.T) {
 	s := testSchema(t)
 
 	for _, version := range []int{2, 99} {
-		data := headerDoc(s, version, `[]`)
-		_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-		if !res.HasErrors() {
+		data := headerDoc(t, s, version, `[]`)
+		_, res := diagtest.Issues(t, func() ([]byte, error) {
+			return snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+		})
+		if diagtest.Err(res) == nil {
 			t.Fatalf("UpdateMetadata accepted version %d", version)
 		}
 		if !hasCode(res, diag.E_SNAPSHOT_UNSUPPORTED_VERSION) {
@@ -81,10 +86,12 @@ func TestUpdateMetadata_RefusesUnsupportedVersion(t *testing.T) {
 func TestUpdateMetadata_RefusesNullFeatures(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
-	data := headerDoc(s, 4, `null`)
+	data := headerDoc(t, s, 4, `null`)
 
-	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-	if !res.HasErrors() {
+	_, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	})
+	if diagtest.Err(res) == nil {
 		t.Fatal("UpdateMetadata accepted a null features field")
 	}
 	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
@@ -97,10 +104,12 @@ func TestUpdateMetadata_RefusesNullFeatures(t *testing.T) {
 func TestUpdateMetadata_RefusesUnrecognizedFeature(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
-	data := headerDoc(s, 4, `["nonexistent_feature"]`)
+	data := headerDoc(t, s, 4, `["nonexistent_feature"]`)
 
-	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-	if !res.HasErrors() {
+	_, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	})
+	if diagtest.Err(res) == nil {
 		t.Fatal("UpdateMetadata accepted an unrecognized feature")
 	}
 	if !hasCode(res, diag.E_SNAPSHOT_UNSUPPORTED_FEATURE) {
@@ -118,20 +127,20 @@ func TestUpdateMetadata_RefusesUnknownHashAlgorithm(t *testing.T) {
 	ctx := context.Background()
 	s := testSchema(t)
 	data := fmt.Appendf(nil,
-		`{"yammm_snapshot":{"version":4,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":99,"integrity_hash":"","features":[]},"types":[{"schema":"test","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
+		`{"yammm_snapshot":{"version":4,"schema_name":"test","schema_hash":%q,"schema_hash_algorithm":99,"integrity_hash":"","features":[]},"types":[{"schema":"test","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
 		schema.StructuralHash(s))
 
-	out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-	if !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) || !res.HasErrors() {
-		t.Errorf("an unrecognized hash algorithm must refuse the relabel with an Error: %v", res)
+	out, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	if !errors.Is(err, diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) || err == nil {
+		t.Errorf("an unrecognized hash algorithm must refuse the relabel with an Error: %v", err)
 	}
 	if out != nil {
 		t.Error("a refused relabel returned output bytes")
 	}
 
-	header, hres := snapshot.HeaderOnly(ctx, data)
-	if hres.HasErrors() {
-		t.Errorf("a header-only read must stay classifiable: %v", hres)
+	header, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	if readErr != nil {
+		t.Errorf("a header-only read must stay classifiable: %v", readErr)
 	}
 	if header == nil || header.SchemaHashMatches(s) {
 		t.Error("a header under an unknown algorithm must not match any schema")

@@ -75,33 +75,31 @@ priority Enum["low", "medium", "high", "critical"]
 
 ### Pattern
 
-String validated against one or two regular expressions.
+String validated against one regular expression.
 
-**Syntax:** `Pattern["regex"]` or `Pattern["regex1", "regex2"]`
+**Syntax:** `Pattern["regex"]`
 
-- Follows Go `regexp` package syntax
-- Maximum of 2 patterns (performance cap)
-- When two patterns are provided, the value must match both (conjunction semantics)
+- Exactly one pattern; a second is `E_SYNTAX`. Write a second rule as an invariant.
+- A pattern is what Go's `regexp.Compile` accepts
+- A match is a search: `Pattern["or"]` takes `"north"`. Anchor with `^` and `$` to match the whole value.
 
 ```yammm-snippet
 email Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
-code Pattern["^[A-Z]", "[0-9]$"]    // must start with uppercase AND end with digit
+code Pattern["^[A-Z][0-9A-Z]*[0-9]$"]    // an upper-case letter, then upper-case letters and digits, ending in a digit
 ```
 
 ### Timestamp
 
-Date-time value with optional format specification.
+Date-time value in RFC 3339. No parameters.
 
-**Syntax:** `Timestamp` or `Timestamp["format"]`
+**Syntax:** `Timestamp`
 
-- Default format is RFC3339: `"2006-01-02T15:04:05Z07:00"`
-- Format string follows Go time formatting conventions
-- Accepts a string or a `time.Time`; **stores the string**, rendered through the declared format when there is one and through RFC 3339 with nanoseconds otherwise
-- A declared format that cannot represent an instant (no zone, no fraction, or neither) loses what it omits and draws `W_TIMESTAMP_LOSSY_FORMAT` at schema load
+- A string is read as `"2006-01-02T15:04:05Z07:00"`, fractional seconds included, and stored as `"2006-01-02T15:04:05.999999999Z07:00"`
+- Accepts a string or a `time.Time`; **stores the string**, rendered through RFC 3339 with nanoseconds; a value at a UTC offset of 24 hours or more is refused, and so is a `time.Time` outside years 0 to 9999
+- A bracket after `Timestamp` is a syntax error. Declare a `String` or a `Pattern` to hold date-time text in another form
 
 ```yammm-snippet
 created_at Timestamp
-log_time Timestamp["2006-01-02 15:04:05"]
 ```
 
 ### Date
@@ -110,7 +108,7 @@ Date value without a time component. No parameters.
 
 **Syntax:** `Date`
 
-- Accepts a `"YYYY-MM-DD"` string or a `time.Time`; **stores the string**. A `time.Time` truncates to its calendar day **in its own location**, so 00:30 `+02:00` is the 19th and the same instant at 22:30 `Z` is the 18th
+- Accepts a `"YYYY-MM-DD"` string or a `time.Time`; **stores the string**. A `time.Time` truncates to its calendar day **in its own location**, so 00:30 `+02:00` is the 19th and the same instant at 22:30 `Z` is the 18th; one whose text is no `YYYY-MM-DD` date, such as one outside years 0 to 9999, is refused
 
 ### UUID
 
@@ -127,8 +125,8 @@ Fixed-dimension numeric vector for embeddings, coordinates, etc.
 **Syntax:** `Vector[dimensions]`
 
 - Dimensions must be a positive integer
-- Accepts float slices/arrays (`[]float32`/`[]float64`)
-- NaN, Inf, and non-float elements rejected
+- Accepts any Go slice whose elements are numbers, such as `[]float64`, `[]float32`, `[]int`, `[]json.Number` or `[]any` (what a JSON decoder produces), a named slice type and a slice of a named number type included, or an `immutable.Slice` of numbers. Each element is stored as a `float64`. A Go array and a pointer to a slice are refused; a nil slice holds no value
+- NaN, Inf, and non-numeric elements rejected
 - Cannot be a primary key
 - Cannot be used in relationship properties
 
@@ -157,7 +155,7 @@ matrix List<List<Float>>
 embeddings List<Vector[768]>[_, 10]
 ```
 
-**Neo4j export caveat.** The last two — a list whose *element* is itself a collection — are valid yammm but have no Neo4j equivalent, and constraint generation is all-or-nothing, so one such property makes `yammm neo4j constraints` emit **nothing for the entire schema** (`E_NEO4J_UNSUPPORTED_TYPE`). If the model must export to Neo4j, represent the inner collection as a `part type` reached by a composition. A bare `Vector[N]` is fine; only a `Vector` nested inside a `List` is not.
+**Neo4j export caveat.** The last two — a list whose *element* is itself a collection — are valid yammm but have no Neo4j equivalent, and constraint generation is all-or-nothing. One such property on a type that gets a label makes `yammm gen --to cypher` exit 1 with `E_NEO4J_UNSUPPORTED_TYPE` and emit **nothing for the entire schema**, constraints and indexes alike. A concrete type and a part type get a label; an abstract type gets none. A property an abstract type declares is judged on each labeled type that inherits it, and is not judged where no labeled type does. No flag lets such a schema through: `--type-constraints none` drops every `IS :: <TYPE>` constraint from the output and still refuses it, and a `--prefix` or `--separator` that breaks the label rule refuses it with `E_NEO4J_INVALID_IDENTIFIER` in place of this check. If the model must export to Neo4j, represent the inner collection as a `part type` reached by a composition. A bare `Vector[N]` is fine; only a `Vector` nested inside a `List` is not.
 
 ---
 
@@ -200,8 +198,8 @@ type Tags = List<String[1, 50]>
 
 - Must be declared with an uppercase identifier
 - Aliases preserve the declared case (not lowercased internally)
-- Can chain: alias A wraps a built-in, alias B wraps A
-- Alias cycles are detected and rejected during schema completion (not during parsing)
+- An alias target must be a built-in, so `type B = A` over an alias `A` draws `E_SYNTAX`. A `List` target can name another alias as its element
+- Alias cycles through `List` elements are detected and rejected during schema completion (not during parsing)
 - Imported aliases require qualification: `common.Money`
 
 ---
@@ -271,7 +269,7 @@ type Document extends Auditable, Named {
 }
 ```
 
-Multiple inheritance is supported (comma-separated parents). The target of `extends` must be an `abstract type`.
+Multiple inheritance is supported (comma-separated parents). A supertype is an `abstract type` or of the subtype's own kind: a concrete type extends abstract and concrete types, a `part type` extends abstract and part types, and an abstract type extends abstract types alone (`E_INVALID_SUPERTYPE`). `extends` includes members and gives no substitution: a relation to a supertype holds no instance of a subtype.
 
 ### What Is Inherited
 
@@ -344,7 +342,7 @@ Making a required field optional is widening and not allowed.
 
 ### Relationship Uniqueness
 
-After inheritance, one relation name carries one definition. Two own relations under one name draw `E_DUPLICATE_RELATION`; inherited definitions that differ, or an association and a composition sharing a name, draw `E_RELATION_COLLISION`, reported once on the type that combines them and naming every rival. Identical definitions reached through two ancestors merge silently.
+After inheritance, one relation name carries one definition. Two own relations under one name draw `E_DUPLICATE_RELATION`; inherited definitions of one kind that differ draw `E_RELATION_COLLISION`, as do an association and a composition sharing a name. A collision within one kind is reported on each type the differing definitions reach, its own or inherited; one across the two kinds is reported on a type that carries both, unless a direct supertype of it already carries both. A report within one kind names the surviving definition and one group of identical rivals; one across the two kinds names the association and the composition. Identical definitions reached through two ancestors merge silently. Inherited definitions of one kind draw no collision when one of them has an unresolved target or an edge property of unknown type: that cause is already reported.
 
 ### Extending Imported Types
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -8,6 +9,10 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/snapshot"
 )
 
 const managerSchema = `schema "p12"
@@ -37,15 +42,13 @@ func verdictFixture(t *testing.T, docs map[string]string) (dir, schemaPath strin
 }
 
 // dataCommands returns, for each command the one data pipeline serves, its
-// argument list over schemaPath and dataPath under --format json.
+// argument list over schemaPath and dataPath under --json.
 func dataCommands(t *testing.T, schemaPath, dataPath string) map[string][]string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "out.ys")
 	return map[string][]string{
-		"check":         {"check", "--format", "json", schemaPath, dataPath},
-		"load":          {"load", "--format", "json", schemaPath, dataPath},
-		"export":        {"export", "--format", "json", "--to", "json", schemaPath, dataPath},
-		"snapshot save": {"snapshot", "save", "--format", "json", "-o", out, schemaPath, dataPath},
+		"check":         {"check", "--json", schemaPath, dataPath},
+		"snapshot save": {"snapshot", "save", "--json", "-o", out, schemaPath, dataPath},
 	}
 }
 
@@ -186,6 +189,98 @@ func TestDataCommands_ReportADuplicateKeyARefusedInstanceHides(t *testing.T) {
 	}
 }
 
+// TestDataCommands_ADuplicateKeyNamesItsEarlierHolder pins that every
+// E_DUPLICATE_PK names the key's first holder as a related location, whether
+// the graph refused the later holder, the validator refused the first one or
+// every one, or the holders sit in two files, so one key names one first holder.
+func TestDataCommands_ADuplicateKeyNamesItsEarlierHolder(t *testing.T) {
+	t.Parallel()
+
+	dir, schemaPath := verdictFixture(t, map[string]string{
+		"twice.json": `{"Person": [
+{"id": "boss", "name": "A", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "B", "manager": {"_target_id": "boss"}}
+]}`,
+		"refused_first.json": `{"Person": [
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "B", "manager": {"_target_id": "boss"}}
+]}`,
+		"refused_then_two.json": `{"Person": [
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "B", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "C", "manager": {"_target_id": "boss"}}
+]}`,
+		"refused_thrice.json": `{"Person": [
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "manager": {"_target_id": "boss"}}
+]}`,
+		"first.json": `{"Person": [
+{"id": "boss", "name": "A", "manager": {"_target_id": "boss"}}
+]}`,
+		"second.json": `{"Person": [
+{"id": "boss", "name": "B", "manager": {"_target_id": "boss"}}
+]}`,
+	})
+	cases := []struct {
+		name        string
+		files       []string
+		wantSource  string
+		wantLines   []int
+		wantRelated string
+		relatedLine int
+	}{
+		{"one file", []string{"twice.json"}, "twice.json", []int{3}, "twice.json", 2},
+		{"a refused earlier holder", []string{"refused_first.json"}, "refused_first.json", []int{3}, "refused_first.json", 2},
+		{"a refused first holder of three", []string{"refused_then_two.json"}, "refused_then_two.json", []int{3, 4}, "refused_then_two.json", 2},
+		{"three refused holders", []string{"refused_thrice.json"}, "refused_thrice.json", []int{3, 4}, "refused_thrice.json", 2},
+		{"two files", []string{"first.json", "second.json"}, "second.json", []int{2}, "first.json", 2},
+	}
+	for _, tc := range cases {
+		paths := make([]string, len(tc.files))
+		for i, f := range tc.files {
+			paths[i] = filepath.Join(dir, f)
+		}
+		commands := map[string][]string{
+			"check":         append([]string{"check", "--json", schemaPath}, paths...),
+			"snapshot save": append([]string{"snapshot", "save", "--json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath}, paths...),
+		}
+		for command, args := range commands {
+			t.Run(tc.name+"/"+command, func(t *testing.T) {
+				t.Parallel()
+				code, _, errOut := executeCmdOutput(t, args...)
+				if code != cli.ExitValidation {
+					t.Fatalf("exit code = %d, want %d", code, cli.ExitValidation)
+				}
+				var dups []documentIssue
+				for _, iss := range decodeDocument(t, errOut).Issues {
+					if iss.Code == "E_DUPLICATE_PK" {
+						dups = append(dups, iss)
+					}
+				}
+				if len(dups) != len(tc.wantLines) {
+					t.Fatalf("E_DUPLICATE_PK drew %d issues, want %d", len(dups), len(tc.wantLines))
+				}
+				for i, iss := range dups {
+					if iss.Span == nil || !strings.HasSuffix(iss.Span.Source, tc.wantSource) || iss.Span.Start.Line != tc.wantLines[i] {
+						t.Errorf("E_DUPLICATE_PK %d span = %+v, want %s line %d", i, iss.Span, tc.wantSource, tc.wantLines[i])
+					}
+					if len(iss.Related) != 1 {
+						t.Fatalf("E_DUPLICATE_PK %d has %d related locations, want 1", i, len(iss.Related))
+					}
+					rel := iss.Related[0]
+					if rel.Message != "first declared here" {
+						t.Errorf("related message = %q, want %q", rel.Message, "first declared here")
+					}
+					if rel.Span == nil || !strings.HasSuffix(rel.Span.Source, tc.wantRelated) || rel.Span.Start.Line != tc.relatedLine {
+						t.Errorf("E_DUPLICATE_PK %d related span = %+v, want %s line %d", i, rel.Span, tc.wantRelated, tc.relatedLine)
+					}
+				}
+			})
+		}
+	}
+}
+
 // TestSnapshotSave_TheDataFilesAreOneDocument pins that snapshot save judges
 // its data files together: a target one file refuses explains the missing target
 // another file names, and a key two files state is a duplicate.
@@ -201,7 +296,7 @@ func TestSnapshotSave_TheDataFilesAreOneDocument(t *testing.T) {
 {"id": "boss", "name": "B", "manager": {"_target_id": "boss"}}
 ]}`,
 	})
-	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--format", "json", "-o", filepath.Join(dir, "out.ys"),
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "-o", filepath.Join(dir, "out.ys"),
 		schemaPath, filepath.Join(dir, "first.json"), filepath.Join(dir, "second.json"))
 	if code != cli.ExitValidation {
 		t.Fatalf("exit code = %d, want %d", code, cli.ExitValidation)
@@ -236,7 +331,7 @@ func TestSnapshotSaveInto_TheMergedFileHoldsItsKeys(t *testing.T) {
 	if code, _, errOut := executeCmdOutput(t, "snapshot", "save", "-o", base, schemaPath, filepath.Join(dir, "base.json")); code != cli.ExitOK {
 		t.Fatalf("save the base: exit %d\n%s", code, errOut)
 	}
-	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--format", "json", "-o", filepath.Join(dir, "out.ys"),
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "-o", filepath.Join(dir, "out.ys"),
 		"--into", base, schemaPath, filepath.Join(dir, "more.json"))
 	if code != cli.ExitValidation {
 		t.Fatalf("exit code = %d, want %d", code, cli.ExitValidation)
@@ -250,6 +345,40 @@ func TestSnapshotSaveInto_TheMergedFileHoldsItsKeys(t *testing.T) {
 	}
 }
 
+// TestSnapshotSaveInto_ADuplicateOfAMergedKeyNamesNoLocation pins that under
+// --into a key the merged file holds draws E_DUPLICATE_PK at each new holder,
+// a refused one and a valid one, with no related location: the merged file's
+// instance has no span to name.
+func TestSnapshotSaveInto_ADuplicateOfAMergedKeyNamesNoLocation(t *testing.T) {
+	t.Parallel()
+
+	dir, schemaPath := verdictFixture(t, map[string]string{
+		"base.json": `{"Person": [{"id": "boss", "name": "Boss", "manager": {"_target_id": "boss"}}]}`,
+		"more.json": `{"Person": [
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "B2", "manager": {"_target_id": "boss"}}
+]}`,
+	})
+	base := filepath.Join(dir, "base.ys")
+	if code, _, errOut := executeCmdOutput(t, "snapshot", "save", "-o", base, schemaPath, filepath.Join(dir, "base.json")); code != cli.ExitOK {
+		t.Fatalf("save the base: exit %d\n%s", code, errOut)
+	}
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "-o", filepath.Join(dir, "out.ys"),
+		"--into", base, schemaPath, filepath.Join(dir, "more.json"))
+	if code != cli.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitValidation)
+	}
+	doc := decodeDocument(t, errOut)
+	if got := issueLines(doc, "E_DUPLICATE_PK"); !slices.Equal(got, []int{2, 3}) {
+		t.Errorf("E_DUPLICATE_PK at lines %v, want [2 3]", got)
+	}
+	for _, iss := range doc.Issues {
+		if iss.Code == "E_DUPLICATE_PK" && iss.Related != nil {
+			t.Errorf("the E_DUPLICATE_PK at %+v names related locations %+v, want none", iss.Span, iss.Related)
+		}
+	}
+}
+
 // TestSnapshotSave_KeepsEarlierFilesFindingsWhenALaterFileCannotBeRead pins
 // that a data file that cannot be read ends the command without dropping what
 // the files read before it diagnosed.
@@ -259,39 +388,33 @@ func TestSnapshotSave_KeepsEarlierFilesFindingsWhenALaterFileCannotBeRead(t *tes
 	dir, schemaPath := verdictFixture(t, map[string]string{
 		"first.json": `{"Person": [{"id": "a", "id": "b", "name": "A", "manager": {"_target_id": "a"}}]}`,
 	})
-	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--format", "json", "-o", filepath.Join(dir, "out.ys"),
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "-o", filepath.Join(dir, "out.ys"),
 		schemaPath, filepath.Join(dir, "first.json"), filepath.Join(dir, "missing.json"))
 	if code != cli.ExitRuntime {
 		t.Fatalf("exit code = %d, want %d", code, cli.ExitRuntime)
 	}
 	doc := decodeDocument(t, errOut)
-	if got, want := codesOf(doc), []string{"E_ADAPTER_PARSE", "E_COMMAND_FAILED"}; !slices.Equal(got, want) {
+	if got, want := codesOf(doc), []string{"E_COMMAND_FAILED", "E_DATA_PARSE"}; !slices.Equal(got, want) {
 		t.Errorf("codes = %v, want %v: the first file's finding must survive the second file's failure", got, want)
 	}
 }
 
 // TestSnapshotSave_RefusesAUsageErrorBeforeReadingAnyFile pins that every data
-// usage error — a format, a CSV type flag, a --type name, an operand — is
-// decided before the first data file is read, so it reports nothing an earlier
-// file would have drawn.
+// operand a read could not answer is refused before the first data file is read,
+// so it reports nothing an earlier file would have drawn.
 func TestSnapshotSave_RefusesAUsageErrorBeforeReadingAnyFile(t *testing.T) {
 	t.Parallel()
 
 	dir, schemaPath := verdictFixture(t, map[string]string{
 		"first.json": `{"Person": [{"id": "a", "id": "b", "name": "A", "manager": {"_target_id": "a"}}]}`,
-		"second.csv": "id,name\nc,C\n",
-		"third.xml":  "<Person/>",
 	})
 	for name, args := range map[string][]string{
-		"a CSV file with no type flag":  {filepath.Join(dir, "first.json"), filepath.Join(dir, "second.csv")},
-		"an undetectable format":        {filepath.Join(dir, "first.json"), filepath.Join(dir, "third.xml")},
-		"a --type the schema lacks":     {"--type", "Nope", filepath.Join(dir, "first.json"), filepath.Join(dir, "second.csv")},
-		"an empty data path":            {"--from", "json", filepath.Join(dir, "first.json"), ""},
+		"an empty data path":            {filepath.Join(dir, "first.json"), ""},
 		"a data path that is not UTF-8": {filepath.Join(dir, "first.json"), "bad\xff.json"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			argv := append([]string{"snapshot", "save", "--format", "json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath}, args...)
+			argv := append([]string{"snapshot", "save", "--json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath}, args...)
 			code, _, errOut := executeCmdOutput(t, argv...)
 			if code != cli.ExitUsage {
 				t.Fatalf("exit code = %d, want %d", code, cli.ExitUsage)
@@ -303,10 +426,10 @@ func TestSnapshotSave_RefusesAUsageErrorBeforeReadingAnyFile(t *testing.T) {
 	}
 }
 
-// TestDataCommands_RefuseAUsageErrorBeforeAnyRead pins that check, load and
-// snapshot save decide every data file's format before they read the schema or
-// a merged file: a schema that does not load and a merged file that does not
-// exist draw nothing beside the usage error.
+// TestDataCommands_RefuseAUsageErrorBeforeAnyRead pins that check and snapshot
+// save judge every data operand before they read the schema or a merged
+// file: a schema that does not load and a merged file that does not exist draw
+// nothing beside the usage error.
 func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
 	t.Parallel()
 
@@ -315,16 +438,12 @@ func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
 	if err := os.WriteFile(broken, []byte("schema \"b\"\n\ntype {\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	data := filepath.Join(dir, "data.csv")
-	if err := os.WriteFile(data, []byte("id,name\na,A\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	const data = "bad\xff.json"
 	out := filepath.Join(dir, "out.ys")
 	for name, argv := range map[string][]string{
-		"check":                {"check", "--format", "json", broken, data},
-		"load":                 {"load", "--format", "json", broken, data},
-		"snapshot save":        {"snapshot", "save", "--format", "json", "-o", out, broken, data},
-		"snapshot save --into": {"snapshot", "save", "--format", "json", "--into", filepath.Join(dir, "missing.ys"), broken, data},
+		"check":                {"check", "--json", broken, data},
+		"snapshot save":        {"snapshot", "save", "--json", "-o", out, broken, data},
+		"snapshot save --into": {"snapshot", "save", "--json", "--into", filepath.Join(dir, "missing.ys"), broken, data},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -339,66 +458,99 @@ func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
 	}
 }
 
-// TestCheck_ReadsATypeColumn pins that --type-column alone satisfies CSV data:
-// the rows are read and judged, so a row the schema refuses exits 1, not 2.
-func TestCheck_ReadsATypeColumn(t *testing.T) {
+// TestSnapshotSaveInto_ReportsAMissingTargetOfARootTheEntryCannotName pins that
+// a base snapshot's root of a type the entry schema reaches only through another
+// import keeps its E_UNRESOLVED_REQUIRED when the document refuses an entry type
+// of the target's name and key: the refused root is another type.
+func TestSnapshotSaveInto_ReportsAMissingTargetOfARootTheEntryCannotName(t *testing.T) {
 	t.Parallel()
-
+	ctx := context.Background()
 	dir := t.TempDir()
-	good := filepath.Join(dir, "good.csv")
-	bad := filepath.Join(dir, "bad.csv")
-	if err := os.WriteFile(good, []byte("kind,id,name\nPerson,a,A\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(bad, []byte("kind,id\nPerson,a\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if code, _, errOut := executeCmdOutput(t, "check", "--type-column", "kind", "testdata/valid.yammm", good); code != cli.ExitOK {
-		t.Errorf("check --type-column over a valid row: exit %d\n%s", code, errOut)
-	}
-	if code, _, errOut := executeCmdOutput(t, "check", "--type-column", "kind", "testdata/valid.yammm", bad); code != cli.ExitValidation {
-		t.Errorf("check --type-column over a refused row: exit %d, want %d\n%s", code, cli.ExitValidation, errOut)
-	}
+	for name, src := range map[string]string{
+		"entry.yammm": `schema "entry"
+
+import "./base" as base
+
+type Beacon {
+	id String primary
+	--> LINK (one) Target
 }
 
-// TestLoad_SummaryCountsTheDocumentAndIgnoresWarnings pins the summary line's
-// two counts over a document of several type names, and that a warning does
-// not withhold it.
-func TestLoad_SummaryCountsTheDocumentAndIgnoresWarnings(t *testing.T) {
-	t.Parallel()
-
-	dir, schemaPath := verdictFixture(t, map[string]string{
-		"two.json": `{"Person": [
-{"id": "a", "name": "A", "manager": {"_target_id": "a"}},
-{"id": "b", "name": "B", "manager": {"_target_id": "a"}}
-]}`,
-	})
-	companySchema := filepath.Join(dir, "company.yammm")
-	if err := os.WriteFile(companySchema, []byte(managerSchema+`
-type Company {
-    cid String primary
+type Target {
+	id String primary
+	n Integer[0, 5]
 }
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	both := filepath.Join(dir, "both.json")
-	if err := os.WriteFile(both, []byte(`{"Company": [{"cid": "c"}], "Person": [
-{"id": "a", "name": "A", "manager": {"_target_id": "a"}},
-{"id": "b", "name": "B", "manager": {"_target_id": "a"}}
-]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"load", schemaPath, filepath.Join(dir, "two.json")}, "loaded 2 instances of 1 types\n"},
-		{[]string{"load", companySchema, both}, "loaded 3 instances of 2 types\n"},
-		{[]string{"load", "testdata/annotation_shadowed.yammm", "testdata/annotation_shadowed_good.json"}, "loaded 1 instances of 1 types\n"},
+`,
+		"base.yammm": `schema "base"
+
+import "./deep" as deep
+
+type Basin {
+	id String primary
+	--> LIGHT (_:one) deep.Beacon
+}
+`,
+		"deep.yammm": `schema "deep"
+
+type Beacon {
+	id String primary
+	--> LINK (one) Target
+}
+
+type Target {
+	id String primary
+}
+`,
+		"refused.json": `{"Target": [{"id": "t1", "n": 99}]}`,
 	} {
-		code, _, errOut := executeCmdOutput(t, tc.args...)
-		if code != cli.ExitOK || !strings.Contains(errOut, tc.want) {
-			t.Errorf("%v: exit %d, stderr %q; want exit 0 and %q", tc.args, code, errOut, tc.want)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entryPath := filepath.Join(dir, "entry.yammm")
+	s, loadErr := schema.Load(ctx, entryPath)
+	if loadErr != nil {
+		t.Fatalf("load schema: %s", loadErr)
+	}
+	var deep schema.Schema
+	for member := range s.Closure() {
+		if member.Name() == "deep" {
+			deep = member
+		}
+	}
+	beacon, validateErr := instance.NewValidator(deep).ValidateOne(ctx, "Beacon",
+		instance.RawInstance{Properties: map[string]any{"id": "b1", "link": map[string]any{"_target_id": "t1"}}})
+	if validateErr != nil {
+		t.Fatalf("validate deep Beacon: %s", validateErr)
+	}
+	g := graph.New(s)
+	if err := g.Add(ctx, beacon); err != nil {
+		t.Fatalf("add deep Beacon: %s", err)
+	}
+	data, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
+	}
+	base := filepath.Join(dir, "base.ys")
+	if err := os.WriteFile(base, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "--into", base,
+		"-o", filepath.Join(dir, "out.ys"), entryPath, filepath.Join(dir, "refused.json"))
+	if code != cli.ExitValidation {
+		t.Fatalf("exit code = %d, want %d\nstderr:\n%s", code, cli.ExitValidation, errOut)
+	}
+	doc := decodeDocument(t, errOut)
+	if got, want := codesOf(doc), []string{"E_CONSTRAINT_FAIL", "E_UNRESOLVED_REQUIRED"}; !slices.Equal(got, want) {
+		t.Errorf("codes = %v, want %v", got, want)
+	}
+	for _, iss := range doc.Issues {
+		if iss.Code != "E_UNRESOLVED_REQUIRED" {
+			continue
+		}
+		if name, _ := iss.detail("type"); name != "deep#Beacon" {
+			t.Errorf("the missing target's source is named %q, want %q", name, "deep#Beacon")
 		}
 	}
 }

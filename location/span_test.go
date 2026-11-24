@@ -5,250 +5,52 @@ import (
 	"testing"
 )
 
-var testSource = NewSourceID("test://unit")
+var testSource = SourceID{synthetic: "test://unit"}
 
-func TestPoint(t *testing.T) {
-	s := Point(testSource, 10, 5)
-
-	if s.Source != testSource {
-		t.Error("Source mismatch")
+// at returns the span on one line from column c1 at offset o1 to column c2 at
+// offset o2.
+func at(line, c1, o1, c2, o2 int) Span {
+	return Span{
+		Source: testSource,
+		Start:  Position{Line: line, Column: c1, Offset: o1},
+		End:    Position{Line: line, Column: c2, Offset: o2},
 	}
-	if s.Start.Line != 10 || s.Start.Column != 5 {
-		t.Errorf("Start = %v; want {10, 5, -1}", s.Start)
-	}
-	if s.Start.Byte != -1 {
-		t.Error("Point should have Byte = -1")
-	}
-	if !s.IsPoint() {
-		t.Error("Point should report IsPoint() == true")
-	}
-}
-
-func TestPointWithByte(t *testing.T) {
-	s := PointWithByte(testSource, 10, 5, 42)
-
-	if s.Start.Byte != 42 {
-		t.Errorf("Start.Byte = %d; want 42", s.Start.Byte)
-	}
-	if !s.IsPoint() {
-		t.Error("PointWithByte should report IsPoint() == true")
-	}
-}
-
-func TestRange(t *testing.T) {
-	s := Range(testSource, 10, 5, 10, 15)
-
-	if s.Start.Line != 10 || s.Start.Column != 5 {
-		t.Errorf("Start = %v; want {10, 5, -1}", s.Start)
-	}
-	if s.End.Line != 10 || s.End.Column != 15 {
-		t.Errorf("End = %v; want {10, 15, -1}", s.End)
-	}
-	if s.IsPoint() {
-		t.Error("Range should not be a point")
-	}
-}
-
-func TestRange_Panics_EndBeforeStart(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Range with end before start should panic")
-		}
-	}()
-
-	Range(testSource, 10, 15, 10, 5) // End column before start column
-}
-
-func TestRangeWithBytes(t *testing.T) {
-	s := RangeWithBytes(testSource, 10, 5, 100, 10, 15, 110)
-
-	if s.Start.Byte != 100 {
-		t.Errorf("Start.Byte = %d; want 100", s.Start.Byte)
-	}
-	if s.End.Byte != 110 {
-		t.Errorf("End.Byte = %d; want 110", s.End.Byte)
-	}
-}
-
-func TestRangeWithBytes_Panics_EndByteBeforeStartByte(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("RangeWithBytes with end byte before start byte should panic")
-		}
-	}()
-
-	RangeWithBytes(testSource, 10, 5, 110, 10, 15, 100) // End byte before start byte
-}
-
-// TestRangeWithBytes_Panics_OrdersDisagree holds the constructor to both orders
-// when both are known. A span whose bytes run forward and whose line and column
-// run backward reaches lsputil.SpanToLSPRange, which takes the line from one
-// and the character from the other, and becomes an inverted LSP range.
-func TestRangeWithBytes_Panics_OrdersDisagree(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("RangeWithBytes should panic when the byte and line/column orders disagree")
-		}
-	}()
-
-	RangeWithBytes(testSource, 10, 15, 100, 10, 5, 110)
 }
 
 func TestSpan_IsZero(t *testing.T) {
-	var zeroSpan Span
-	if !zeroSpan.IsZero() {
-		t.Error("zero value should report IsZero() == true")
+	t.Parallel()
+	if !(Span{}).IsZero() {
+		t.Error("the zero Span must report zero")
 	}
-
-	s := Point(testSource, 1, 1)
-	if s.IsZero() {
-		t.Error("valid span should not be zero")
-	}
-}
-
-func TestSpan_IsValid(t *testing.T) {
-	tests := []struct {
-		name string
-		span Span
-		want bool
-	}{
-		{
-			name: "zero span",
-			span: Span{},
-			want: false,
-		},
-		{
-			name: "valid point",
-			span: Point(testSource, 1, 1),
-			want: true,
-		},
-		{
-			name: "valid range",
-			span: Range(testSource, 1, 1, 2, 10),
-			want: true,
-		},
-		{
-			name: "no source",
-			span: Span{Start: Position{Line: 1, Column: 1}, End: Position{Line: 1, Column: 1}},
-			want: false,
-		},
-		{
-			name: "unknown start",
-			span: Span{Source: testSource, Start: Position{}, End: Position{Line: 1, Column: 1}},
-			want: false,
-		},
-		{
-			name: "unknown end (non-point)",
-			span: Span{Source: testSource, Start: Position{Line: 1, Column: 1}, End: Position{}},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.span.IsValid(); got != tt.want {
-				t.Errorf("IsValid() = %v; want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSpan_IsGeometricallySafe(t *testing.T) {
-	tests := []struct {
-		name string
-		span Span
-		want bool
-	}{
-		{
-			name: "zero span",
-			span: Span{},
-			want: true,
-		},
-		{
-			name: "point span",
-			span: Point(testSource, 5, 10),
-			want: true,
-		},
-		{
-			name: "valid range",
-			span: Range(testSource, 1, 1, 2, 10),
-			want: true,
-		},
-		{
-			name: "inverted range via struct literal",
-			span: Span{
-				Source: testSource,
-				Start:  Position{Line: 2, Column: 10, Byte: -1},
-				End:    Position{Line: 1, Column: 1, Byte: -1},
-			},
-			want: false,
-		},
-		{
-			name: "inverted bytes via struct literal",
-			span: Span{
-				Source: testSource,
-				Start:  Position{Line: 1, Column: 1, Byte: 100},
-				End:    Position{Line: 1, Column: 10, Byte: 50},
-			},
-			want: false,
-		},
-		{
-			// Both orders are known and they disagree, so the span is unsafe
-			// whichever one a reader takes.
-			name: "ordered bytes, inverted line and column",
-			span: Span{
-				Source: testSource,
-				Start:  Position{Line: 10, Column: 15, Byte: 100},
-				End:    Position{Line: 10, Column: 5, Byte: 110},
-			},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.span.IsGeometricallySafe(); got != tt.want {
-				t.Errorf("IsGeometricallySafe() = %v; want %v", got, tt.want)
-			}
-		})
+	for name, s := range map[string]Span{
+		"a source alone":   {Source: testSource},
+		"a start alone":    {Start: Position{Line: 1, Column: 1}},
+		"an offset alone":  {End: Position{Offset: 3}},
+		"a complete point": at(1, 1, 0, 1, 0),
+	} {
+		if s.IsZero() {
+			t.Errorf("%s: %v reports zero", name, s)
+		}
 	}
 }
 
 func TestSpan_String(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		span Span
 		want string
 	}{
-		{
-			name: "zero span",
-			span: Span{},
-			want: "<no location>",
-		},
-		{
-			name: "point span",
-			span: Point(testSource, 10, 5),
-			want: "test://unit:10:5",
-		},
-		{
-			name: "range span",
-			span: Range(testSource, 10, 5, 10, 15),
-			want: "test://unit:10:5-10:15",
-		},
-		{
-			name: "range with an unknown end",
-			span: Span{Source: testSource, Start: Position{Line: 10, Column: 5, Byte: -1}},
-			want: "test://unit:10:5-<unknown>",
-		},
-		{
-			name: "range with an unknown start",
-			span: Span{Source: testSource, End: Position{Line: 10, Column: 15, Byte: -1}},
-			want: "test://unit:<unknown>-10:15",
-		},
+		{"zero span", Span{}, "<no location>"},
+		{"point span", at(10, 5, 40, 5, 40), "test://unit:10:5"},
+		{"range span", at(10, 5, 40, 15, 50), "test://unit:10:5-10:15"},
+		{"a range whose ends share a line and column", at(1, 1, 0, 1, 5), "test://unit:1:1-1:1"},
+		{"range with an unknown end", Span{Source: testSource, Start: Position{Line: 10, Column: 5}}, "test://unit:10:5-<unknown>"},
+		{"range with an unknown start", Span{Source: testSource, End: Position{Line: 10, Column: 15}}, "test://unit:<unknown>-10:15"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := tt.span.String(); got != tt.want {
 				t.Errorf("String() = %q; want %q", got, tt.want)
 			}
@@ -256,114 +58,64 @@ func TestSpan_String(t *testing.T) {
 	}
 }
 
+// TestSpan_Contains holds Contains to the half-open byte range [Start, End):
+// the offsets decide, and a span or position that is not valid contains, and
+// is contained by, nothing. A point span is empty.
 func TestSpan_Contains(t *testing.T) {
-	// Range from line 5, column 10 to line 5, column 20
-	s := Range(testSource, 5, 10, 5, 20)
-
+	t.Parallel()
+	s := at(5, 10, 100, 20, 110)
 	tests := []struct {
 		name string
+		span Span
 		pos  Position
 		want bool
 	}{
-		{
-			name: "before range",
-			pos:  Position{Line: 5, Column: 5, Byte: -1},
-			want: false,
-		},
-		{
-			name: "at start",
-			pos:  Position{Line: 5, Column: 10, Byte: -1},
-			want: true,
-		},
-		{
-			name: "in middle",
-			pos:  Position{Line: 5, Column: 15, Byte: -1},
-			want: true,
-		},
-		{
-			name: "at end (exclusive)",
-			pos:  Position{Line: 5, Column: 20, Byte: -1},
-			want: false,
-		},
-		{
-			name: "after range",
-			pos:  Position{Line: 5, Column: 25, Byte: -1},
-			want: false,
-		},
-		{
-			name: "unknown position",
-			pos:  Position{},
-			want: false,
-		},
+		{"before the range", s, Position{Line: 5, Column: 5, Offset: 95}, false},
+		{"at the start", s, Position{Line: 5, Column: 10, Offset: 100}, true},
+		{"in the middle", s, Position{Line: 5, Column: 15, Offset: 105}, true},
+		{"at the end, which is exclusive", s, Position{Line: 5, Column: 20, Offset: 110}, false},
+		{"after the range", s, Position{Line: 5, Column: 25, Offset: 115}, false},
+		{"the offset decides over the column", s, Position{Line: 5, Column: 99, Offset: 105}, true},
+		{"an unknown position", s, Position{}, false},
+		{"an unknown position whose offset falls inside", s, Position{Offset: 105}, false},
+		{"a point span's own position", at(5, 10, 100, 10, 100), Position{Line: 5, Column: 10, Offset: 100}, false},
+		{"a span with an unknown start", Span{Source: testSource, End: s.End}, Position{Line: 5, Column: 1, Offset: 0}, false},
+		{"a span with an unknown end", Span{Source: testSource, Start: Position{Line: 1, Column: 1}}, Position{Line: 5, Column: 1, Offset: 3}, false},
+		{"a span whose unknown end holds an offset past the position", Span{Source: testSource, Start: Position{Line: 1, Column: 1}, End: Position{Offset: 50}}, Position{Line: 1, Column: 5, Offset: 10}, false},
+		{"the first byte of a span that starts there", at(1, 1, 0, 4, 3), Position{Line: 1, Column: 1, Offset: 0}, true},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := s.Contains(tt.pos); got != tt.want {
-				t.Errorf("Contains() = %v; want %v", got, tt.want)
+			t.Parallel()
+			if got := tt.span.Contains(tt.pos); got != tt.want {
+				t.Errorf("%v.Contains(%#v) = %v; want %v", tt.span, tt.pos, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestSpan_Contains_WithBytes(t *testing.T) {
-	// Range with byte offsets: 100 to 110 (half-open)
-	s := RangeWithBytes(testSource, 5, 10, 100, 5, 20, 110)
-
-	tests := []struct {
-		name string
-		pos  Position
-		want bool
-	}{
-		{
-			name: "before range (byte)",
-			pos:  Position{Line: 5, Column: 5, Byte: 95},
-			want: false,
-		},
-		{
-			name: "at start (byte)",
-			pos:  Position{Line: 5, Column: 10, Byte: 100},
-			want: true,
-		},
-		{
-			name: "in middle (byte)",
-			pos:  Position{Line: 5, Column: 15, Byte: 105},
-			want: true,
-		},
-		{
-			name: "at end (byte, exclusive)",
-			pos:  Position{Line: 5, Column: 20, Byte: 110},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := s.Contains(tt.pos); got != tt.want {
-				t.Errorf("Contains() = %v; want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestCompare_ZeroOnlyForEqualSpans holds Compare to its contract: it returns
-// 0 exactly when the two spans are ==, so a sort by it ties nothing distinct.
-func TestCompare_ZeroOnlyForEqualSpans(t *testing.T) {
+// TestSpan_Compare_ZeroOnlyForEqualSpans holds Compare to its contract: it
+// returns 0 exactly when the two spans are ==, so a sort by it ties nothing
+// distinct.
+func TestSpan_Compare_ZeroOnlyForEqualSpans(t *testing.T) {
 	t.Parallel()
 
 	file, err := SourceIDFromPath(filepath.Join(t.TempDir(), "a.yammm"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	pointIn := func(src SourceID) Span {
+		return Span{Source: src, Start: Position{Line: 1, Column: 1}, End: Position{Line: 1, Column: 1}}
+	}
 	pairs := []struct {
 		name string
 		a, b Span
 	}{
-		{"a known and an unknown start byte", Point(testSource, 1, 1), PointWithByte(testSource, 1, 1, 0)},
-		{"two known start bytes", PointWithByte(testSource, 1, 1, 0), PointWithByte(testSource, 1, 1, 4)},
-		{"two known end bytes", RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4), RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9)},
-		{"two known start bytes before one end byte", RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9), RangeWithBytes(testSource, 1, 1, 2, 1, 5, 9)},
-		{"a synthetic and a file-backed source spelled alike", Point(NewSourceID(file.String()), 1, 1), Point(file, 1, 1)},
+		{"two start offsets", at(1, 1, 0, 1, 0), at(1, 1, 4, 1, 4)},
+		{"two end offsets", at(1, 1, 0, 5, 4), at(1, 1, 0, 5, 9)},
+		{"two start offsets before one end offset", at(1, 1, 0, 5, 9), at(1, 1, 2, 5, 9)},
+		{"a synthetic and a file-backed source", pointIn(testSource), pointIn(file)},
+		{"the zero source and a synthetic one", pointIn(SourceID{}), pointIn(testSource)},
 	}
 	for _, p := range pairs {
 		t.Run(p.name, func(t *testing.T) {
@@ -371,207 +123,62 @@ func TestCompare_ZeroOnlyForEqualSpans(t *testing.T) {
 			if p.a == p.b {
 				t.Fatalf("the fixture's spans are equal: %v", p.a)
 			}
-			c := Compare(p.a, p.b)
+			c := p.a.Compare(p.b)
 			if c == 0 {
 				t.Errorf("Compare(%v, %v) = 0 for spans that differ", p.a, p.b)
 			}
-			if back := Compare(p.b, p.a); back != -c {
+			if back := p.b.Compare(p.a); back != -c {
 				t.Errorf("Compare is not antisymmetric: %d one way, %d the other", c, back)
 			}
-			if self := Compare(p.a, p.a); self != 0 {
+			if self := p.a.Compare(p.a); self != 0 { //nolint:gocritic // a span compares equal to itself
 				t.Errorf("Compare(a, a) = %d, want 0", self)
 			}
 		})
 	}
 }
 
-func TestCompare(t *testing.T) {
-	file, err := SourceIDFromPath(filepath.Join(t.TempDir(), "a.yammm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	synthetic := NewSourceID(file.String())
-
+func TestSpan_Compare(t *testing.T) {
+	t.Parallel()
+	in := func(src string, s Span) Span { s.Source = SourceID{synthetic: src}; return s }
 	tests := []struct {
 		name string
 		a    Span
 		b    Span
 		want int
 	}{
-		{
-			name: "equal",
-			a:    Range(testSource, 5, 10, 5, 20),
-			b:    Range(testSource, 5, 10, 5, 20),
-			want: 0,
-		},
-		{
-			name: "a before b (line)",
-			a:    Range(testSource, 4, 10, 4, 20),
-			b:    Range(testSource, 5, 10, 5, 20),
-			want: -1,
-		},
-		{
-			name: "a after b (line)",
-			a:    Range(testSource, 6, 10, 6, 20),
-			b:    Range(testSource, 5, 10, 5, 20),
-			want: 1,
-		},
-		{
-			name: "a before b (column)",
-			a:    Range(testSource, 5, 5, 5, 15),
-			b:    Range(testSource, 5, 10, 5, 20),
-			want: -1,
-		},
-		{
-			name: "same start, different end",
-			a:    Range(testSource, 5, 10, 5, 15),
-			b:    Range(testSource, 5, 10, 5, 20),
-			want: -1,
-		},
-		{
-			name: "different source (alphabetic)",
-			a:    Range(NewSourceID("aaa://"), 5, 10, 5, 20),
-			b:    Range(NewSourceID("bbb://"), 5, 10, 5, 20),
-			want: -1,
-		},
-		{
-			name: "end position decides before the start byte",
-			a:    RangeWithBytes(testSource, 1, 1, 9, 1, 5, 20),
-			b:    RangeWithBytes(testSource, 1, 1, 0, 1, 6, 20),
-			want: -1,
-		},
-		{
-			name: "start byte decides before the end byte",
-			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9),
-			b:    RangeWithBytes(testSource, 1, 1, 2, 1, 5, 4),
-			want: -1,
-		},
-		{
-			name: "unknown start byte before a known one",
-			a:    Range(testSource, 1, 1, 1, 5),
-			b:    Span{Source: testSource, Start: Position{Line: 1, Column: 1, Byte: 0}, End: Position{Line: 1, Column: 5, Byte: -1}},
-			want: -1,
-		},
-		{
-			name: "smaller start byte first",
-			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9),
-			b:    RangeWithBytes(testSource, 1, 1, 4, 1, 5, 9),
-			want: -1,
-		},
-		{
-			name: "unknown end byte before a known one",
-			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, -1),
-			b:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4),
-			want: -1,
-		},
-		{
-			name: "smaller end byte first",
-			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4),
-			b:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9),
-			want: -1,
-		},
-		{
-			name: "synthetic source before a file-backed one spelled alike",
-			a:    Point(synthetic, 1, 1),
-			b:    Point(file, 1, 1),
-			want: -1,
-		},
-		{
-			name: "byte offset decides before the source kind",
-			a:    PointWithByte(file, 1, 1, 0),
-			b:    PointWithByte(synthetic, 1, 1, 4),
-			want: -1,
-		},
+		{"equal", at(5, 10, 40, 20, 50), at(5, 10, 40, 20, 50), 0},
+		{"a before b (line)", at(4, 10, 40, 20, 50), at(5, 10, 40, 20, 50), -1},
+		{"a after b (line)", at(6, 10, 40, 20, 50), at(5, 10, 40, 20, 50), 1},
+		{"a before b (column)", at(5, 5, 40, 15, 50), at(5, 10, 40, 20, 50), -1},
+		{"same start, different end", at(5, 10, 40, 15, 50), at(5, 10, 40, 20, 50), -1},
+		{"different source (alphabetic)", in("aaa://", at(5, 10, 40, 20, 50)), in("bbb://", at(5, 10, 40, 20, 50)), -1},
+		{"the source decides before the position", in("aaa://", at(9, 10, 90, 20, 99)), in("bbb://", at(1, 1, 0, 2, 1)), -1},
+		{"end position decides before the start offset", at(1, 1, 9, 5, 20), at(1, 1, 0, 6, 20), -1},
+		{"start offset decides before the end offset", at(1, 1, 0, 5, 9), at(1, 1, 2, 5, 4), -1},
+		{"smaller start offset first", at(1, 1, 0, 5, 9), at(1, 1, 4, 5, 9), -1},
+		{"smaller end offset first", at(1, 1, 0, 5, 4), at(1, 1, 0, 5, 9), -1},
+		{"an unknown start before a known one", Span{Source: testSource}, at(1, 1, 0, 1, 0), -1},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := Compare(tt.a, tt.b); got != tt.want {
-				t.Errorf("Compare(%v, %v) = %d; want %d", tt.a, tt.b, got, tt.want)
+			t.Parallel()
+			if got := tt.a.Compare(tt.b); got != tt.want {
+				t.Errorf("%v.Compare(%v) = %d; want %d", tt.a, tt.b, got, tt.want)
 			}
-			if got := Compare(tt.b, tt.a); got != -tt.want {
-				t.Errorf("Compare(%v, %v) = %d; want %d", tt.b, tt.a, got, -tt.want)
+			if got := tt.b.Compare(tt.a); got != -tt.want {
+				t.Errorf("%v.Compare(%v) = %d; want %d", tt.b, tt.a, got, -tt.want)
 			}
 		})
 	}
 }
 
-func TestSpan_Equality(t *testing.T) {
-	// Go struct equality should work
-	s1 := Range(testSource, 5, 10, 5, 20)
-	s2 := Range(testSource, 5, 10, 5, 20)
-	s3 := Range(testSource, 5, 10, 5, 21)
-
-	if s1 != s2 {
-		t.Error("equal spans should be equal")
-	}
-	if s1 == s3 {
-		t.Error("different spans should not be equal")
-	}
-}
-
 func TestSpan_MapKey(t *testing.T) {
-	s1 := Range(testSource, 5, 10, 5, 20)
-	s2 := Range(testSource, 5, 10, 5, 20)
-
-	m := make(map[Span]int)
-	m[s1] = 42
-
-	if m[s2] != 42 {
+	t.Parallel()
+	m := map[Span]int{at(5, 10, 40, 20, 50): 42}
+	if m[at(5, 10, 40, 20, 50)] != 42 {
 		t.Error("equal spans should work as map keys")
 	}
-}
-
-// TestSpan_PointContains documents that point spans contain no positions by definition
-// of the half-open interval [Start, End) where Start == End.
-func TestSpan_PointContains(t *testing.T) {
-	point := Point(testSource, 5, 10)
-	pos := Position{Line: 5, Column: 10, Byte: -1}
-
-	// Point spans use half-open interval [Start, End) where Start == End
-	// Therefore they contain no positions (empty interval)
-	if point.Contains(pos) {
-		t.Error("point span should not contain its own position (half-open interval [Start, End) is empty when Start == End)")
-	}
-
-	// The correct way to check if a position matches a point span's location
-	// is to compare against Start directly
-	if point.Start != pos {
-		t.Error("use Start equality for point span position checks")
-	}
-}
-
-// TestSpan_PointContains_WithBytes tests point span behavior with byte offsets.
-func TestSpan_PointContains_WithBytes(t *testing.T) {
-	point := PointWithByte(testSource, 5, 10, 100)
-	pos := Position{Line: 5, Column: 10, Byte: 100}
-
-	// Even with matching byte offsets, point span contains nothing
-	if point.Contains(pos) {
-		t.Error("point span with bytes should not contain its own position")
-	}
-
-	// Verify position equality still works
-	if point.Start != pos {
-		t.Error("position equality should work for point span start")
-	}
-}
-
-// TestSpan_PartialPositions_Contains documents that spans with partial positions
-// behave defensively - positionBefore returns false for partial positions.
-func TestSpan_PartialPositions_Contains(t *testing.T) {
-	// A span where End has a partial position (Line > 0, Column == 0)
-	span := Span{
-		Source: testSource,
-		Start:  Position{Line: 1, Column: 1, Byte: -1},
-		End:    Position{Line: 5, Column: 0, Byte: -1}, // partial - column is 0
-	}
-
-	pos := Position{Line: 3, Column: 5, Byte: -1}
-
-	// Contains should return false because End.IsKnown() is false
-	// and positionBefore will return false
-	if span.Contains(pos) {
-		t.Error("Contains should return false when End position is partial")
+	if _, ok := m[at(5, 10, 40, 21, 51)]; ok {
+		t.Error("a different span found the key")
 	}
 }

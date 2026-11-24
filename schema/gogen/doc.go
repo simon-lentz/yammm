@@ -1,0 +1,404 @@
+// Package gogen generates Go source from a yammm schema: one struct per type,
+// named Enum/DataType types and their value constants, a generated Date
+// type, EDGE_ association structs, a Graph aggregate, and the embedded schema
+// source with its SchemaHash. Output is
+// stdlib-only — it imports at most "time" and "encoding/json". Call [Marshal]
+// with a loaded, resolved schema; it returns formatted, type-checked bytes.
+//
+// # Schema-In, Bytes-Out
+//
+// Like schema/cypher and unlike neo4j, gogen has no instance-data path: it never parses,
+// validates, or serializes instances. It imports neither instance nor graph.
+// It maps a completed schema to Go source, nothing more. It also returns a plain error rather than the
+// *[github.com/simon-lentz/yammm/diag.ResultError] the library's loading, validation
+// and graph code return, because its failures are refusals of its inputs and generator bugs (see
+// Error Conditions), not data diagnostics with source locations. The one exception is an
+// embedded store that does not re-load, a generator bug whose error wraps the load's
+// *[github.com/simon-lentz/yammm/diag.ResultError].
+//
+// # Generated Declarations
+//
+// [Marshal] emits the declarations below. The order of its output is
+// deterministic, and is not the order of this list:
+//
+//   - A named Go type for every DataType (type <Name> <base>), plus value constants
+//     when the DataType resolves to an Enum.
+//   - The inline enum a List DataType holds as its innermost element
+//     (type <DataType>Element string), plus its value constants.
+//   - A per-owner named type for every inline-enum property
+//     (type <Owner><Field> string), plus its value constants.
+//   - A Date type when a position emits Date, a struct embedding time.Time
+//     with a JSON codec that exchanges the value as the text the library
+//     stores (see Type Mapping).
+//   - One struct per type in the closure. Concrete, abstract, and part types are all
+//     emitted — part types because compositions reference them, abstract types
+//     because they document the schema even though inheritance is flattened into
+//     each concrete struct.
+//   - One EDGE_ struct per declared association (see Associations and the Graph
+//     Aggregate).
+//   - A Graph aggregate (see Associations and the Graph Aggregate).
+//   - The embedded schema source, reachable through the SerializedSources /
+//     SerializedEntry pair, and SchemaHash (see the Embedded Source section
+//     below).
+//
+// A type's or a property's schema doc-comment, an edge property's included,
+// becomes the Go declaration's doc-comment, one "//" line for each of its
+// lines; every other doc-comment, a data type's, a relation's, an invariant's,
+// an annotation's and the schema's own among them, is not written. The text is
+// the loaded schema's, whose continuation lines lost the indentation they all
+// share, byte for byte, when the parser read the comment, so layout that
+// indents every continuation line alike makes no code block; lines indented by
+// different bytes, such as a tab on one and spaces on another, share none and
+// keep theirs, which the Go doc-comment formatter reads as a code block, or as
+// a list when the first starts with a list marker ("-", "*", "+", "•", or a
+// number and "." or ")"). Lines indented deeper than the rest keep the
+// difference and are read by the same rule. [Marshal] formats its output with
+// go/format, and the toolchain that builds its caller decides what that does to
+// a doc comment: Go 1.26 rewrites every one as go/doc reads it, and Go 1.27 a
+// type's alone, leaving a field's as written. A rewritten comment can differ
+// from the schema's words: a code block gains a blank "//" line before it, and
+// after it when text follows; a list is indented again and its markers written
+// "-" or "<n>."; a one-line paragraph that reads as a heading, such as
+// "Overview" between two paragraphs, gains "# "; and in text, each pair of
+// backquotes outside a run of three becomes an opening curly double quote and
+// each pair of single quotes a closing one. A line Go would read as a build
+// line — "+build ignore" as a "//" line, which gofmt moves into the file's
+// build constraints — is written as a one-line /* */ comment in the same
+// comment group, which neither gofmt nor go vet reads as one, so the doc's
+// words read unchanged; go/format then leaves the whole group as written. A
+// form feed in such a line is written as a space: gofmt counts a form feed in a
+// comment as a line end, and would join the next line of the group, or the
+// field the comment documents, to a /* */ comment holding one.
+//
+// # Type Mapping
+//
+// Each property's constraint maps to a Go type, and a DataType reference to the
+// DataType's own type:
+//
+//	String, UUID, Pattern         →  string
+//	Enum                          →  <Owner><Field>     (generated, a string type)
+//	Integer                       →  int64
+//	Float                         →  float64
+//	Boolean                       →  bool
+//	Timestamp                     →  time.Time
+//	Date                          →  Date               (generated)
+//	Vector                        →  []float64
+//	List<T>                       →  []T
+//
+// The library stores a Date as "2006-01-02", and the validator reads that text.
+// A bare time.Time decodes RFC 3339 alone, so it refuses a Date. The generated
+// Date type is a struct embedding time.Time — so every time.Time method but
+// MarshalJSON and UnmarshalJSON is promoted, and a value is built as
+// Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that speak the stored text.
+// MarshalJSON refuses a year outside 0 to 9999, which UnmarshalJSON could not
+// read back. The validator reads a generated Date or temporal DataType only
+// through JSON or as its .Time: the value itself draws E_TYPE_MISMATCH, whose
+// message says to pass .Time. A Timestamp stays time.Time, whose own codec
+// exchanges RFC 3339 with nanoseconds, the text the library stores. It decodes
+// and encodes every text the validator stores as written: the validator stores
+// only text time.Time writes. A DataType over a Date or a Timestamp is emitted
+// as struct{ time.Time } too, a Date with the Date codec.
+//
+// Named types are rendered faithfully rather than collapsed to their primitive: a
+// field typed by a named DataType keeps that Go type; a List whose innermost
+// element is a named DataType renders it at every depth ([]<Name>,
+// [][]<Name>), in a property and in a List DataType's own declaration; and an
+// enum declared inline on a property becomes that property's own
+// <Owner><Field> string type, at any List depth ([]<Owner><Field>), and an
+// edge property's owner is its EDGE_ struct; the inline enum a List
+// DataType holds as its innermost element becomes <DataType>Element, so
+// type Tags = List<Enum[...]> emits type TagsElement and type Tags
+// []TagsElement. An optional non-slice field becomes a pointer (*T); slices and
+// vectors stay nil-able as-is, since a nil slice already encodes an absent
+// field. A nil inner slice of a nested List field is not absent: encoding/json
+// writes it as a null element, which instance validation refuses
+// (E_TYPE_MISMATCH).
+//
+// Every field but the time.Time a generated temporal type embeds (Date, or a
+// DataType resolving to Date or Timestamp) carries a json tag preserving the
+// wire name verbatim. An optional pointer field adds ,omitempty. An optional
+// slice field adds ,omitzero, which leaves out a nil slice and writes a present
+// empty list as [], since the library keeps an empty list apart from an absent
+// one; encoding/json reads omitzero from Go 1.24, and a consumer built below it
+// writes a nil slice as null, which instance validation reads as an absent
+// optional. A relation field takes the same rule by its Go kind: an optional
+// composition and an optional to-many association, each a slice, add ,omitzero,
+// and an optional to-one association, a pointer, adds ,omitempty. A required
+// field adds neither. A required relation and a required List or Vector
+// property are a slice or a pointer, so an unset one is written null, which
+// instance validation reads as the key left out and refuses where presence is
+// checked; a required scalar property holds a value, so an unset one is written
+// as its zero value.
+//
+// # Associations and the Graph Aggregate
+//
+// Each declared association is emitted as one struct, whose bare spelling is
+// EDGE_<Owner>_<edge>_<Target> (see Names), carrying the target type's primary-key
+// fields under the reserved "_target_" keys, with the association's
+// own edge properties beside them — the shape the instance document yammm check
+// reads gives an association:
+//
+//	type EDGE_Person_employer_Company struct {
+//		TargetID string    `json:"_target_id"` // the target Company's primary key
+//		Since    time.Time `json:"since"`      // an edge property
+//	}
+//
+// The owning type references it as a field — *EDGE_… for a to-one association,
+// []*EDGE_… for a to-many — and an association inherited by several subtypes is
+// emitted once, by its declaring type, with every subtype's field pointing at that
+// same struct. A completed schema guarantees every association targets a concrete
+// type (E_INVALID_ASSOCIATION_TARGET) that carries a primary key
+// (E_NO_PRIMARY_KEY), so the "_target_" fields always exist. Compositions, by
+// contrast, are inlined as ownership slices ([]*Child for every
+// multiplicity — the document holds an array for (one) too) on the owning
+// struct.
+//
+// The Graph aggregate is the top-level envelope: one slice field per concrete type
+// the entry schema can name (abstract and part types are excluded), each keyed by
+// its [github.com/simon-lentz/yammm/schema.AddressableTag], the type tag the
+// instance document yammm check reads keys a type's array by — the bare type
+// name for the entry schema's own types and the alias-qualified name for a
+// directly imported one — so such a document decodes into the aggregate once it
+// holds no leading byte order mark and none of JSONC's comments and trailing
+// commas, which encoding/json refuses. A type
+// the entry schema reaches only through another import has no such name, so no
+// document can hold it at top level, and it takes no Graph field. Its struct is
+// still emitted, as every type in the closure is.
+//
+//	type Graph struct {
+//		Person []*Person `json:"Person,omitempty"`
+//		Region []*Region `json:"common.Region,omitempty"`
+//	}
+//
+// # Imports and Cross-Schema Schemas
+//
+// gogen handles schemas with imports, save the layouts Error Conditions lists.
+// The entire import closure — the entry schema plus every transitively imported
+// schema, walked deterministically and deduped by source — is flattened into one
+// self-contained package, whose names the Names section states: a name whose
+// bare spelling no other entity or reserved name takes stays bare, and two schemas' Region are Type_geo__Region and
+// Type_common__Region. Inherited properties, associations, and compositions
+// resolve against their declaring schema, so a member inherited from a
+// cross-schema parent maps to the correct type.
+//
+// # Names
+//
+// Every top-level declaration shares one Go package-block namespace. A schema
+// names each type, data type, EDGE_ struct, inline enum, List
+// element enum and enum value constant, and the exported names gogen emits or
+// once emitted (Graph, SchemaHash, SerializedSources, SerializedEntry,
+// SerializedModel, SerializedModelEntry and Date) are reserved. The unexported
+// declarations gogen adds (serializedSources, marshalDate and unmarshalDate)
+// start in lower case, so no exported spelling meets them. Each entity has a bare
+// spelling, built from the names as the schema writes them:
+//
+//   - a type or a data type: its name as an exported identifier, under the
+//     initialisms (URL for Url);
+//   - an EDGE_ struct: EDGE_<Owner>_<edge>_<Target>, its owner's and its
+//     target's names as exported identifiers and its relation's field name
+//     (the name in lower case), so Url's and URL's LINK associations to one
+//     target share one;
+//   - an inline enum: <Owner><Field>, where <Owner> is its type's bare
+//     spelling or its EDGE_ struct's;
+//   - the inline enum a List data type holds as its element: <DataType>Element;
+//   - an enum value constant: its enum's bare spelling and the value as an
+//     exported identifier ("a-b" gives AB).
+//
+// An entity takes its bare spelling when no other entity and no reserved name
+// has that spelling. Otherwise every claimant takes its exact spelling: a word
+// that names its family, "_", and the parts of its identity joined by "__",
+// each part with every rune other than a letter or a digit written "_<hex>_",
+// its code point in upper-case hexadecimal, save the enum part of a value
+// constant, which the table states:
+//
+//	Type_<schema>__<Name>                                   a type
+//	DataType_<schema>__<Name>                               a data type
+//	Association_<schema>__<Owner>__<RELATION>               an EDGE_ struct
+//	Enum_<schema>__<Owner>__<field>                         an inline enum on a type
+//	AssociationEnum_<schema>__<Owner>__<RELATION>__<field>  an inline enum on an edge
+//	Element_<schema>__<DataType>                            a List element enum
+//	Const_<its enum's exact spelling>__<value>              an enum value constant
+//
+// So Url and URL in schema geo are Type_geo__Url and Type_geo__URL, a data type
+// Uri and a type URI are DataType_geo__Uri and Type_geo__URI, and the values
+// "a-b" and "a_b" of data type Level are Const_DataType_geo__Level__a_2D_b and
+// Const_DataType_geo__Level__a_5F_b.
+//
+// A bare spelling either starts "EDGE_" or holds "_" only after a digit or an
+// "X" and before a digit. An exact spelling holds "_" directly after its word,
+// which ends in another letter and is never "EDGE", so no bare spelling is an
+// exact one. Past that first "_", an exact spelling holds "_" only in a
+// "_<hex>_" group, a "__" join, or, in a value constant's, after its enum's
+// word, which fixes how many parts follow; so it reads back to one family and
+// one identity, and no two entities share one. A name therefore depends on the set of claims, never on
+// declaration or import order, and adding a declaration never gives a name to
+// another entity: it can only move a claimant from its bare spelling to its
+// exact one.
+//
+// The fields of one struct share a namespace of their own. A field's bare
+// spelling is its property's name, or its relation's field name (the
+// relation's name in lower case), as an exported identifier. An EDGE_ struct's
+// key field is "Target" and then the key property's name as an exported
+// identifier. Two fields whose bare spellings meet each take "Field_" and their
+// wire key, which their json tag also holds: Field_foo_1 and Field_foo1 for
+// foo_1 and foo1. A Graph field is named by its type's Go name, bare or exact,
+// so it moves when that name moves; its json tag, the type's AddressableTag,
+// does not.
+//
+// # Embedded Source
+//
+// Every generated file embeds the .yammm source it was generated from, so the
+// schema can be re-loaded at runtime without the original files on disk. One
+// surface carries it, emitted identically whatever the source count:
+//
+//   - func SerializedSources() map[string][]byte returns every source the
+//     schema's load held, by its key, and const SerializedEntry names the
+//     entry's key. The recommended re-load is
+//     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with
+//     [github.com/simon-lentz/yammm/schema.WithSyntheticRoot] and no module root,
+//     which reads no disk and gives type identities no working directory,
+//     checkout, or container mount point can move.
+//
+// The backing store is an unexported package-level map, so the identifiers a
+// consumer sees do not vary with how many files a schema happens to span.
+//
+// A key is the name the re-load registers a source under, never an absolute
+// generation-machine path, so the output of a generator one Go toolchain
+// builds is byte-reproducible across checkouts and CI. The entry keys by its
+// path under the load's recorded module root
+// ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot] — supplied by the
+// caller, discovered from a yammm.mod marker, a synthetic root, or the entry
+// file's own directory), compared as
+// an identity, with ".." segments when the entry lies outside it. A file entry
+// loaded with no root keys against its own directory. A
+// [github.com/simon-lentz/yammm/schema.LoadString] source has no root and keys
+// by the base name it was loaded under, split at either separator and written
+// in NFC; a name with no base, such as ".", names no file and is refused.
+// Every imported source keys by the text that imports it, resolved against its
+// importer's key by the loader's own rule, so an import through a symlinked directory keys by
+// the path the import names, not by where the link resolves.
+//
+// Two import layouts a load accepts have no store the re-load can read, and
+// [Marshal] refuses both, naming the paths: one source imported by two paths under two
+// keys (a store holding both fails to re-load as one schema name declared
+// twice), and two sources
+// taking one key (a relative import through a symlink reads the link target's
+// neighbour on load and resolves by the key's text on re-load).
+// A source with no path relative to the root, such as one on another drive, is
+// refused too, because a key is never a generation-machine path, and so is a
+// LoadString name with no base, which names no file. So is a key the re-load's
+// key rule, the one [schema.WithSyntheticRoot] states, refuses: one holding a backslash, which a Unix file name may hold and another
+// host reads as a separator, one holding a character that does not print, and
+// one that looks absolute, such as the key of a
+// source in a directory named "C:" directly under the root. The entry and a
+// source nothing imports key from their identities, so a symlinked path to one
+// is judged by where the link resolves. const SchemaHash carries the schema's
+// [github.com/simon-lentz/yammm/schema.StructuralHash]. Before returning,
+// [Marshal] re-loads the store exactly as emitted, through the recipe the
+// generated file prints, and confirms it produces the input's StructuralHash —
+// hermetically: a synthetic root reads no disk, so a mis-keyed source fails
+// generation rather than being silently satisfied by an on-disk file.
+// [Marshal] returns only bytes that check passed.
+//
+// # Output Guarantees
+//
+// Generated source is formatted until gofmt writes it back byte for byte, so
+// gofmt leaves the file [Marshal] returns as written, and is then type-checked
+// with go/types. One gofmt pass does not give that for every doc comment: a
+// list item, a numbered item and then an indented line are laid out again by
+// a second pass. Type-checking is hermetic: the output imports at most "time"
+// and "encoding/json", calls only time.Time.Format, time.Parse, json.Marshal
+// and json.Unmarshal, and names one constant, time.DateOnly, so a synthetic
+// importer declaring exactly those satisfies
+// it with no Go toolchain, GOROOT, or build cache — [Marshal] behaves identically
+// inside the distributed yammm CLI binary, a CI container, or a scratch image, while
+// still catching duplicate declarations, unused imports, and undefined references. A
+// format or type-check failure is treated as a generator bug and surfaced as an
+// error rather than emitted as broken Go. All closure walks and name assignments are
+// ordered, so output is deterministic across runs.
+//
+// # Preconditions
+//
+// The schema is one a load returned: [github.com/simon-lentz/yammm/schema.Load],
+// [github.com/simon-lentz/yammm/schema.LoadString], or
+// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry]. It holds the sources
+// the embedded store carries and the round-trip check re-loads.
+//
+// # Configuration
+//
+//   - [WithPackageName]: override the generated package name. The default is derived
+//     from the schema name, an identifier, lowered with its underscores dropped; a
+//     keyword, a predeclared identifier such as nil, string or len,
+//     "main" or "init" takes a "_" suffix, since a file importing a package named
+//     for a predeclared identifier can no longer use that identifier, a file of
+//     declarations alone cannot build as package main, and a package named init
+//     cannot be imported without an alias. An explicit name, the empty one
+//     included, must be a Go identifier that is not a keyword and not "_", and may
+//     be "main", "init" or a predeclared identifier.
+//   - [WithInitialisms]: register extra acronyms (e.g. "JWT") the name mapper
+//     upper-cases wholesale in exported identifiers. They merge with gogen's
+//     default golint acronym set, less "utf8", and are matched
+//     case-insensitively. An acronym is one or more letters, since a word of a
+//     name holds nothing else. This is how a downstream generator injects its
+//     own domain vocabulary without that vocabulary ever living in yammm.
+//
+// # Error Conditions
+//
+// [Marshal] returns an error (never partial or broken Go) when:
+//
+//   - the [WithPackageName] value cannot head a package clause
+//     ([ErrInvalidPackageName]; [CheckPackageName] applies the same rule
+//     before a schema is loaded);
+//   - a [WithInitialisms] acronym is empty or holds a rune that is not a letter
+//     ([ErrInvalidInitialism]);
+//   - a source is imported by two paths under two keys, two sources take one
+//     key, a source has no path relative to the root, a LoadString name has
+//     no base, or a key is one the re-load's key rule refuses (see Embedded
+//     Source);
+//   - the module root the load recorded no longer resolves as a host path;
+//   - any other failure, which is a generator bug: emission meets a state it
+//     cannot write, such as an unresolved reference, alias or target, a kind
+//     it does not handle or whose constraint it does not carry, or a name with
+//     no Go spelling registered; the generated source
+//     fails to parse or to type-check or imports a package other than time and
+//     encoding/json, gofmt still rewrites it after eight passes, or the
+//     embedded store fails to re-load or fails its round-trip hash check.
+//
+// # Thread Safety
+//
+// [Marshal] is safe for concurrent use. It allocates a fresh generator per call and
+// shares no mutable state; the package-level acronym set is cloned, never mutated.
+//
+// # Annotations
+//
+// Schema annotations do not shape the generated Go: no struct field, tag, enum,
+// or method reflects them. They describe store-level concerns — index shape,
+// write-once behaviour — that a Go type does not express, and
+// [github.com/simon-lentz/yammm/schema/cypher] and
+// [github.com/simon-lentz/yammm/neo4j] are where they are read.
+//
+// They do survive in the embedded source, which is held verbatim and reachable
+// through SerializedSources. A schema re-loaded from it carries its annotations,
+// and the store DDL derived from the re-loaded schema matches the DDL derived
+// from the original files — the whole point of embedding the source rather than
+// a reduction of it. Adding an annotation to a schema changes the embedded text
+// and nothing else in the emitted file.
+//
+// They do reach the generator indirectly: a property inherited from several
+// direct supertypes carries the union of their merged views' annotations. Where
+// that union differs from the surviving property's own set, the merged view
+// holds a synthesized copy rather than the declared property. Every lookup keyed by a
+// property here therefore goes through [github.com/simon-lentz/yammm/schema.Property.Origin].
+//
+// # Dependencies
+//
+//	schema/gogen  ──imports──▶  schema, location, internal/ident, internal/source
+//
+// gogen imports two core internal packages: internal/ident, for the
+// identifier-casing transform that turns schema names into Go identifiers, and
+// internal/source, for the rule that cleans an embedded source key.
+// It does not import instance and, unlike neo4j, imports neither graph
+// nor diag. The
+// generated output depends only on the standard library, importing at most
+// "time" and "encoding/json".
+package gogen

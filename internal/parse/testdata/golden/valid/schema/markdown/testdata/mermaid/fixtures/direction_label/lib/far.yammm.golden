@@ -1,0 +1,37 @@
+{
+  "name": "\"dir__ection_TB\"",
+  "span": {
+    "s": 0,
+    "e": 23
+  },
+  "types": [
+    {
+      "name": "Beacon",
+      "name_span": {
+        "s": 30,
+        "e": 36
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 43,
+              "e": 49
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 40,
+            "e": 57
+          }
+        }
+      ],
+      "span": {
+        "s": 25,
+        "e": 59
+      }
+    }
+  ]
+}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"unicode/utf8"
@@ -39,7 +40,7 @@ func CheckSourceOperand(what, path string) error {
 
 // HostPath returns the path the CLI reads and writes for a path the operator
 // named, by the module's one rule for a "..": it is evaluated on the text, as
-// the schema loader and [location.ResolveHostPath] evaluate it, and every other
+// the schema loader and [location.SourceIDFromPath] evaluate it, and every other
 // component, each symbolic link included, is left to the kernel. So every
 // command reaches the file `yammm check` reads for that spelling.
 func HostPath(p string) (string, error) {
@@ -50,6 +51,9 @@ func HostPath(p string) (string, error) {
 // the operator spelled it.
 func ReadFile(path string) ([]byte, error) {
 	host, err := HostPath(path)
+	if err == nil {
+		err = hostpath.RefusedRead(host)
+	}
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
@@ -61,11 +65,31 @@ func ReadFile(path string) ([]byte, error) {
 // path as the operator spelled it.
 func Open(path string) (*os.File, error) {
 	host, err := HostPath(path)
+	if err == nil {
+		err = hostpath.RefusedRead(host)
+	}
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
 	f, err := os.Open(host)
 	return f, renamePathError(err, path)
+}
+
+// SpelledReader returns a reader of f, which [Open] opened for path, whose
+// errors name path as the operator spelled it, as Open's own do. A read of f
+// itself names the host's path.
+func SpelledReader(f *os.File, path string) io.Reader {
+	return spelledReader{f: f, path: path}
+}
+
+type spelledReader struct {
+	f    *os.File
+	path string
+}
+
+func (r spelledReader) Read(p []byte) (int, error) {
+	n, err := r.f.Read(p)
+	return n, renamePathError(err, r.path)
 }
 
 // renamePathError makes an [fs.PathError] name path.

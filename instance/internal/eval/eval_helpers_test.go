@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // lit wraps a Go value as a literal expression.
@@ -37,6 +37,15 @@ func evalEq(t *testing.T, e expr.Expression, want any) {
 		t.Fatalf("Evaluate(%v): %v", e, err)
 	}
 	yammmtest.Diff(t, want, result)
+}
+
+// evalErrIs evaluates e and requires the error whose whole text is want.
+func evalErrIs(t *testing.T, e expr.Expression, want string) {
+	t.Helper()
+	got, err := eval.NewEvaluator().Evaluate(t.Context(), e, eval.EmptyScope())
+	if err == nil || err.Error() != want {
+		t.Errorf("Evaluate(%v) = %v, %v; want the error %q", e, got, err, want)
+	}
 }
 
 // evalErr evaluates e in an empty scope, requires an error, and — when substr

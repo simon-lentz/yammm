@@ -1,0 +1,52 @@
+{
+  "name": "\"geo__Regions\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "types": [
+    {
+      "name": "Region",
+      "name_span": {
+        "s": 28,
+        "e": 34
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 46,
+              "e": 52
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 41,
+            "e": 60
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 70,
+              "e": 76
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 65,
+            "e": 85
+          }
+        }
+      ],
+      "span": {
+        "s": 23,
+        "e": 87
+      }
+    }
+  ]
+}

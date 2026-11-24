@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 )
@@ -17,8 +19,8 @@ func TestNewRegistry(t *testing.T) {
 	if reg == nil {
 		t.Fatal("NewRegistry() returned nil")
 	}
-	if reg.Len() != 0 {
-		t.Errorf("NewRegistry().Len() = %d; want 0", reg.Len())
+	if got := len(reg.Keys()); got != 0 {
+		t.Errorf("NewRegistry() holds %d sources; want 0", got)
 	}
 }
 
@@ -26,7 +28,7 @@ func TestRegistry_Register_And_ContentBySource(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
+	sourceID := sourcetest.ID("test://test.yammm")
 	content := []byte("type Person {\n  name: string\n}\n")
 
 	// Register content
@@ -48,7 +50,7 @@ func TestRegistry_ContentBySource_UnknownSource(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://unknown.yammm")
+	sourceID := sourcetest.ID("test://unknown.yammm")
 
 	_, ok := reg.ContentBySource(sourceID)
 	if ok {
@@ -60,7 +62,7 @@ func TestRegistry_Content_Span(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
+	sourceID := sourcetest.ID("test://test.yammm")
 	content := []byte("type Person {}")
 
 	if err := reg.Register(sourceID, content); err != nil {
@@ -68,7 +70,7 @@ func TestRegistry_Content_Span(t *testing.T) {
 	}
 
 	// Content via Span (adapter method)
-	span := location.Point(sourceID, 1, 1)
+	span := location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}
 	got, ok := reg.Content(span)
 	if !ok {
 		t.Fatal("Content(span) returned false for registered source")
@@ -82,7 +84,7 @@ func TestRegistry_Register_IdempotentSameContent(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
+	sourceID := sourcetest.ID("test://test.yammm")
 	content := []byte("type Person {}")
 
 	// First registration
@@ -96,8 +98,8 @@ func TestRegistry_Register_IdempotentSameContent(t *testing.T) {
 	}
 
 	// Verify only one entry
-	if reg.Len() != 1 {
-		t.Errorf("Len() = %d; want 1 after idempotent registration", reg.Len())
+	if got := len(reg.Keys()); got != 1 {
+		t.Errorf("registry holds %d sources; want 1 after idempotent registration", got)
 	}
 }
 
@@ -105,7 +107,7 @@ func TestRegistry_Register_CollisionDifferentContent(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
+	sourceID := sourcetest.ID("test://test.yammm")
 	content1 := []byte("type Person {}")
 	content2 := []byte("type Vehicle {}")
 
@@ -133,7 +135,7 @@ func TestRegistry_Register_DefensiveCopy(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
+	sourceID := sourcetest.ID("test://test.yammm")
 	content := []byte("original content")
 
 	if err := reg.Register(sourceID, content); err != nil {
@@ -160,7 +162,7 @@ func TestRegistry_ContentBySource_DefensiveCopy(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
+	sourceID := sourcetest.ID("test://test.yammm")
 	content := []byte("original content")
 
 	if err := reg.Register(sourceID, content); err != nil {
@@ -191,7 +193,7 @@ func TestRegistry_PositionAt_SimpleASCII(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
+	sourceID := sourcetest.ID("test://test.yammm")
 	// Line 1: "hello\n" (bytes 0-5, newline at 5)
 	// Line 2: "world\n" (bytes 6-11, newline at 11)
 	// Line 3: "!\n" (bytes 12-13, newline at 13)
@@ -225,8 +227,8 @@ func TestRegistry_PositionAt_SimpleASCII(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pos := reg.PositionAt(sourceID, tt.byteOffset)
-			if pos.IsZero() != tt.wantZero {
-				t.Errorf("PositionAt(%d).IsZero() = %v; want %v", tt.byteOffset, pos.IsZero(), tt.wantZero)
+			if pos.IsValid() == tt.wantZero {
+				t.Errorf("PositionAt(%d).IsValid() = %v; want %v", tt.byteOffset, pos.IsValid(), !tt.wantZero)
 				return
 			}
 			if tt.wantZero {
@@ -238,8 +240,8 @@ func TestRegistry_PositionAt_SimpleASCII(t *testing.T) {
 			if pos.Column != tt.wantColumn {
 				t.Errorf("PositionAt(%d).Column = %d; want %d", tt.byteOffset, pos.Column, tt.wantColumn)
 			}
-			if pos.Byte != tt.wantByte {
-				t.Errorf("PositionAt(%d).Byte = %d; want %d", tt.byteOffset, pos.Byte, tt.wantByte)
+			if pos.Offset != tt.wantByte {
+				t.Errorf("PositionAt(%d).Offset = %d; want %d", tt.byteOffset, pos.Offset, tt.wantByte)
 			}
 		})
 	}
@@ -249,7 +251,7 @@ func TestRegistry_PositionAt_CRLF(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://crlf.yammm")
+	sourceID := sourcetest.ID("test://crlf.yammm")
 	// Line 1: "ab\r\n" (bytes 0-3, CRLF at 2-3)
 	// Line 2: "cd\r\n" (bytes 4-7, CRLF at 6-7)
 	// Line 3: "e" (bytes 8, no newline)
@@ -279,7 +281,7 @@ func TestRegistry_PositionAt_CRLF(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pos := reg.PositionAt(sourceID, tt.byteOffset)
-			if pos.IsZero() {
+			if !pos.IsValid() {
 				t.Fatalf("PositionAt(%d) returned zero Position", tt.byteOffset)
 			}
 			if pos.Line != tt.wantLine {
@@ -296,7 +298,7 @@ func TestRegistry_PositionAt_UTF8(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://utf8.yammm")
+	sourceID := sourcetest.ID("test://utf8.yammm")
 	// "café" = c(1) a(1) f(1) é(2 bytes) = 5 bytes total
 	// Line 1: "café\n" (bytes 0-5)
 	// Line 2: "日本語" = 9 bytes (3 chars × 3 bytes each)
@@ -327,7 +329,7 @@ func TestRegistry_PositionAt_UTF8(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pos := reg.PositionAt(sourceID, tt.byteOffset)
-			if pos.IsZero() {
+			if !pos.IsValid() {
 				t.Fatalf("PositionAt(%d) returned zero Position", tt.byteOffset)
 			}
 			if pos.Line != tt.wantLine {
@@ -344,10 +346,10 @@ func TestRegistry_PositionAt_UnknownSource(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://unknown.yammm")
+	sourceID := sourcetest.ID("test://unknown.yammm")
 
 	pos := reg.PositionAt(sourceID, 0)
-	if !pos.IsZero() {
+	if pos.IsValid() {
 		t.Error("PositionAt() returned non-zero Position for unknown source")
 	}
 }
@@ -356,7 +358,7 @@ func TestRegistry_LineStartByte(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
+	sourceID := sourcetest.ID("test://test.yammm")
 	// Line 1: "hello\n" (starts at 0)
 	// Line 2: "world\n" (starts at 6)
 	// Line 3: "!" (starts at 12)
@@ -398,7 +400,7 @@ func TestRegistry_LineStartByte_UnknownSource(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://unknown.yammm")
+	sourceID := sourcetest.ID("test://unknown.yammm")
 
 	_, ok := reg.LineStartByte(sourceID, 1)
 	if ok {
@@ -410,7 +412,7 @@ func TestRegistry_EmptyContent(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://empty.yammm")
+	sourceID := sourcetest.ID("test://empty.yammm")
 	content := []byte{}
 
 	if err := reg.Register(sourceID, content); err != nil {
@@ -428,7 +430,7 @@ func TestRegistry_EmptyContent(t *testing.T) {
 
 	// Position at offset 0 (EOF position for empty content)
 	pos := reg.PositionAt(sourceID, 0)
-	if pos.IsZero() {
+	if !pos.IsValid() {
 		t.Fatal("PositionAt(0) returned zero Position for empty content")
 	}
 	if pos.Line != 1 || pos.Column != 1 {
@@ -440,7 +442,7 @@ func TestRegistry_SingleLineNoNewline(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://single.yammm")
+	sourceID := sourcetest.ID("test://single.yammm")
 	content := []byte("hello")
 
 	if err := reg.Register(sourceID, content); err != nil {
@@ -460,7 +462,7 @@ func TestRegistry_SingleLineNoNewline(t *testing.T) {
 
 	for _, tt := range tests {
 		pos := reg.PositionAt(sourceID, tt.byteOffset)
-		if pos.IsZero() {
+		if !pos.IsValid() {
 			t.Fatalf("PositionAt(%d) returned zero Position", tt.byteOffset)
 		}
 		if pos.Line != tt.wantLine || pos.Column != tt.wantColumn {
@@ -478,7 +480,7 @@ func TestRegistry_Keys(t *testing.T) {
 	// Register multiple sources
 	sources := []string{"test://c.yammm", "test://a.yammm", "test://b.yammm"}
 	for _, s := range sources {
-		sourceID := location.MustNewSourceID(s)
+		sourceID := sourcetest.ID(s)
 		if err := reg.Register(sourceID, []byte("content")); err != nil {
 			t.Fatalf("Register() error: %v", err)
 		}
@@ -498,7 +500,7 @@ func TestRegistry_Keys(t *testing.T) {
 	}
 
 	// Keys should be a defensive copy
-	keys[0] = location.MustNewSourceID("test://modified.yammm")
+	keys[0] = sourcetest.ID("test://modified.yammm")
 	keysAgain := reg.Keys()
 	if keysAgain[0].String() == "test://modified.yammm" {
 		t.Error("Keys() did not return defensive copy; modification propagated")
@@ -509,8 +511,8 @@ func TestRegistry_Has(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
-	otherID := location.MustNewSourceID("test://other.yammm")
+	sourceID := sourcetest.ID("test://test.yammm")
+	otherID := sourcetest.ID("test://other.yammm")
 
 	if reg.Has(sourceID) {
 		t.Error("Has() returned true before registration")
@@ -528,93 +530,24 @@ func TestRegistry_Has(t *testing.T) {
 	}
 }
 
-func TestRegistry_Len(t *testing.T) {
+func TestRegistry_KeysCountsEachRegistration(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
 
-	if reg.Len() != 0 {
-		t.Errorf("Len() = %d; want 0 for empty registry", reg.Len())
+	if got := len(reg.Keys()); got != 0 {
+		t.Errorf("empty registry holds %d sources; want 0", got)
 	}
 
 	for i := range 5 {
-		sourceID := location.MustNewSourceID("test://source" + string(rune('0'+i)) + ".yammm")
+		sourceID := sourcetest.ID("test://source" + string(rune('0'+i)) + ".yammm")
 		if err := reg.Register(sourceID, []byte("content")); err != nil {
 			t.Fatalf("Register() error: %v", err)
 		}
 	}
 
-	if reg.Len() != 5 {
-		t.Errorf("Len() = %d; want 5", reg.Len())
-	}
-}
-
-func TestRegistry_Clear(t *testing.T) {
-	t.Parallel()
-
-	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://test.yammm")
-
-	if err := reg.Register(sourceID, []byte("content")); err != nil {
-		t.Fatalf("Register() error: %v", err)
-	}
-
-	if reg.Len() != 1 {
-		t.Errorf("Len() = %d; want 1 before Clear", reg.Len())
-	}
-
-	reg.Clear()
-
-	if reg.Len() != 0 {
-		t.Errorf("Len() = %d; want 0 after Clear", reg.Len())
-	}
-	if reg.Has(sourceID) {
-		t.Error("Has() returned true after Clear")
-	}
-	if len(reg.Keys()) != 0 {
-		t.Errorf("Keys() len = %d; want 0 after Clear", len(reg.Keys()))
-	}
-
-	// Should be able to register again after Clear
-	if err := reg.Register(sourceID, []byte("new content")); err != nil {
-		t.Fatalf("Register() after Clear error: %v", err)
-	}
-}
-
-func TestRegistry_Stats(t *testing.T) {
-	t.Parallel()
-
-	reg := NewRegistry()
-
-	// Empty registry
-	stats := reg.Stats()
-	if stats.SourceCount != 0 {
-		t.Errorf("Stats().SourceCount = %d; want 0", stats.SourceCount)
-	}
-	if stats.ContentBytes != 0 {
-		t.Errorf("Stats().ContentBytes = %d; want 0", stats.ContentBytes)
-	}
-
-	// Register some content
-	content1 := []byte("hello\nworld") // 11 bytes, 2 lines, 11 runes
-	content2 := []byte("日本語")          // 9 bytes, 1 line, 3 runes
-
-	if err := reg.Register(location.MustNewSourceID("test://1.yammm"), content1); err != nil {
-		t.Fatalf("Register() error: %v", err)
-	}
-	if err := reg.Register(location.MustNewSourceID("test://2.yammm"), content2); err != nil {
-		t.Fatalf("Register() error: %v", err)
-	}
-
-	stats = reg.Stats()
-	if stats.SourceCount != 2 {
-		t.Errorf("Stats().SourceCount = %d; want 2", stats.SourceCount)
-	}
-	if stats.ContentBytes != 20 { // 11 + 9
-		t.Errorf("Stats().ContentBytes = %d; want 20", stats.ContentBytes)
-	}
-	if stats.IndexBytes <= 0 {
-		t.Errorf("Stats().IndexBytes = %d; want > 0", stats.IndexBytes)
+	if got := len(reg.Keys()); got != 5 {
+		t.Errorf("registry holds %d sources; want 5", got)
 	}
 }
 
@@ -624,7 +557,7 @@ func TestProvenanceUTF8ByteOffsets(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://utf8_test.yammm")
+	sourceID := sourcetest.ID("test://utf8_test.yammm")
 
 	// Test content with various UTF-8 sequences:
 	// - ASCII: 1 byte per char
@@ -719,7 +652,7 @@ func TestProvenanceUTF8ByteOffsets(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pos := reg.PositionAt(sourceID, tt.byteOffset)
-			if pos.IsZero() {
+			if !pos.IsValid() {
 				t.Fatalf("PositionAt(%d) returned zero Position", tt.byteOffset)
 			}
 			if pos.Line != tt.wantLine {
@@ -738,7 +671,7 @@ func TestProvenanceUTF8Roundtrip(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://roundtrip_test.yammm")
+	sourceID := sourcetest.ID("test://roundtrip_test.yammm")
 
 	// Mix of 1, 2, 3, and 4 byte characters
 	// "a" = 1 byte
@@ -758,14 +691,14 @@ func TestProvenanceUTF8Roundtrip(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			pos := reg.PositionAt(sourceID, byteOffset)
-			if pos.IsZero() {
+			if !pos.IsValid() {
 				t.Fatalf("PositionAt(%d) returned zero Position", byteOffset)
 			}
 
 			// Verify the byte offset is echoed back correctly
-			if pos.Byte != byteOffset {
-				t.Errorf("PositionAt(%d).Byte = %d; want %d",
-					byteOffset, pos.Byte, byteOffset)
+			if pos.Offset != byteOffset {
+				t.Errorf("PositionAt(%d).Offset = %d; want %d",
+					byteOffset, pos.Offset, byteOffset)
 			}
 		})
 	}
@@ -775,7 +708,7 @@ func TestProvenanceUTF8MultiLineWithCJK(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://multiline_cjk.yammm")
+	sourceID := sourcetest.ID("test://multiline_cjk.yammm")
 
 	// Byte layout analysis:
 	// Line 1: "schema \"日本語\"\n" = 7 + 1 + 9 + 1 + 1 = 19 bytes (0-18)
@@ -810,7 +743,7 @@ func TestProvenanceUTF8MultiLineWithCJK(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pos := reg.PositionAt(sourceID, tt.byteOffset)
-			if pos.IsZero() {
+			if !pos.IsValid() {
 				t.Fatalf("PositionAt(%d) returned zero Position", tt.byteOffset)
 			}
 			if pos.Line != tt.wantLine {
@@ -833,14 +766,14 @@ func TestRegistry_ConcurrentRegister(t *testing.T) {
 	reg := NewRegistry()
 
 	yammmtest.RunConcurrent(100, 1, func() {
-		sourceID := location.MustNewSourceID("test://concurrent.yammm")
+		sourceID := sourcetest.ID("test://concurrent.yammm")
 		// All goroutines register the same content
 		content := []byte("type Test {}")
 		_ = reg.Register(sourceID, content)
 	})
 
 	// Verify content was registered
-	sourceID := location.MustNewSourceID("test://concurrent.yammm")
+	sourceID := sourcetest.ID("test://concurrent.yammm")
 	content, ok := reg.ContentBySource(sourceID)
 	if !ok {
 		t.Fatal("ContentBySource() returned false after concurrent registration")
@@ -854,7 +787,7 @@ func TestRegistry_ConcurrentRead(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://concurrent-read.yammm")
+	sourceID := sourcetest.ID("test://concurrent-read.yammm")
 	content := []byte("hello\nworld\n日本語\n")
 
 	if err := reg.Register(sourceID, content); err != nil {
@@ -867,7 +800,6 @@ func TestRegistry_ConcurrentRead(t *testing.T) {
 		_ = reg.PositionAt(sourceID, 5)
 		_, _ = reg.LineStartByte(sourceID, 2)
 		_ = reg.Has(sourceID)
-		_ = reg.Len()
 		_ = reg.Keys()
 	})
 }
@@ -884,7 +816,7 @@ func TestRegistry_ConcurrentRegisterAndRead(t *testing.T) {
 	// Writers
 	for i := range numSources {
 		wg.Go(func() {
-			sourceID := location.MustNewSourceID(fmt.Sprintf("test://source%d.yammm", i))
+			sourceID := sourcetest.ID(fmt.Sprintf("test://source%d.yammm", i))
 			content := fmt.Appendf(nil, "content for source %d", i)
 			_ = reg.Register(sourceID, content)
 		})
@@ -895,12 +827,11 @@ func TestRegistry_ConcurrentRegisterAndRead(t *testing.T) {
 		wg.Go(func() {
 			// Read operations on potentially non-existent sources
 			for i := range numSources {
-				sourceID := location.MustNewSourceID(fmt.Sprintf("test://source%d.yammm", i))
+				sourceID := sourcetest.ID(fmt.Sprintf("test://source%d.yammm", i))
 				_, _ = reg.ContentBySource(sourceID)
 				_ = reg.PositionAt(sourceID, 0)
 				_ = reg.Has(sourceID)
 			}
-			_ = reg.Len()
 			_ = reg.Keys()
 		})
 	}
@@ -914,7 +845,7 @@ func TestRegistry_PositionAt_MidRuneOffset_CJK(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://midrune_cjk.yammm")
+	sourceID := sourcetest.ID("test://midrune_cjk.yammm")
 	// "日本語" = 9 bytes: 日(0-2) 本(3-5) 語(6-8)
 	content := []byte("日本語")
 
@@ -943,7 +874,7 @@ func TestRegistry_PositionAt_MidRuneOffset_CJK(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pos := reg.PositionAt(sourceID, tt.byteOffset)
-			if pos.IsZero() {
+			if !pos.IsValid() {
 				t.Fatalf("PositionAt(%d) returned zero Position", tt.byteOffset)
 			}
 			if pos.Column != tt.wantColumn {
@@ -958,7 +889,7 @@ func TestRegistry_PositionAt_MidRuneOffset_Latin(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://midrune_latin.yammm")
+	sourceID := sourcetest.ID("test://midrune_latin.yammm")
 	// "café" = 5 bytes: c(0) a(1) f(2) é(3-4)
 	content := []byte("café")
 
@@ -983,7 +914,7 @@ func TestRegistry_PositionAt_MidRuneOffset_Latin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pos := reg.PositionAt(sourceID, tt.byteOffset)
-			if pos.IsZero() {
+			if !pos.IsValid() {
 				t.Fatalf("PositionAt(%d) returned zero Position", tt.byteOffset)
 			}
 			if pos.Column != tt.wantColumn {
@@ -998,7 +929,7 @@ func TestRegistry_PositionAt_MidRuneOffset_Emoji(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://midrune_emoji.yammm")
+	sourceID := sourcetest.ID("test://midrune_emoji.yammm")
 	// "a🔥b" = 6 bytes: a(0) 🔥(1-4) b(5)
 	content := []byte("a🔥b")
 
@@ -1024,56 +955,12 @@ func TestRegistry_PositionAt_MidRuneOffset_Emoji(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pos := reg.PositionAt(sourceID, tt.byteOffset)
-			if pos.IsZero() {
+			if !pos.IsValid() {
 				t.Fatalf("PositionAt(%d) returned zero Position", tt.byteOffset)
 			}
 			if pos.Column != tt.wantColumn {
 				t.Errorf("PositionAt(%d).Column = %d; want %d (floor semantics)",
 					tt.byteOffset, pos.Column, tt.wantColumn)
-			}
-		})
-	}
-}
-
-func TestCountRunesInRange_MidRuneFloor(t *testing.T) {
-	t.Parallel()
-
-	// "café日本語" = c(0) a(1) f(2) é(3-4) 日(5-7) 本(8-10) 語(11-13)
-	content := []byte("café日本語")
-
-	tests := []struct {
-		name  string
-		start int
-		end   int
-		want  int // 1-based column
-	}{
-		// Rune-aligned boundaries (unchanged behavior)
-		{"empty range", 0, 0, 1},
-		{"through 'c'", 0, 1, 2},
-		{"through 'a'", 0, 2, 3},
-		{"through 'f'", 0, 3, 4},
-		{"through 'é'", 0, 5, 5},
-		{"through '日'", 0, 8, 6},
-		{"through '本'", 0, 11, 7},
-		{"entire string", 0, 14, 8},
-
-		// Mid-rune offsets (floor semantics)
-		{"mid 'é' (byte 4)", 0, 4, 4},   // floor to before 'é'
-		{"mid '日' (byte 6)", 0, 6, 5},   // floor to before '日'
-		{"mid '日' (byte 7)", 0, 7, 5},   // floor to before '日'
-		{"mid '本' (byte 9)", 0, 9, 6},   // floor to before '本'
-		{"mid '本' (byte 10)", 0, 10, 6}, // floor to before '本'
-		{"mid '語' (byte 12)", 0, 12, 7}, // floor to before '語'
-		{"mid '語' (byte 13)", 0, 13, 7}, // floor to before '語'
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := countRunesInRange(content, tt.start, tt.end)
-			if got != tt.want {
-				t.Errorf("countRunesInRange(%q, %d, %d) = %d; want %d",
-					content, tt.start, tt.end, got, tt.want)
 			}
 		})
 	}
@@ -1179,39 +1066,6 @@ func TestFindLine(t *testing.T) {
 	}
 }
 
-func TestCountRunesInRange(t *testing.T) {
-	t.Parallel()
-
-	content := []byte("café日本語")
-	// c(1) a(1) f(1) é(2) 日(3) 本(3) 語(3) = 14 bytes total
-	// Runes: c a f é 日 本 語 = 7 runes
-
-	tests := []struct {
-		name  string
-		start int
-		end   int
-		want  int // 1-based column
-	}{
-		{"empty range", 0, 0, 1},
-		{"first char", 0, 1, 2},
-		{"first 3 ASCII", 0, 3, 4},
-		{"through é", 0, 5, 5},
-		{"through 日", 0, 8, 6},
-		{"entire string", 0, 14, 8},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := countRunesInRange(content, tt.start, tt.end)
-			if got != tt.want {
-				t.Errorf("countRunesInRange(%q, %d, %d) = %d; want %d",
-					content, tt.start, tt.end, got, tt.want)
-			}
-		})
-	}
-}
-
 // Benchmarks
 
 func BenchmarkRegistry_Register(b *testing.B) {
@@ -1219,14 +1073,14 @@ func BenchmarkRegistry_Register(b *testing.B) {
 
 	for b.Loop() {
 		reg := NewRegistry()
-		sourceID := location.MustNewSourceID("test://bench.yammm")
+		sourceID := sourcetest.ID("test://bench.yammm")
 		_ = reg.Register(sourceID, content)
 	}
 }
 
 func BenchmarkRegistry_PositionAt(b *testing.B) {
 	reg := NewRegistry()
-	sourceID := location.MustNewSourceID("test://bench.yammm")
+	sourceID := sourcetest.ID("test://bench.yammm")
 	content := []byte("type Person {\n  name: string\n  age: int\n}\n")
 	_ = reg.Register(sourceID, content)
 

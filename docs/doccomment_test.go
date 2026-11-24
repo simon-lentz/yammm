@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/doclint"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 )
 
 // TestModuleDocCommentsRender points the doc-comment checker at the module.
@@ -12,6 +13,8 @@ import (
 // no syntax for still reads as markup.
 func TestModuleDocCommentsRender(t *testing.T) {
 	t.Parallel()
+	// The module is read on one goroutine, and the detector multiplies each read.
+	raceskip.Skip(t)
 	checked := doclint.AssertDocCommentsRender(t, "..")
 	// The walk is the only thing standing between "every doc renders" and "no
 	// doc was read", so a shrunken walk is an error rather than a silent pass.

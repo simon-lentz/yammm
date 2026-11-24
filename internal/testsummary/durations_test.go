@@ -9,7 +9,7 @@ import (
 
 func timed(t *testing.T, action, pkg, test string, seconds float64) string {
 	t.Helper()
-	b, err := json.Marshal(event{Action: action, Package: pkg, Test: test, Elapsed: &seconds})
+	b, err := json.Marshal(map[string]any{"Action": action, "Package": pkg, "Test": test, "Elapsed": seconds})
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}

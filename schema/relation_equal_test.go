@@ -46,22 +46,22 @@ type D {
     }
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "s.yammm")
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	s, err := schema.LoadString(t.Context(), src, "s.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
-	rel := func(typeName string) *schema.Relation {
+	rel := func(typeName string) schema.Relation {
 		typ, _ := s.Type(typeName)
 		r, _ := typ.Relation("R")
 		return r
 	}
-	if !rel("A").Equal(rel("B")) {
+	if !schema.TestRelationEqual(rel("A"), rel("B")) {
 		t.Error("relations alike in every field, edge properties included, must be equal")
 	}
-	if rel("A").Equal(rel("C")) {
+	if schema.TestRelationEqual(rel("A"), rel("C")) {
 		t.Error("relations whose edge properties differ by name must not be equal")
 	}
-	if rel("A").Equal(rel("D")) {
+	if schema.TestRelationEqual(rel("A"), rel("D")) {
 		t.Error("relations whose edge property differs in constraint must not be equal")
 	}
 }
@@ -88,9 +88,9 @@ type Order extends HasCustomer {
 `
 	res := loadRules(t, src)
 	if countCode(res, diag.E_UNKNOWN_TYPE) != 1 {
-		t.Errorf("want the unresolved target reported once; got %v", res.Err())
+		t.Errorf("want the unresolved target reported once; got %v", res)
 	}
 	if countCode(res, diag.E_RELATION_COLLISION) != 0 {
-		t.Errorf("an unresolved side must not be blamed twice; got %v", res.Err())
+		t.Errorf("an unresolved side must not be blamed twice; got %v", res)
 	}
 }

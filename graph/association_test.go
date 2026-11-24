@@ -1,15 +1,18 @@
 package graph_test
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 )
 
 // Forward Reference Tests
@@ -28,9 +31,9 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"acme"}})
 
-	result := g.Add(ctx, person)
+	addErr := g.Add(ctx, person)
 	// Should succeed (forward ref is allowed)
-	if err := result.Err(); err != nil {
+	if err := addErr; err != nil {
 		t.Errorf("Add person should succeed: %v", err)
 	}
 
@@ -43,8 +46,8 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "Acme Corp"})
 
-	result = g.Add(ctx, company)
-	if err := result.Err(); err != nil {
+	addErr = g.Add(ctx, company)
+	if err := addErr; err != nil {
 		t.Errorf("Add company should succeed: %v", err)
 	}
 
@@ -54,7 +57,7 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 	assertEdgeCount(t, snap, 1)
 
 	// Verify edge details
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if edges[0].Source().TypeName() != "Person" {
 		t.Errorf("Edge source should be Person, got %s", edges[0].Source().TypeName())
 	}
@@ -78,26 +81,30 @@ func TestGraph_ForwardReference_Multiple(t *testing.T) {
 			[]any{name}, map[string]any{"name": name},
 			"EMPLOYER", [][]any{{"acme"}})
 
-		g.Add(ctx, person)
+		if err := g.Add(ctx, person); err != nil {
+			t.Errorf("Add: %v", err)
+		}
 	}
 
 	// All 3 should be unresolved
 	snap := g.Snapshot()
 	assertInstanceCount(t, snap, mustTypeID(t, s, "Person"), 3)
 	// All 3 pending edges should be tracked (one per source)
-	if len(snap.Unresolved()) != 3 {
-		t.Errorf("Expected 3 unresolved edges (one per source), got %d", len(snap.Unresolved()))
+	if len(slices.Collect(snap.Unresolved())) != 3 {
+		t.Errorf("Expected 3 unresolved edges (one per source), got %d", len(slices.Collect(snap.Unresolved())))
 	}
 
 	// Add Company (target)
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "Acme Corp"})
 
-	g.Add(ctx, company)
+	if err := g.Add(ctx, company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// All 3 edges should resolve
 	snap = g.Snapshot()
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if len(edges) != 3 {
 		t.Errorf("Expected 3 resolved edges (one per source), got %d", len(edges))
 	}
@@ -131,13 +138,17 @@ func TestGraph_ForwardReference_Chain(t *testing.T) {
 		[]any{"a1"}, map[string]any{"name": "A1"},
 		"REF_B", [][]any{{"b1"}})
 
-	g.Add(ctx, typeA)
+	if err := g.Add(ctx, typeA); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Add C (no forward references)
 	typeC := mustValidInstance(t, s, "TypeC",
 		[]any{"c1"}, map[string]any{"name": "C1"})
 
-	g.Add(ctx, typeC)
+	if err := g.Add(ctx, typeC); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Verify A→B still unresolved
 	snap := g.Snapshot()
@@ -148,7 +159,9 @@ func TestGraph_ForwardReference_Chain(t *testing.T) {
 		[]any{"b1"}, map[string]any{"name": "B1"},
 		"REF_C", [][]any{{"c1"}})
 
-	g.Add(ctx, typeB)
+	if err := g.Add(ctx, typeB); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// All edges should now be resolved
 	snap = g.Snapshot()
@@ -167,10 +180,12 @@ func TestGraph_ForwardReference_Snapshot(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"acme"}})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -202,10 +217,12 @@ func TestUnresolvedEdge_RequiredAndReasonFields(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"missing-company"}})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -215,7 +232,7 @@ func TestUnresolvedEdge_RequiredAndReasonFields(t *testing.T) {
 	if !ur.Required() {
 		t.Error("Expected Required=true for required association")
 	}
-	if ur.Reason() != "target_missing" {
+	if ur.Reason() != graph.ReasonTargetMissing {
 		t.Errorf("Expected Reason='target_missing', got %q", ur.Reason())
 	}
 }
@@ -231,10 +248,12 @@ func TestUnresolvedEdge_OptionalAssociation(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"missing-company"}})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -244,7 +263,7 @@ func TestUnresolvedEdge_OptionalAssociation(t *testing.T) {
 	if ur.Required() {
 		t.Error("Expected Required=false for optional association")
 	}
-	if ur.Reason() != "target_missing" {
+	if ur.Reason() != graph.ReasonTargetMissing {
 		t.Errorf("Expected Reason='target_missing', got %q", ur.Reason())
 	}
 }
@@ -259,10 +278,12 @@ func TestUnresolvedEdge_AbsentReason(t *testing.T) {
 	person := mustValidInstance(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -272,7 +293,7 @@ func TestUnresolvedEdge_AbsentReason(t *testing.T) {
 	if !ur.Required() {
 		t.Error("Expected Required=true for required association")
 	}
-	if ur.Reason() != "absent" {
+	if ur.Reason() != graph.ReasonAbsent {
 		t.Errorf("Expected Reason='absent', got %q", ur.Reason())
 	}
 	if ur.TargetKey() != "" {
@@ -291,10 +312,12 @@ func TestUnresolvedEdge_EmptyReason(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYERS")
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -304,7 +327,7 @@ func TestUnresolvedEdge_EmptyReason(t *testing.T) {
 	if !ur.Required() {
 		t.Error("Expected Required=true for required association")
 	}
-	if ur.Reason() != "empty" {
+	if ur.Reason() != graph.ReasonEmpty {
 		t.Errorf("Expected Reason='empty', got %q", ur.Reason())
 	}
 	if ur.TargetKey() != "" {
@@ -323,11 +346,13 @@ func TestGraph_ForwardReference_AfterResolution(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"acme"}})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Confirm pending exists
 	snap1 := g.Snapshot()
-	if len(snap1.Unresolved()) == 0 {
+	if len(slices.Collect(snap1.Unresolved())) == 0 {
 		t.Fatal("Expected unresolved edge before adding target")
 	}
 
@@ -335,17 +360,19 @@ func TestGraph_ForwardReference_AfterResolution(t *testing.T) {
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "Acme Corp"})
 
-	g.Add(ctx, company)
+	if err := g.Add(ctx, company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Confirm pending is gone
 	snap2 := g.Snapshot()
-	if len(snap2.Unresolved()) != 0 {
-		t.Errorf("Expected no unresolved edges after adding target, got %d", len(snap2.Unresolved()))
+	if len(slices.Collect(snap2.Unresolved())) != 0 {
+		t.Errorf("Expected no unresolved edges after adding target, got %d", len(slices.Collect(snap2.Unresolved())))
 	}
 
 	// Confirm edge exists
-	if len(snap2.Edges()) != 1 {
-		t.Errorf("Expected 1 edge after resolution, got %d", len(snap2.Edges()))
+	if len(slices.Collect(snap2.Edges())) != 1 {
+		t.Errorf("Expected 1 edge after resolution, got %d", len(slices.Collect(snap2.Edges())))
 	}
 }
 
@@ -364,12 +391,14 @@ func TestGraph_Check_RequiredMissing(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"missing-company"}})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Check should report unresolved required
-	result := g.Check(ctx)
+	result := diagtest.Failures(t, g.Check(ctx))
 
-	if result.OK() {
+	if diagtest.Err(result) == nil {
 		t.Error("Check should fail with unresolved required association")
 	}
 
@@ -387,16 +416,38 @@ func TestGraph_Check_RequiredEmpty(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYERS")
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Check should report unresolved required
-	result := g.Check(ctx)
+	result := diagtest.Failures(t, g.Check(ctx))
 
-	if result.OK() {
+	if diagtest.Err(result) == nil {
 		t.Error("Check should fail with empty required association")
 	}
 
 	assertHasCode(t, result, diag.E_UNRESOLVED_REQUIRED)
+	assertUnresolvedNamesNoTarget(t, result, "association array is empty")
+}
+
+// assertUnresolvedNamesNoTarget holds Check's one E_UNRESOLVED_REQUIRED issue to
+// the message for its reason and to no target detail: the record names no target.
+func assertUnresolvedNamesNoTarget(t *testing.T, result diag.Result, why string) {
+	t.Helper()
+	for issue := range result.Issues() {
+		if issue.Code() != diag.E_UNRESOLVED_REQUIRED {
+			continue
+		}
+		if !strings.HasSuffix(issue.Message(), ": "+why) {
+			t.Errorf("message = %q, want it to end %q", issue.Message(), why)
+		}
+		for _, d := range issue.Details() {
+			if d.Key == diag.DetailKeyTargetType || d.Key == diag.DetailKeyTargetPK {
+				t.Errorf("detail %s=%q on a record that names no target", d.Key, d.Value)
+			}
+		}
+	}
 }
 
 func TestGraph_Check_OptionalMissing(t *testing.T) {
@@ -410,12 +461,14 @@ func TestGraph_Check_OptionalMissing(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"missing-company"}})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Check should pass (optional unresolved is OK)
-	result := g.Check(ctx)
+	checkErr := g.Check(ctx)
 
-	if err := result.Err(); err != nil {
+	if err := checkErr; err != nil {
 		t.Errorf("Check should pass with unresolved optional association: %v", err)
 	}
 }
@@ -432,12 +485,14 @@ func TestGraph_Check_MultipleUnresolved(t *testing.T) {
 			[]any{name}, map[string]any{"name": name},
 			"EMPLOYER", [][]any{{name + "-company"}}) // Each has unique missing target
 
-		g.Add(ctx, person)
+		if err := g.Add(ctx, person); err != nil {
+			t.Errorf("Add: %v", err)
+		}
 	}
 
-	result := g.Check(ctx)
+	result := diagtest.Failures(t, g.Check(ctx))
 
-	if result.OK() {
+	if diagtest.Err(result) == nil {
 		t.Error("Check should fail with multiple unresolved required associations")
 	}
 
@@ -459,16 +514,17 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"missing"}})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Call Check multiple times
-	result1 := g.Check(ctx)
-	result2 := g.Check(ctx)
-	result3 := g.Check(ctx)
+	result1 := diagtest.Failures(t, g.Check(ctx))
+	result2 := diagtest.Failures(t, g.Check(ctx))
+	result3 := diagtest.Failures(t, g.Check(ctx))
 
 	// OK() alone is trivially stable because Check holds no state; what the
-	// contract promises is that the issues themselves repeat and that none
-	// of them reaches the snapshot.
+	// contract promises is that the issues themselves repeat.
 	// Compare the SET of issues, not Result.String(): Check walks g.pending,
 	// a map, so the rendered order is not stable even for one call's own
 	// output and a string comparison would be flaky rather than meaningful.
@@ -487,9 +543,6 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 	if !result1.HasCode(diag.E_UNRESOLVED_REQUIRED) {
 		t.Fatalf("the fixture did not produce an unresolved required association: %s", render(result1))
 	}
-	if g.Snapshot().Diagnostics().HasCode(diag.E_UNRESOLVED_REQUIRED) {
-		t.Error("Check accumulated into the snapshot's construction diagnostics")
-	}
 }
 
 // Edge Properties Tests
@@ -504,7 +557,9 @@ func TestGraph_Edge_Properties(t *testing.T) {
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "Acme Corp"})
 
-	g.Add(ctx, company)
+	if err := g.Add(ctx, company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Add Person with edge properties
 	person := mustValidInstanceWithEdgeProps(t, s, "Person",
@@ -512,10 +567,12 @@ func TestGraph_Edge_Properties(t *testing.T) {
 		"EMPLOYER", []any{"acme"},
 		map[string]any{"role": "Engineer", "since": int64(2020)})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if len(edges) != 1 {
 		t.Fatalf("Expected 1 edge, got %d", len(edges))
 	}
@@ -529,7 +586,7 @@ func TestGraph_Edge_Properties(t *testing.T) {
 	if !ok {
 		t.Error("Edge should have 'role' property")
 	} else {
-		roleStr, _ := role.String()
+		roleStr, _ := role.AsString()
 		if roleStr != "Engineer" {
 			t.Errorf("Edge role should be 'Engineer', got %q", roleStr)
 		}
@@ -539,7 +596,7 @@ func TestGraph_Edge_Properties(t *testing.T) {
 	if !ok {
 		t.Error("Edge should have 'since' property")
 	} else {
-		sinceInt, _ := since.Int()
+		sinceInt, _ := since.AsInt()
 		if sinceInt != 2020 {
 			t.Errorf("Edge since should be 2020, got %d", sinceInt)
 		}
@@ -562,33 +619,35 @@ func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 		"EMPLOYER", []any{"missing-acme"},
 		map[string]any{"role": "Engineer", "since": int64(2020)})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
-	if len(snap.Edges()) != 0 {
-		t.Fatalf("expected 0 resolved edges, got %d", len(snap.Edges()))
+	if len(slices.Collect(snap.Edges())) != 0 {
+		t.Fatalf("expected 0 resolved edges, got %d", len(slices.Collect(snap.Edges())))
 	}
-	unres := snap.Unresolved()
+	unres := slices.Collect(snap.Unresolved())
 	if len(unres) != 1 {
 		t.Fatalf("expected 1 unresolved edge, got %d", len(unres))
 	}
 
 	u := unres[0]
-	if u.Reason() != "target_missing" {
+	if u.Reason() != graph.ReasonTargetMissing {
 		t.Errorf("Reason: got %q, want %q", u.Reason(), "target_missing")
 	}
 
 	role, ok := u.Property("role")
 	if !ok {
 		t.Error("unresolved edge should have 'role' property")
-	} else if roleStr, _ := role.String(); roleStr != "Engineer" {
+	} else if roleStr, _ := role.AsString(); roleStr != "Engineer" {
 		t.Errorf("Property(role): got %q, want %q", roleStr, "Engineer")
 	}
 
 	since, ok := u.Property("since")
 	if !ok {
 		t.Error("unresolved edge should have 'since' property")
-	} else if sinceInt, _ := since.Int(); sinceInt != 2020 {
+	} else if sinceInt, _ := since.AsInt(); sinceInt != 2020 {
 		t.Errorf("Property(since): got %d, want 2020", sinceInt)
 	}
 
@@ -602,21 +661,34 @@ func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 // TestUnresolvedEdge_NilReceiver pins the nil-safety contract on the
 // Property / Properties accessors — parallel to graph.Edge's nil-safety.
 func TestUnresolvedEdge_NilReceiver(t *testing.T) {
-	var u *graph.UnresolvedEdge
+	var u graph.UnresolvedEdge
 	if _, ok := u.Property("role"); ok {
 		t.Error("nil receiver Property should return (_, false)")
 	}
 	if u.Properties().Len() != 0 {
 		t.Error("nil receiver Properties should return empty")
 	}
-	if u.Source() != nil || u.Relation() != "" || !u.TargetType().IsZero() || u.TargetKey() != "" || u.Required() || u.Reason() != "" {
+	if !u.Source().IsZero() || u.Relation() != "" || !u.TargetType().IsZero() || u.TargetKey() != "" || u.Required() || u.Reason() != 0 {
 		t.Error("a nil UnresolvedEdge's accessors should return zero values")
 	}
 }
 
+// The zero UnresolvedReason names no reason, so it is none of the three and its
+// text is no wire text; neither is an out-of-range value's.
+func TestUnresolvedReason_TheZeroNamesNoReason(t *testing.T) {
+	for _, r := range []graph.UnresolvedReason{0, graph.ReasonEmpty + 1} {
+		if r == graph.ReasonTargetMissing || r == graph.ReasonAbsent || r == graph.ReasonEmpty {
+			t.Errorf("UnresolvedReason(%d) is a named reason", uint8(r))
+		}
+		if got, want := r.String(), fmt.Sprintf("UnresolvedReason(%d)", uint8(r)); got != want {
+			t.Errorf("String() = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestDuplicate_NilReceiver(t *testing.T) {
-	var d *graph.Duplicate
-	if d.Instance() != nil || d.Conflict() != nil || d.Parent() != nil || d.Relation() != "" || !d.Diagnostic().IsZero() {
+	var d graph.Duplicate
+	if !d.Instance().IsZero() || !d.Conflict().IsZero() {
 		t.Error("a nil Duplicate's accessors should return zero values")
 	}
 }
@@ -636,12 +708,14 @@ func TestGraph_Check_MultipleUnresolved_SameTarget(t *testing.T) {
 			[]any{name}, map[string]any{"name": name},
 			"EMPLOYER", [][]any{{"missing-acme"}}) // Same target!
 
-		g.Add(ctx, person)
+		if err := g.Add(ctx, person); err != nil {
+			t.Errorf("Add: %v", err)
+		}
 	}
 
-	result := g.Check(ctx)
+	result := diagtest.Failures(t, g.Check(ctx))
 
-	if result.OK() {
+	if diagtest.Err(result) == nil {
 		t.Error("Check should fail with multiple unresolved required associations")
 	}
 
@@ -682,11 +756,13 @@ func TestGraph_ForwardReference_Multiple_Unresolved_Snapshot(t *testing.T) {
 			[]any{name}, map[string]any{"name": name},
 			"EMPLOYER", [][]any{{"acme"}})
 
-		g.Add(ctx, person)
+		if err := g.Add(ctx, person); err != nil {
+			t.Errorf("Add: %v", err)
+		}
 	}
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 3 {
 		t.Errorf("Expected 3 unresolved edges, got %d", len(unresolved))
@@ -719,11 +795,13 @@ func TestGraph_Check_RequiredAbsent(t *testing.T) {
 	person := mustValidInstance(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
-	result := g.Check(ctx)
+	result := diagtest.Failures(t, g.Check(ctx))
 
-	if result.OK() {
+	if diagtest.Err(result) == nil {
 		t.Error("Check should fail with absent required association")
 	}
 
@@ -741,6 +819,7 @@ func TestGraph_Check_RequiredAbsent(t *testing.T) {
 	if !foundAbsent {
 		t.Error("Expected E_UNRESOLVED_REQUIRED with reason='absent'")
 	}
+	assertUnresolvedNamesNoTarget(t, result, "association field is absent")
 }
 
 func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {
@@ -749,49 +828,28 @@ func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Get the Person type for creating the instance
-	personType, ok := s.Type("Person")
-	if !ok {
-		t.Fatal("Person type not found")
-	}
-
 	// Create provenance with a specific span
-	prov := location.NewProvenance(
+	prov := instance.NewProvenance(
 		"test.json",
-		path.Root().Key("people").Index(0),
+		path.Root.Key("people").Index(0),
 		location.Span{
 			Start: location.Position{Line: 5, Column: 3},
 			End:   location.Position{Line: 10, Column: 5},
 		},
 	)
 
-	// Create edge data for missing reference
-	targets := []instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(
-			immutable.WrapKey([]any{"missing-company"}),
-			immutable.Properties{},
-		),
-	}
-	edges := map[string]*instance.ValidEdgeData{
-		"EMPLOYER": instance.NewValidEdgeData(targets),
+	inst := instancetest.ValidRaw(t, s, "Person", instance.RawInstance{
+		Properties: map[string]any{"id": "alice", "name": "Alice", "employer": map[string]any{"_target_id": "missing-company"}},
+		Provenance: prov,
+	})
+
+	if err := g.Add(ctx, inst); err != nil {
+		t.Errorf("Add: %v", err)
 	}
 
-	// Create instance with provenance
-	inst := instance.NewValidInstance(
-		"Person",
-		personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		edges,
-		nil,
-		prov,
-	)
+	result := diagtest.Failures(t, g.Check(ctx))
 
-	g.Add(ctx, inst)
-
-	result := g.Check(ctx)
-
-	if result.OK() {
+	if diagtest.Err(result) == nil {
 		t.Fatal("Check should fail with unresolved required association")
 	}
 
@@ -827,8 +885,8 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "Acme Corp"})
 
-	result := g.Add(ctx, company)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, company)
+	if err := addErr; err != nil {
 		t.Errorf("Add company should succeed: %v", err)
 	}
 
@@ -842,8 +900,8 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"acme"}})
 
-	result = g.Add(ctx, person)
-	if err := result.Err(); err != nil {
+	addErr = g.Add(ctx, person)
+	if err := addErr; err != nil {
 		t.Errorf("Add person should succeed: %v", err)
 	}
 
@@ -853,7 +911,7 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 	assertEdgeCount(t, snap, 1)
 
 	// Verify edge details
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if edges[0].Source().TypeName() != "Person" {
 		t.Errorf("Edge source should be Person, got %s", edges[0].Source().TypeName())
 	}
@@ -872,7 +930,9 @@ func TestGraph_BackwardReference_Multiple(t *testing.T) {
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "Acme Corp"})
 
-	g.Add(ctx, company)
+	if err := g.Add(ctx, company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Add multiple Persons all referencing existing Company
 	for _, name := range []string{"alice", "bob", "carol"} {
@@ -880,7 +940,9 @@ func TestGraph_BackwardReference_Multiple(t *testing.T) {
 			[]any{name}, map[string]any{"name": name},
 			"EMPLOYER", [][]any{{"acme"}})
 
-		g.Add(ctx, person)
+		if err := g.Add(ctx, person); err != nil {
+			t.Errorf("Add: %v", err)
+		}
 	}
 
 	// All 3 edges should be immediately resolved
@@ -890,7 +952,7 @@ func TestGraph_BackwardReference_Multiple(t *testing.T) {
 
 	// Verify all 3 sources have edges
 	sources := make(map[string]bool)
-	for _, edge := range snap.Edges() {
+	for edge := range snap.Edges() {
 		sources[edge.Source().PrimaryKey().String()] = true
 		if edge.Target().PrimaryKey().String() != `["acme"]` {
 			t.Errorf("Edge target should be [\"acme\"], got %s", edge.Target().PrimaryKey().String())
@@ -919,7 +981,9 @@ func TestGraph_CircularReference_Basic(t *testing.T) {
 		[]any{"a1"}, map[string]any{"name": "A1"},
 		"REF_B", [][]any{{"b1"}})
 
-	g.Add(ctx, typeA)
+	if err := g.Add(ctx, typeA); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// TypeA → TypeB is unresolved
 	snap := g.Snapshot()
@@ -930,7 +994,9 @@ func TestGraph_CircularReference_Basic(t *testing.T) {
 		[]any{"b1"}, map[string]any{"name": "B1"},
 		"REF_A", [][]any{{"a1"}})
 
-	g.Add(ctx, typeB)
+	if err := g.Add(ctx, typeB); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Both edges should now be resolved
 	snap = g.Snapshot()
@@ -938,8 +1004,8 @@ func TestGraph_CircularReference_Basic(t *testing.T) {
 	assertEdgeCount(t, snap, 2)
 
 	// Check should not infinite loop and should succeed
-	result := g.Check(ctx)
-	if err := result.Err(); err != nil {
+	checkErr := g.Check(ctx)
+	if err := checkErr; err != nil {
 		t.Errorf("Check should succeed for resolved circular references: %v", err)
 	}
 }
@@ -955,13 +1021,17 @@ func TestGraph_CircularReference_Chain(t *testing.T) {
 		[]any{"a1"}, map[string]any{"name": "A1"},
 		"REF_B", [][]any{{"b1"}})
 
-	g.Add(ctx, typeA)
+	if err := g.Add(ctx, typeA); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	typeB := mustValidInstanceWithEdge(t, s, "TypeB",
 		[]any{"b1"}, map[string]any{"name": "B1"},
 		"REF_C", [][]any{{"c1"}})
 
-	g.Add(ctx, typeB)
+	if err := g.Add(ctx, typeB); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// At this point: A→B resolved, B→C unresolved
 	snap := g.Snapshot()
@@ -973,7 +1043,9 @@ func TestGraph_CircularReference_Chain(t *testing.T) {
 		[]any{"c1"}, map[string]any{"name": "C1"},
 		"REF_A", [][]any{{"a1"}})
 
-	g.Add(ctx, typeC)
+	if err := g.Add(ctx, typeC); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// All 3 edges should be resolved
 	snap = g.Snapshot()
@@ -981,13 +1053,13 @@ func TestGraph_CircularReference_Chain(t *testing.T) {
 	assertEdgeCount(t, snap, 3) // A→B, B→C, C→A
 
 	// Check should complete without infinite loop
-	result := g.Check(ctx)
-	if err := result.Err(); err != nil {
+	checkErr := g.Check(ctx)
+	if err := checkErr; err != nil {
 		t.Errorf("Check should succeed for resolved circular chain: %v", err)
 	}
 
 	// Verify edges form the expected cycle
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if len(edges) != 3 {
 		t.Fatalf("Expected 3 edges in cycle, got %d", len(edges))
 	}

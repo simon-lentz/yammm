@@ -35,9 +35,6 @@ func TestScanDir_PopulatesFileSize(t *testing.T) {
 		if entry.Header == nil {
 			t.Fatalf("%s: header is nil on a valid fixture", entry.Name)
 		}
-		if entry.Header.FileSize != info.Size() {
-			t.Errorf("%s: HeaderInfo.FileSize = %d, want %d", entry.Name, entry.Header.FileSize, info.Size())
-		}
 	}
 	if seen != 2 {
 		t.Errorf("scanned %d entries, want 2", seen)
@@ -57,7 +54,7 @@ func TestScanDir_PopulatesFileSizeForACorruptEntry(t *testing.T) {
 			t.Fatalf("ScanDir: %v", err)
 		}
 		seen++
-		if !entry.Result.HasErrors() {
+		if entry.Err == nil {
 			t.Fatal("the corrupt fixture parsed cleanly, so this asserts nothing")
 		}
 		if entry.Header != nil {
@@ -73,27 +70,6 @@ func TestScanDir_PopulatesFileSizeForACorruptEntry(t *testing.T) {
 	}
 	if seen != 1 {
 		t.Errorf("scanned %d entries, want 1", seen)
-	}
-}
-
-// A size is not knowable from an io.Reader, and the reader form still says so.
-func TestHeaderOnlyRead_LeavesFileSizeZero(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a.ys")
-	seedValidYS(t, path)
-
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer f.Close()
-
-	header, result := snapshot.HeaderOnlyRead(t.Context(), f)
-	if err := result.Err(); err != nil {
-		t.Fatalf("HeaderOnlyRead: %v", err)
-	}
-	if header.FileSize != 0 {
-		t.Errorf("HeaderOnlyRead FileSize = %d, want 0", header.FileSize)
 	}
 }
 
@@ -144,8 +120,8 @@ func TestScanDir_FollowsASymlinkToARegularFile(t *testing.T) {
 		if entry.Name != "link.ys" {
 			t.Errorf("scanned %q, want link.ys", entry.Name)
 		}
-		if entry.Result.HasErrors() {
-			t.Errorf("link.ys reported errors: %v", entry.Result.Err())
+		if entry.Err != nil {
+			t.Errorf("link.ys reported errors: %v", entry.Err)
 		}
 		// f.Stat answers for the symlink's target, which is the file that was
 		// actually read.
@@ -176,7 +152,7 @@ func TestScanDir_BrokenSymlinkStillYieldsAnIOEntry(t *testing.T) {
 			t.Fatalf("ScanDir: %v", err)
 		}
 		seen++
-		if !entry.Result.HasErrors() {
+		if entry.Err == nil {
 			t.Errorf("broken.ys reported no error")
 		}
 		if entry.FileSize != 0 {

@@ -10,28 +10,29 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // contractFixture loads a testdata/contract schema+data pair. The data file
 // holds {"TypeName": [instances...]}; every instance validates as that type.
-func contractFixture(t *testing.T, schemaFile, dataFile string) (*schema.Schema, map[string][]map[string]any) {
+func contractFixture(t *testing.T, schemaFile, dataFile string) (schema.Schema, map[string][]map[string]any) {
 	t.Helper()
 	src, err := os.ReadFile(filepath.Join("testdata", "contract", schemaFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, result := schema.LoadString(t.Context(), string(src), schemaFile)
-	if result.HasErrors() {
-		t.Fatalf("load %s: %s", schemaFile, result)
+	s, loadErr := schema.LoadString(t.Context(), string(src), schemaFile)
+	if loadErr != nil {
+		t.Fatalf("load %s: %s", schemaFile, loadErr)
 	}
 
 	raw, err := os.ReadFile(filepath.Join("testdata", "contract", dataFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Numbers stay json.Number, as yammm's JSON adapter reads a document: a
+	// Numbers stay json.Number, as the yammm command reads a data file: a
 	// float64 decode would turn every integer into a float, which no Integer
 	// accepts.
 	var data map[string][]map[string]any
@@ -55,7 +56,7 @@ func TestContract_PassCorpus(t *testing.T) {
 	if !ok {
 		t.Fatal("contract_pass.yammm declares no type T")
 	}
-	if n := len(typ.InvariantsSlice()); n < 100 {
+	if n := len(slices.Collect(typ.Invariants())); n < 100 {
 		t.Fatalf("contract_pass.yammm declares %d invariants, floor is 100 — fixture emptied?", n)
 	}
 
@@ -63,11 +64,11 @@ func TestContract_PassCorpus(t *testing.T) {
 	validated := 0
 	for typeName, instances := range data {
 		for _, props := range instances {
-			valid, result := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
-			if !result.OK() {
-				t.Errorf("pass corpus drew diagnostics: %s", result)
+			valid, err := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
+			if err != nil {
+				t.Errorf("pass corpus drew diagnostics: %s", err)
 			}
-			if valid == nil {
+			if valid.IsZero() {
 				t.Error("pass corpus returned nil instance")
 			}
 			validated++
@@ -79,7 +80,8 @@ func TestContract_PassCorpus(t *testing.T) {
 	if validated == 0 {
 		t.Fatal("data_pass.json drove no instance — every assertion above was skipped")
 	}
-	for typeName, typ := range s.Types() {
+	for typ := range s.Types() {
+		typeName := typ.Name()
 		// Abstract and part types have no ValidateOne entry point, so requiring
 		// an instance for them would fail on a fixture that is entirely correct.
 		if typ.IsAbstract() || typ.IsPart() {
@@ -104,11 +106,11 @@ func TestContract_ErrCorpus(t *testing.T) {
 	s, data := contractFixture(t, "contract_err.yammm", "data_err.json")
 
 	want := []string{
-		"E_EVAL_ERROR: invariant evaluation error: division by zero",
-		"E_EVAL_ERROR: invariant evaluation error: expected boolean, got int64",
-		"E_EVAL_ERROR: invariant evaluation error: min of empty sequence",
-		"E_EVAL_ERROR: invariant evaluation error: modulo by zero",
-		"E_EVAL_ERROR: invariant evaluation error: reduce of empty sequence with no initial value",
+		`E_EVAL_ERROR: invariant "x_int_div_zero": division by zero`,
+		`E_EVAL_ERROR: invariant "x_min_empty": min of empty sequence`,
+		`E_EVAL_ERROR: invariant "x_mod_zero": modulo by zero`,
+		`E_EVAL_ERROR: invariant "x_nonbool_invariant_result": expected boolean, got int64`,
+		`E_EVAL_ERROR: invariant "x_reduce_empty_no_init": reduce of empty sequence with no initial value`,
 		"E_INVARIANT_FAIL: f_nil_result_is_falsey",
 	}
 
@@ -116,8 +118,10 @@ func TestContract_ErrCorpus(t *testing.T) {
 	var got []string
 	for typeName, instances := range data {
 		for _, props := range instances {
-			valid, result := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
-			if valid != nil {
+			valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
+			})
+			if !valid.IsZero() {
 				t.Error("err corpus returned a valid instance")
 			}
 			for issue := range result.Issues() {

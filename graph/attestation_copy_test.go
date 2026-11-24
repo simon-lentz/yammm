@@ -4,9 +4,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -15,23 +13,20 @@ import (
 // for concurrent reads, and Attestation's fields are exported — so handing out
 // the stored pointer would let one caller rewrite another's claim.
 func TestSnapshot_AttestationIsACopy(t *testing.T) {
-	s, res := schema.NewBuilder().
-		WithName("att").
-		WithSourceID(location.MustNewSourceID("test://att.yammm")).
-		AddType("Thing").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), `schema "att"
+
+type Thing {
+	id String primary
+}
+`, "att.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
-	ty, _ := s.Type("Thing")
 
 	g := graph.New(s)
-	g.Add(t.Context(), instance.NewValidInstance("Thing", ty.ID(),
-		immutable.WrapKey([]any{"t1"}),
-		immutable.WrapProperties(map[string]any{"id": "t1"}),
-		nil, nil, nil))
+	if err := g.Add(t.Context(), instancetest.Valid(t, s, "Thing", map[string]any{"id": "t1"})); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 	snap := g.Snapshot()
 
 	first := snap.Attestation()

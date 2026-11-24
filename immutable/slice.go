@@ -5,55 +5,33 @@ import (
 	"slices"
 )
 
-// Slice provides immutable access to a slice with pre-wrapped elements.
-//
-// Elements are wrapped at construction time, so Get operations are O(1)
-// with no additional allocations.
+// Slice holds a slice immutably, each element wrapped as [Wrap] wraps it: a
+// List or Vector value.
 //
 // Slice is safe for concurrent read access.
 type Slice struct {
 	elements []Value
 }
 
-// WrapSlice wraps a slice with ownership transfer semantics.
-//
-// After calling WrapSlice, the caller MUST NOT retain or use any reference
-// to s or any mutable value reachable from s. Mutation after WrapSlice is
-// undefined behavior.
-//
-// Pass [WithClone] with true to deep-clone what would be stored as-is — a
-// non-string-keyed map and its contents — so the caller can retain it.
-func WrapSlice(s []any, opts ...Option) Slice {
+// WrapSlice returns s held immutably. It copies the slice, and wraps each
+// element as [Wrap] does, so a later change to s reaches nothing it returned,
+// save through a value Wrap stores as given, such as a struct, a pointer or an
+// array. A nil slice gives the zero Slice, which is nil.
+func WrapSlice(s []any) Slice {
 	if s == nil {
 		return Slice{}
 	}
-
-	cfg := resolveConfig(opts)
 	elements := make([]Value, len(s))
 	for i, v := range s {
-		elements[i] = Value{val: wrapValue(v, cfg.clone)}
+		elements[i] = Value{val: wrapValue(v)}
 	}
 	return Slice{elements: elements}
 }
 
-// Get returns the element at the given index.
-//
-// Panics if i is out of bounds, matching Go slice semantics.
-// Use [Slice.GetOK] for bounds-checked access without panics.
-func (s Slice) Get(i int) Value {
+// At returns the element at index i. It panics if i is out of range, as a
+// slice index does.
+func (s Slice) At(i int) Value {
 	return s.elements[i]
-}
-
-// GetOK returns the element at the given index and true if the index is valid.
-// Returns (zero Value, false) if i is out of bounds.
-//
-// This is a safe alternative to [Slice.Get] for code paths where index
-// validity is uncertain.
-func (s Slice) GetOK(i int) (Value, bool) {
-	if i < 0 || i >= len(s.elements) {
-		return Value{}, false
-	}
-	return s.elements[i], true
 }
 
 // Len returns the number of elements in the slice.
@@ -61,20 +39,14 @@ func (s Slice) Len() int {
 	return len(s.elements)
 }
 
-// Iter returns an iterator over the slice elements.
-func (s Slice) Iter() iter.Seq[Value] {
+// Values returns an iterator over the elements in order.
+func (s Slice) Values() iter.Seq[Value] {
 	return slices.Values(s.elements)
 }
 
-// Iter2 returns an iterator over index-value pairs.
-func (s Slice) Iter2() iter.Seq2[int, Value] {
-	return slices.All(s.elements)
-}
-
-// Clone returns a deep copy of the slice as a mutable []any.
-//
-// This is the escape hatch for callers who need to modify values.
-// The returned slice is independent of the immutable Slice.
+// Clone returns the elements as a new []any, each as [Value.Clone] returns it:
+// a container at every depth is copied, and what [Value.Clone] shares is shared
+// with the Slice. The zero Slice clones to nil.
 func (s Slice) Clone() []any {
 	if s.elements == nil {
 		return nil

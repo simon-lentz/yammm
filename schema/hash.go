@@ -12,52 +12,37 @@ import (
 	"regexp"
 	"slices"
 
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // StructuralHashVersion identifies the version of the structural hashing
-// algorithm. Bump this when the hash algorithm changes in a way that
-// invalidates previous hashes. Version 2 (v0.15.0) added invariants and
-// the abstract/part markers. Version 3 (v0.17.0) widened the input from
-// the entry schema's own declarations to its whole import closure, so the
-// hash covers every rule that decides what instance data is valid — an
-// imported type's constraints decide validity for every instance of it the
-// importing schema admits. Version 4 (v0.21.0) writes a relation target as
-// the pair (owning schema name, type name) and normalizes the two float
-// zeros, so two closure members declaring one type name no longer collide.
+// algorithm: a snapshot body read of a header that records another version
+// draws E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM, a header-only read draws nothing,
+// and neither compares its hash.
+// Version 2 (v0.15.0) added invariants and the abstract/part markers.
+// Version 3 (v0.17.0) widened the input from the entry schema's own
+// declarations to its whole import closure, since an imported type's
+// constraints decide validity for every instance of it the importing schema
+// admits. Version 4 (v0.21.0) writes a relation target as
+// the pair (owning schema name, type name), so two closure members declaring
+// one type name no longer collide, and normalizes the two float zeros of a
+// Float bound. Within version 4, a composite key is hashed in key order and a
+// negative number in an invariant as a signed literal, so a v0.21 hash of a
+// schema with a composite key declared out of name order, or with such a
+// number, no longer matches.
 const StructuralHashVersion = 4
 
-// StructuralHash computes a deterministic, content-based identity over the
-// rules that decide what instance data is valid, across the schema's whole
-// import closure: for every member of [Schema.Closure], its types,
-// properties, relations, compositions, data types, constraints, invariants,
-// and the abstract and part markers.
+// StructuralHash returns a deterministic "sha256:<hex>" digest of the rules
+// that decide what instance data is valid, over every member of
+// [Schema.Closure]. Two schemas with one digest agree on every hashed rule in
+// their closures. The package doc's Structural Hash section states what is
+// hashed and what is left out, the entry schema's name surface among it.
 //
-// Two schemas that hash the same agree on every rule everywhere in their
-// closures. The converse does not hold: a hash can move on a change to an
-// imported schema this schema never references, because closure membership
-// is part of the identity. Each member is framed under its schema name, the
-// entry schema first and the remaining members ordered by name, so the
-// order imports are declared in does not enter the digest.
-//
-// Annotations are deliberately excluded — they configure downstream store
-// DDL and never reject data. So are import aliases and source paths: a member
-// frame carries the schema's declared name, never its source, and a relation
-// target is the pair (owning schema name, type name) — never a path. A hashed
-// path would make embedded:// and disk loads of one schema text disagree, and
-// consumer dispatch relies on the hash carrying no source path. A supertype
-// hashes by name alone, which loses nothing: inheritance merges the ancestor's
-// members into the subtype and those members are hashed here, so two
-// candidate ancestors that differ in any rule already produce different
-// digests.
-//
-// The returned string has the format "sha256:<hex>".
-//
-// Panics if s is nil.
-func StructuralHash(s *Schema) string {
-	if s == nil {
-		panic("schema: StructuralHash called on nil *Schema")
+// Panics if s is zero.
+func StructuralHash(s Schema) string {
+	if s.IsZero() {
+		panic("schema.StructuralHash: zero Schema")
 	}
 
 	h := sha256.New()
@@ -65,12 +50,10 @@ func StructuralHash(s *Schema) string {
 	// Domain separator.
 	writeTag(h, "yammm-schema-v4")
 
-	// Closure() returns the entry schema first; the rest are re-ordered by
-	// name so a re-ordered import list hashes the same. The slice is a copy,
-	// so sorting it in place touches no cached state. Ties on name keep
-	// closure order, which is deterministic, so the digest stays so.
-	members := s.Closure()
-	slices.SortStableFunc(members[1:], func(a, b *Schema) int {
+	// The entry schema stays first and the rest sort by name, so import order is
+	// not hashed. The slice is a copy, so sorting it touches no cached state.
+	members := slices.Collect(s.Closure())
+	slices.SortFunc(members[1:], func(a, b Schema) int {
 		return compareName(a.Name(), b.Name())
 	})
 
@@ -91,17 +74,15 @@ func StructuralHash(s *Schema) string {
 // frame opened by its name: its local types, then its local data types. The
 // frame is what keeps two different closures from serializing to one byte
 // stream.
-func hashSchemaMember(h io.Writer, s *Schema, owners map[location.SourceID]string) {
+func hashSchemaMember(h io.Writer, s Schema, owners map[location.SourceID]string) {
 	writeTag(h, "schema")
 	writeStr(h, s.Name())
 
-	// Types (lexicographic iteration guaranteed by s.Types()).
-	for _, typ := range s.Types() {
+	for _, typ := range slices.SortedFunc(s.Types(), func(a, b Type) int { return cmp.Compare(a.name, b.name) }) {
 		hashType(h, typ, owners)
 	}
 
-	// Data types (lexicographic iteration guaranteed by s.DataTypes()).
-	for _, dt := range s.DataTypes() {
+	for _, dt := range slices.SortedFunc(s.DataTypes(), func(a, b DataType) int { return cmp.Compare(a.name, b.name) }) {
 		writeTag(h, "datatype")
 		writeStr(h, dt.Name())
 		hashConstraint(h, dt.Constraint())
@@ -109,26 +90,23 @@ func hashSchemaMember(h io.Writer, s *Schema, owners map[location.SourceID]strin
 }
 
 // hashType hashes a single type's structural shape.
-func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
+func hashType(h io.Writer, typ Type, owners map[location.SourceID]string) {
 	writeTag(h, "type")
 	writeStr(h, typ.ID().Name())
 	writeBool(h, typ.IsAbstract())
 	writeBool(h, typ.IsPart())
 
-	// Primary keys (sorted by name).
-	pks := typ.PrimaryKeysSlice()
-	slices.SortFunc(pks, func(a, b *Property) int {
-		return compareName(a.Name(), b.Name())
-	})
-	for _, pk := range pks {
+	// The key in the order the type holds it, unsorted: a composite key's
+	// order decides validity, since an instance reads its key as a list.
+	for pk := range typ.PrimaryKeys() {
 		writeTag(h, "pk")
 		writeStr(h, pk.Name())
 		hashConstraint(h, pk.Constraint())
 	}
 
 	// All properties (sorted by name).
-	props := typ.AllPropertiesSlice()
-	slices.SortFunc(props, func(a, b *Property) int {
+	props := slices.Collect(typ.AllProperties())
+	slices.SortFunc(props, func(a, b Property) int {
 		return compareName(a.Name(), b.Name())
 	})
 	for _, prop := range props {
@@ -140,8 +118,8 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	}
 
 	// All associations (sorted by name).
-	assocs := typ.AllAssociationsSlice()
-	slices.SortFunc(assocs, func(a, b *Relation) int {
+	assocs := slices.Collect(typ.AllAssociations())
+	slices.SortFunc(assocs, func(a, b Relation) int {
 		return compareName(a.Name(), b.Name())
 	})
 	for _, rel := range assocs {
@@ -152,8 +130,8 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 		writeBool(h, rel.IsMany())
 
 		// Edge properties (sorted by name).
-		edgeProps := rel.PropertiesSlice()
-		slices.SortFunc(edgeProps, func(a, b *Property) int {
+		edgeProps := slices.Collect(rel.Properties())
+		slices.SortFunc(edgeProps, func(a, b Property) int {
 			return compareName(a.Name(), b.Name())
 		})
 		for _, prop := range edgeProps {
@@ -165,8 +143,8 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	}
 
 	// All compositions (sorted by name).
-	comps := typ.AllCompositionsSlice()
-	slices.SortFunc(comps, func(a, b *Relation) int {
+	comps := slices.Collect(typ.AllCompositions())
+	slices.SortFunc(comps, func(a, b Relation) int {
 		return compareName(a.Name(), b.Name())
 	})
 	for _, rel := range comps {
@@ -178,13 +156,13 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	}
 
 	// Super types (sorted by ID name).
-	supers := typ.SuperTypesSlice()
-	slices.SortFunc(supers, func(a, b ResolvedTypeRef) int {
-		return compareName(a.ID().Name(), b.ID().Name())
+	supers := slices.Collect(typ.SuperTypes())
+	slices.SortFunc(supers, func(a, b TypeID) int {
+		return compareName(a.Name(), b.Name())
 	})
-	for _, ref := range supers {
+	for _, id := range supers {
 		writeTag(h, "extends")
-		writeStr(h, ref.ID().Name())
+		writeStr(h, id.Name())
 	}
 
 	// Invariants: order-independent, because two schemas differing only in
@@ -192,10 +170,10 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	// its own blob; the blobs sort by bytes and hash length-prefixed. The
 	// name is excluded — it is the failure message — and inherited
 	// invariants hash like local ones, since both decide validity.
-	invs := typ.AllInvariantsSlice()
+	invs := slices.Collect(typ.AllInvariants())
 	blobs := make([][]byte, 0, len(invs))
 	for _, inv := range invs {
-		e := inv.Expression()
+		e := inv.expr
 		if e == nil {
 			continue
 		}
@@ -214,7 +192,7 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 
 // hashExpression serializes one expression node deterministically: a
 // node-kind tag, then the node's content, children in order. There is no
-// canonical rendering in schema/expr to reuse, and none to drift from.
+// canonical rendering in internal/expr to reuse, and none to drift from.
 func hashExpression(w io.Writer, e expr.Expression) {
 	if e == nil {
 		writeTag(w, "x:nil")
@@ -229,9 +207,6 @@ func hashExpression(w io.Writer, e expr.Expression) {
 		}
 	case expr.Op:
 		writeTag(w, "x:op")
-		writeStr(w, string(n))
-	case expr.DatatypeLiteral:
-		writeTag(w, "x:dt")
 		writeStr(w, string(n))
 	case *expr.Literal:
 		writeTag(w, "x:lit")
@@ -254,8 +229,10 @@ func hashLiteralValue(w io.Writer, v any) {
 		writeTag(w, "l:int")
 		writeInt64(w, val)
 	case float64:
+		// A literal's zero keeps its sign, where a bound's does not: x / -0.0
+		// and x / 0.0 evaluate apart.
 		writeTag(w, "l:float")
-		writeFloat64(w, val)
+		writeFloat64Bits(w, val)
 	case bool:
 		writeTag(w, "l:bool")
 		writeBool(w, val)
@@ -330,7 +307,10 @@ func hashConstraint(h io.Writer, c Constraint) {
 
 	case TimestampConstraint:
 		writeTag(h, "c:timestamp")
-		writeStr(h, cc.Format())
+		// Hash version 4 writes a format's length here. A Timestamp holds no
+		// format, and leaving the write out would move the hash of every
+		// schema that declares one.
+		writeLen(h, 0)
 
 	case DateConstraint:
 		writeTag(h, "c:date")
@@ -348,13 +328,15 @@ func hashConstraint(h io.Writer, c Constraint) {
 		}
 
 	case PatternConstraint:
+		// The count, 0 or 1, keeps the encoding of a pattern list, so a
+		// StructuralHash a consumer stored for a one-pattern constraint holds.
 		writeTag(h, "c:pattern")
-		patterns := cc.Patterns()
-		slices.Sort(patterns)
-		writeLen(h, len(patterns))
-		for _, pat := range patterns {
-			writeStr(h, pat)
+		if cc.compiled == nil {
+			writeLen(h, 0)
+			break
 		}
+		writeLen(h, 1)
+		writeStr(h, cc.Pattern())
 
 	case VectorConstraint:
 		writeTag(h, "c:vector")
@@ -433,12 +415,17 @@ func writeInt64(h io.Writer, v int64) {
 }
 
 // writeFloat64 writes a float64 as 8 bytes IEEE 754 big-endian
-// (via [math.Float64bits]).
+// (via [math.Float64bits]), the two zeros as one.
 func writeFloat64(h io.Writer, v float64) {
-	// FloatConstraint.Equal compares with ==, which calls the two zeros equal.
+	// FloatConstraint.equal compares with ==, which calls the two zeros equal.
 	if v == 0 {
 		v = 0
 	}
+	writeFloat64Bits(h, v)
+}
+
+// writeFloat64Bits writes a float64 as its 8 IEEE 754 bytes, big-endian.
+func writeFloat64Bits(h io.Writer, v float64) {
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], math.Float64bits(v))
 	hwrite(h, buf[:])

@@ -2,92 +2,49 @@ package location
 
 import (
 	"errors"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
 
+// mustSourceID is [NewSourceID] for a test's own fixed name.
+func mustSourceID(name string) SourceID {
+	id, err := NewSourceID(name)
+	if err != nil {
+		panic(err)
+	}
+	return id
+}
+
+// TestNewSourceID holds the synthetic door to the identities it admits and the
+// names it refuses: one that could not be told apart from another identity.
 func TestNewSourceID(t *testing.T) {
-	// NewSourceID should accept any identifier without validation
-	tests := []string{
+	t.Parallel()
+	for _, name := range []string{
 		"test://unit/person.yammm",
 		"inline:schema",
 		"<stdin>",
 		"embedded://app/builtin.yammm",
-		"", // Even empty is allowed (caller's responsibility)
-	}
-
-	for _, id := range tests {
-		sid := NewSourceID(id)
-		if sid.String() != id {
-			t.Errorf("NewSourceID(%q).String() = %q; want %q", id, sid.String(), id)
-		}
-		if sid.IsFilePath() {
-			t.Errorf("NewSourceID(%q) should not be a file path", id)
-		}
-	}
-}
-
-func TestMustNewSourceID_Valid(t *testing.T) {
-	tests := []string{
-		"test://unit/person.yammm",
-		"inline:schema",
-		"<stdin>",
-		"embedded://app/builtin.yammm",
-		"relative/path", // Relative paths are allowed (not absolute)
-	}
-
-	for _, id := range tests {
-		// Should not panic
-		sid := MustNewSourceID(id)
-		if sid.String() != id {
-			t.Errorf("MustNewSourceID(%q).String() = %q; want %q", id, sid.String(), id)
-		}
-	}
-}
-
-func TestMustNewSourceID_Panics(t *testing.T) {
-	tests := []string{
-		"/absolute/path",
-		"C:/windows/path",
-		"C:\\windows\\path",
-		"//unc/path",
-		"\\\\unc\\path",
-	}
-
-	for _, id := range tests {
-		t.Run(id, func(t *testing.T) {
-			defer func() {
-				if r := recover(); r == nil {
-					t.Errorf("MustNewSourceID(%q) should panic", id)
-				}
-			}()
-			MustNewSourceID(id)
-		})
-	}
-}
-
-func TestValidateSyntheticSourceID(t *testing.T) {
-	validCases := []string{
-		"test://unit/person.yammm",
-		"inline:schema",
-		"<stdin>",
 		"relative/path",
 		"just-a-name",
-	}
-
-	for _, id := range validCases {
-		if err := ValidateSyntheticSourceID(id); err != nil {
-			t.Errorf("ValidateSyntheticSourceID(%q) = %v; want nil", id, err)
+		"C:relative",
+	} {
+		id, err := NewSourceID(name)
+		if err != nil {
+			t.Errorf("NewSourceID(%q) = %v; want an identity", name, err)
+			continue
+		}
+		if id.String() != name || id.IsFilePath() || id.IsZero() {
+			t.Errorf("NewSourceID(%q) = %q, file %v, zero %v; want the name, synthetic", name, id, id.IsFilePath(), id.IsZero())
+		}
+		if !id.Dir().IsZero() {
+			t.Errorf("NewSourceID(%q).Dir() = %q; a synthetic source has no directory", name, id.Dir())
 		}
 	}
-
-	invalidCases := []struct {
-		id      string
-		wantErr error
+	for _, tc := range []struct {
+		name string
+		want error
 	}{
 		{"", ErrEmptySourceID},
 		{"/absolute", ErrAbsolutePathSourceID},
@@ -95,17 +52,44 @@ func TestValidateSyntheticSourceID(t *testing.T) {
 		{"C:\\windows", ErrAbsolutePathSourceID},
 		{"//unc", ErrAbsolutePathSourceID},
 		{"\\\\unc", ErrAbsolutePathSourceID},
+		{"inline:caf\xff", ErrInvalidUTF8Path},
+		{"inline:a\nb", ErrUnprintableSourceID},
+	} {
+		id, err := NewSourceID(tc.name)
+		if !errors.Is(err, tc.want) {
+			t.Errorf("NewSourceID(%q) = %q, %v; want %v", tc.name, id, err, tc.want)
+		}
+		if !id.IsZero() {
+			t.Errorf("NewSourceID(%q) refused the name but returned %q", tc.name, id)
+		}
 	}
+}
 
-	for _, tc := range invalidCases {
-		err := ValidateSyntheticSourceID(tc.id)
-		if err == nil {
-			t.Errorf("ValidateSyntheticSourceID(%q) = nil; want %v", tc.id, tc.wantErr)
-			continue
-		}
-		if !errors.Is(err, tc.wantErr) {
-			t.Errorf("ValidateSyntheticSourceID(%q) = %v; want %v", tc.id, err, tc.wantErr)
-		}
+// TestSourceID_Dir holds Dir to the identity of the directory that holds a
+// file-backed source, and to the root at a volume root.
+func TestSourceID_Dir(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file, err := SourceIDFromPath(filepath.Join(dir, "a.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := SourceIDFromPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := file.Dir(); got != want {
+		t.Errorf("Dir() = %q; want %q", got, want)
+	}
+	root, err := SourceIDFromPath(filepath.VolumeName(dir) + string(filepath.Separator))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := root.Dir(); got != root {
+		t.Errorf("Dir() of the root = %q; want the root %q", got, root)
+	}
+	if got := (SourceID{}).Dir(); !got.IsZero() {
+		t.Errorf("Dir() of the zero SourceID = %q; want zero", got)
 	}
 }
 
@@ -128,14 +112,6 @@ func TestSourceIDFromPath(t *testing.T) {
 	s := sid.String()
 	if !strings.HasPrefix(s, "/") && !strings.Contains(s, ":/") {
 		t.Errorf("String() = %q; want absolute path", s)
-	}
-}
-
-func TestMustSourceIDFromPath(t *testing.T) {
-	// Should not panic for valid path
-	sid := MustSourceIDFromPath(".")
-	if !sid.IsFilePath() {
-		t.Error("should create file-backed SourceID")
 	}
 }
 
@@ -260,7 +236,7 @@ func TestSourceID_IsZero(t *testing.T) {
 		t.Error("zero value should report IsZero() == true")
 	}
 
-	syntheticSID := NewSourceID("test://unit")
+	syntheticSID := mustSourceID("test://unit")
 	if syntheticSID.IsZero() {
 		t.Error("synthetic SourceID should not be zero")
 	}
@@ -272,7 +248,7 @@ func TestSourceID_IsZero(t *testing.T) {
 }
 
 func TestSourceID_String(t *testing.T) {
-	syntheticSID := NewSourceID("test://unit/person.yammm")
+	syntheticSID := mustSourceID("test://unit/person.yammm")
 	if syntheticSID.String() != "test://unit/person.yammm" {
 		t.Errorf("String() = %q; want %q", syntheticSID.String(), "test://unit/person.yammm")
 	}
@@ -285,19 +261,11 @@ func TestSourceID_String(t *testing.T) {
 	}
 }
 
-func TestSourceID_CanonicalPath_Synthetic(t *testing.T) {
-	sid := NewSourceID("test://unit")
-	_, ok := sid.CanonicalPath()
-	if ok {
-		t.Error("CanonicalPath() should return ok=false for synthetic SourceID")
-	}
-}
-
 func TestSourceID_Equality(t *testing.T) {
 	// Synthetic SourceIDs
-	sid1 := NewSourceID("test://unit")
-	sid2 := NewSourceID("test://unit")
-	sid3 := NewSourceID("test://other")
+	sid1 := mustSourceID("test://unit")
+	sid2 := mustSourceID("test://unit")
+	sid3 := mustSourceID("test://other")
 
 	if sid1 != sid2 {
 		t.Error("equal synthetic SourceIDs should be equal")
@@ -323,8 +291,8 @@ func TestSourceID_Equality(t *testing.T) {
 
 func TestSourceID_MapKey(t *testing.T) {
 	// SourceID should work as map key
-	sid1 := NewSourceID("test://unit")
-	sid2 := NewSourceID("test://unit")
+	sid1 := mustSourceID("test://unit")
+	sid2 := mustSourceID("test://unit")
 
 	m := make(map[SourceID]int)
 	m[sid1] = 42
@@ -345,218 +313,4 @@ func TestSourceID_CaseSensitivity(t *testing.T) {
 			t.Error("different-case spellings under a missing root should stay distinct")
 		}
 	}
-}
-
-func TestCanonicalizePathForSourceID(t *testing.T) {
-	// Should return a canonical path string
-	result, err := CanonicalizePathForSourceID(".")
-	if err != nil {
-		t.Fatalf("CanonicalizePathForSourceID(\".\") failed: %v", err)
-	}
-
-	// Should be an absolute path
-	if !strings.HasPrefix(result, "/") && !strings.Contains(result, ":/") {
-		t.Errorf("result = %q; want absolute path", result)
-	}
-}
-
-func TestMustCanonicalizePathForSourceID(t *testing.T) {
-	// Should not panic for valid path
-	result := MustCanonicalizePathForSourceID(".")
-	if result == "" {
-		t.Error("result should not be empty")
-	}
-}
-
-func TestCanonicalizePathForSourceID_StrictSymlinkResolution(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	t.Run("non-existent path returns error", func(t *testing.T) {
-		nonExistent := filepath.Join(tmpDir, "does_not_exist", "file.txt")
-		_, err := CanonicalizePathForSourceID(nonExistent)
-		if err == nil {
-			t.Error("expected error for non-existent path, got nil")
-		}
-		// Use errors.Is with fs.ErrNotExist for robust error classification.
-		// This properly follows the error chain through fmt.Errorf wrapping.
-		if !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("expected fs.ErrNotExist in error chain, got: %v", err)
-		}
-	})
-
-	t.Run("broken symlink returns error", func(t *testing.T) {
-		brokenLink := filepath.Join(tmpDir, "broken_link")
-		if err := os.Symlink("/nonexistent/target", brokenLink); err != nil {
-			t.Skipf("cannot create symlink: %v", err)
-		}
-
-		_, err := CanonicalizePathForSourceID(brokenLink)
-		if err == nil {
-			t.Error("expected error for broken symlink, got nil")
-		}
-		// Use errors.Is with fs.ErrNotExist for robust error classification.
-		// EvalSymlinks returns fs.ErrNotExist for broken symlinks (target doesn't exist).
-		if !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("expected fs.ErrNotExist in error chain, got: %v", err)
-		}
-	})
-
-	t.Run("valid symlink resolves correctly", func(t *testing.T) {
-		realFile := filepath.Join(tmpDir, "real.txt")
-		if err := os.WriteFile(realFile, []byte("test"), 0o600); err != nil {
-			t.Fatalf("create real file: %v", err)
-		}
-
-		symlink := filepath.Join(tmpDir, "link.txt")
-		if err := os.Symlink(realFile, symlink); err != nil {
-			t.Skipf("cannot create symlink: %v", err)
-		}
-
-		realResult, err := CanonicalizePathForSourceID(realFile)
-		if err != nil {
-			t.Fatalf("CanonicalizePathForSourceID(realFile) failed: %v", err)
-		}
-
-		linkResult, err := CanonicalizePathForSourceID(symlink)
-		if err != nil {
-			t.Fatalf("CanonicalizePathForSourceID(symlink) failed: %v", err)
-		}
-
-		if realResult != linkResult {
-			t.Errorf("symlink not resolved: real=%q, link=%q", realResult, linkResult)
-		}
-	})
-
-	t.Run("matches SourceIDFromPath for existing files", func(t *testing.T) {
-		realFile := filepath.Join(tmpDir, "match_test.txt")
-		if err := os.WriteFile(realFile, []byte("test"), 0o600); err != nil {
-			t.Fatalf("create file: %v", err)
-		}
-
-		canonicalized, err := CanonicalizePathForSourceID(realFile)
-		if err != nil {
-			t.Fatalf("CanonicalizePathForSourceID failed: %v", err)
-		}
-
-		sourceID, err := SourceIDFromPath(realFile)
-		if err != nil {
-			t.Fatalf("SourceIDFromPath failed: %v", err)
-		}
-
-		if canonicalized != sourceID.String() {
-			t.Errorf("mismatch: CanonicalizePathForSourceID=%q, SourceIDFromPath=%q",
-				canonicalized, sourceID.String())
-		}
-	})
-}
-
-func TestMustCanonicalizePathForSourceID_PanicsOnNonExistent(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for non-existent path, got none")
-		}
-	}()
-
-	MustCanonicalizePathForSourceID("/nonexistent/path/12345/file.txt")
-}
-
-// TestNewSourceID_EmptyString documents that NewSourceID("") returns a zero-value
-// SourceID (both cp and synthetic fields are empty). This is because NewSourceID
-// bypasses validation. Use MustNewSourceID instead to catch empty identifiers.
-func TestNewSourceID_EmptyString(t *testing.T) {
-	sid := NewSourceID("")
-
-	// Empty string produces a zero SourceID
-	if !sid.IsZero() {
-		t.Error("NewSourceID(\"\") should return zero SourceID")
-	}
-
-	// String() returns empty for zero SourceID
-	if sid.String() != "" {
-		t.Errorf("String() = %q; want \"\"", sid.String())
-	}
-
-	// Not a file path
-	if sid.IsFilePath() {
-		t.Error("zero SourceID should not be a file path")
-	}
-
-	// This demonstrates the problem: zero SourceIDs can cause map key anomalies
-	// because the zero value is indistinguishable from an uninitialized SourceID.
-	m := make(map[SourceID]int)
-	m[sid] = 42
-
-	var uninitializedSID SourceID
-	if v, ok := m[uninitializedSID]; ok && v == 42 {
-		// This is expected but potentially confusing behavior
-		t.Log("zero SourceID and uninitialized SourceID are the same map key (expected but potentially confusing)")
-	}
-}
-
-// TestNewSourceID_AbsolutePathCollision documents the collision risk when using
-// NewSourceID with an absolute path string. This can cause issues because:
-// 1. The synthetic identifier matches a file-backed SourceID's string representation
-// 2. The two SourceIDs are NOT equal (different fields), but have the same String()
-// 3. This breaks the injectivity invariant: different SourceIDs should have different strings
-//
-// Use MustNewSourceID instead, which validates that identifiers don't look like paths.
-func TestNewSourceID_AbsolutePathCollision(t *testing.T) {
-	// Create a synthetic SourceID that looks like an absolute path
-	// (NewSourceID doesn't validate, so this succeeds)
-	syntheticID := NewSourceID("/absolute/path/file.yammm")
-
-	// The synthetic ID is NOT a file path (it's stored in the synthetic field)
-	if syntheticID.IsFilePath() {
-		t.Error("synthetic ID should not be a file path")
-	}
-
-	// But its String() looks like one
-	if syntheticID.String() != "/absolute/path/file.yammm" {
-		t.Errorf("String() = %q; want %q", syntheticID.String(), "/absolute/path/file.yammm")
-	}
-
-	// Create a file-backed SourceID for the same path (if it existed)
-	// For demonstration, we use SourceIDFromPath which doesn't require
-	// the file to exist.
-	if runtime.GOOS != "windows" {
-		fileID, err := SourceIDFromPath("/absolute/path/file.yammm")
-		if err != nil {
-			t.Fatalf("SourceIDFromPath failed: %v", err)
-		}
-
-		// The file-backed ID IS a file path
-		if !fileID.IsFilePath() {
-			t.Error("file-backed ID should be a file path")
-		}
-
-		// Both have the same String() representation (collision!)
-		if syntheticID.String() != fileID.String() {
-			t.Errorf("String() mismatch: synthetic=%q, file=%q",
-				syntheticID.String(), fileID.String())
-		}
-
-		// But they are NOT equal as SourceIDs (different internal representation)
-		if syntheticID == fileID {
-			t.Error("synthetic and file-backed SourceIDs should not be equal (different fields)")
-		}
-
-		// This demonstrates the collision: two different SourceIDs with the same string
-		// This breaks the injectivity invariant and can cause issues with:
-		// - Map lookups (different keys, same string representation)
-		// - Sorting/ordering (interleaved in output)
-		// - Debugging (confusing output)
-		t.Log("Collision demonstrated: different SourceIDs with same String() (use MustNewSourceID to prevent this)")
-	}
-}
-
-// TestMustNewSourceID_RejectsEmptyString verifies that MustNewSourceID panics
-// for empty strings, unlike NewSourceID which silently creates a zero SourceID.
-func TestMustNewSourceID_RejectsEmptyString(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("MustNewSourceID(\"\") should panic")
-		}
-	}()
-
-	MustNewSourceID("")
 }

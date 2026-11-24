@@ -9,19 +9,19 @@ import "testing"
 func TestResult_CodeCounts_SeenBasedUnderTruncation(t *testing.T) {
 	c := NewCollector(1)
 	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "stored").Build())
-	c.Collect(NewIssue(Warning, W_SNAPSHOT_VALUE_NONCONFORMING, "dropped").Build())
+	c.Collect(NewIssue(Warning, W_SNAPSHOT_PATH_EXTENSION, "dropped").Build())
 	r := c.Result()
 
-	if r.HasCode(W_SNAPSHOT_VALUE_NONCONFORMING) {
+	if r.HasCode(W_SNAPSHOT_PATH_EXTENSION) {
 		t.Fatal("setup: the second code must have been dropped past the limit")
 	}
-	if got := r.CodeCounts(Warning)[W_SNAPSHOT_VALUE_NONCONFORMING]; got != 1 {
+	if got := r.CodeCounts(Warning)[W_SNAPSHOT_PATH_EXTENSION]; got != 1 {
 		t.Errorf("CodeCounts(Warning)[dropped code] = %d; want 1", got)
 	}
 	if got := r.CodeCounts(Warning)[W_ANNOTATION_SHADOWED]; got != 1 {
 		t.Errorf("CodeCounts(Warning)[stored code] = %d; want 1", got)
 	}
-	if got := r.CodeCounts(Error)[W_SNAPSHOT_VALUE_NONCONFORMING]; got != 0 {
+	if got := r.CodeCounts(Error)[W_SNAPSHOT_PATH_EXTENSION]; got != 0 {
 		t.Errorf("CodeCounts(Error)[a warning's code] = %d; want 0", got)
 	}
 }
@@ -29,7 +29,7 @@ func TestResult_CodeCounts_SeenBasedUnderTruncation(t *testing.T) {
 // Severity is independent of code: the same code at two severities counts
 // once under each, and a severity-agnostic map could not tell them apart.
 func TestResult_CodeCounts_SeparatesSeverities(t *testing.T) {
-	c := NewCollectorUnlimited()
+	c := NewCollector(NoLimit)
 	c.Collect(NewIssue(Error, E_CONSTRAINT_FAIL, "as an error").Build())
 	c.Collect(NewIssue(Warning, E_CONSTRAINT_FAIL, "retagged to a warning").Build())
 	c.Collect(NewIssue(Warning, E_CONSTRAINT_FAIL, "and again").Build())
@@ -51,7 +51,7 @@ func TestCollector_Merge_SumsCodeCounts(t *testing.T) {
 	src.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "one").Build())
 	src.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "two, dropped").Build())
 
-	dst := NewCollectorUnlimited()
+	dst := NewCollector(NoLimit)
 	dst.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "three").Build())
 	dst.Merge(src.Result())
 
@@ -61,7 +61,7 @@ func TestCollector_Merge_SumsCodeCounts(t *testing.T) {
 }
 
 func TestResult_CodeCounts_ReturnsACopy(t *testing.T) {
-	c := NewCollectorUnlimited()
+	c := NewCollector(NoLimit)
 	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "one").Build())
 	r := c.Result()
 
@@ -70,7 +70,7 @@ func TestResult_CodeCounts_ReturnsACopy(t *testing.T) {
 	if got := r.CodeCounts(Warning)[W_ANNOTATION_SHADOWED]; got != 1 {
 		t.Errorf("a caller's write reached the result: %d; want 1", got)
 	}
-	if OK().CodeCounts(Warning) == nil {
+	if (Result{}).CodeCounts(Warning) == nil {
 		t.Error("CodeCounts on an empty result returned nil; want an empty map")
 	}
 }

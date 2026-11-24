@@ -5,12 +5,15 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func loadRules(t *testing.T, src string) diag.Result {
 	t.Helper()
-	_, res := schema.LoadString(t.Context(), src, "s.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+	})
 	return res
 }
 
@@ -60,7 +63,7 @@ type Order extends HasCustomer {
 `
 	res := loadRules(t, src)
 	if _, ok := issueWith(res, diag.E_RELATION_COLLISION, `"CUSTOMER"`); !ok {
-		t.Errorf("an own relation replacing an inherited one bound to a different type must collide; got %v", res.Err())
+		t.Errorf("an own relation replacing an inherited one bound to a different type must collide; got %v", res)
 	}
 }
 
@@ -88,8 +91,8 @@ type Order extends A, B {
     n Integer
 }
 `
-	if res := loadRules(t, src); res.Err() != nil {
-		t.Errorf("identical inherited relations must merge silently: %v", res.Err())
+	if res := loadRules(t, src); diagtest.Err(res) != nil {
+		t.Errorf("identical inherited relations must merge silently: %v", res)
 	}
 }
 
@@ -111,7 +114,7 @@ type T {
 }
 `)
 		if countCode(res, diag.E_DUPLICATE_INVARIANT) != 1 {
-			t.Errorf("want one E_DUPLICATE_INVARIANT; got %v", res.Err())
+			t.Errorf("want one E_DUPLICATE_INVARIANT; got %v", res)
 		}
 	})
 
@@ -136,7 +139,7 @@ type T extends A1, A2 {
 }
 `)
 		if countCode(res, diag.E_INVARIANT_CONFLICT) != 1 {
-			t.Errorf("want one E_INVARIANT_CONFLICT; got %v", res.Err())
+			t.Errorf("want one E_INVARIANT_CONFLICT; got %v", res)
 		}
 	})
 
@@ -167,7 +170,7 @@ type T extends A1, A2, A3 {
 }
 `)
 		if countCode(res, diag.E_INVARIANT_CONFLICT) != 1 {
-			t.Fatalf("one conflict over three ancestors must draw one diagnostic; got %v", res.Err())
+			t.Fatalf("one conflict over three ancestors must draw one diagnostic; got %v", res)
 		}
 		is, _ := issueWith(res, diag.E_INVARIANT_CONFLICT, `"rule"`)
 		if n := len(is.Related()); n != 3 {
@@ -199,13 +202,13 @@ type C extends P1, P2 {
 }
 `)
 		if countCode(res, diag.E_INVARIANT_CONFLICT) != 1 {
-			t.Errorf("1 and 1.0 are different literals, as they are to the structural hash; got %v", res.Err())
+			t.Errorf("1 and 1.0 are different literals, as they are to the structural hash; got %v", res)
 		}
 	})
 
 	t.Run("inherited agreement", func(t *testing.T) {
 		t.Parallel()
-		s, res := schema.LoadString(t.Context(), `schema "s"
+		s, err := schema.LoadString(t.Context(), `schema "s"
 
 abstract type A1 {
     id String primary
@@ -223,8 +226,8 @@ type T extends A1, A2 {
     y Integer
 }
 `, "s.yammm")
-		if res.Err() != nil {
-			t.Fatalf("two ancestors stating one rule must merge: %v", res.Err())
+		if err != nil {
+			t.Fatalf("two ancestors stating one rule must merge: %v", err)
 		}
 		typ, _ := s.Type("T")
 		n := 0
@@ -252,8 +255,8 @@ type T extends Base {
     ! "rule" x > 10
 }
 `)
-		if res.Err() != nil {
-			t.Errorf("a subtype overriding an inherited invariant is documented: %v", res.Err())
+		if diagtest.Err(res) != nil {
+			t.Errorf("a subtype overriding an inherited invariant is documented: %v", res)
 		}
 	})
 }
@@ -285,7 +288,7 @@ type Order {
 	res := loadRules(t, src)
 	is, ok := issueWith(res, diag.E_INVALID_ASSOCIATION_TARGET, `"Line"`)
 	if !ok {
-		t.Fatalf("a part type inheriting an association must be refused; got %v", res.Err())
+		t.Fatalf("a part type inheriting an association must be refused; got %v", res)
 	}
 	if !strings.Contains(is.Message(), "inherits") {
 		t.Errorf("the diagnostic should say the association is inherited: %q", is.Message())
@@ -324,10 +327,10 @@ type Order {
 `
 	res := loadRules(t, src)
 	if n := countCode(res, diag.E_INVALID_ASSOCIATION_TARGET); n != 1 {
-		t.Fatalf("want one E_INVALID_ASSOCIATION_TARGET for the chain; got %d: %v", n, res.Err())
+		t.Fatalf("want one E_INVALID_ASSOCIATION_TARGET for the chain; got %d: %v", n, res)
 	}
 	if _, ok := issueWith(res, diag.E_INVALID_ASSOCIATION_TARGET, `"Line"`); !ok {
-		t.Errorf("the one diagnostic should sit on the first part type that inherits it; got %v", res.Err())
+		t.Errorf("the one diagnostic should sit on the first part type that inherits it; got %v", res)
 	}
 }
 
@@ -353,7 +356,7 @@ type Grand extends Child {
 `
 	res := loadRules(t, src)
 	if n := countCode(res, diag.E_CASE_COLLISION); n != 1 {
-		t.Fatalf("want one E_CASE_COLLISION; got %d: %v", n, res.Err())
+		t.Fatalf("want one E_CASE_COLLISION; got %d: %v", n, res)
 	}
 	is, _ := issueWith(res, diag.E_CASE_COLLISION, "firstname")
 	line := strings.Split(src, "\n")[is.Span().Start.Line-1]
@@ -385,7 +388,7 @@ type T extends A, B {
 `
 	res := loadRules(t, src)
 	if n := countCode(res, diag.E_CASE_COLLISION); n != 1 {
-		t.Fatalf("want one E_CASE_COLLISION; got %d: %v", n, res.Err())
+		t.Fatalf("want one E_CASE_COLLISION; got %d: %v", n, res)
 	}
 	is, _ := issueWith(res, diag.E_CASE_COLLISION, "firstName")
 	line := strings.Split(src, "\n")[is.Span().Start.Line-1]
@@ -395,9 +398,9 @@ type T extends A, B {
 }
 
 // The inherited-association refusal is reported once, on the first part type
-// in the chain. Asking only the direct supertypes lets a non-part type between
-// two part types hide the one that already reported, so the refusal is drawn
-// twice for one declaration.
+// in the chain, in a chain that puts an abstract type between two part types.
+// That chain is itself refused (E_INVALID_SUPERTYPE), and asking only the
+// direct supertypes would draw the association refusal twice there.
 func TestPartType_InheritedAssociationReportedOncePerChain(t *testing.T) {
 	t.Parallel()
 	const src = `schema "s"
@@ -422,7 +425,9 @@ part type P1 extends Mid {
 	pid String primary
 }
 `
-	_, res := schema.LoadString(t.Context(), src, "s.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+	})
 	var reported []string
 	for is := range res.Issues() {
 		if strings.Contains(is.Message(), "cannot carry an association") {
@@ -431,6 +436,9 @@ part type P1 extends Mid {
 	}
 	if len(reported) != 1 {
 		t.Fatalf("the refusal was reported %d times, want 1: %v", len(reported), reported)
+	}
+	if n := codeCounts(res)[diag.E_INVALID_SUPERTYPE]; n != 1 {
+		t.Errorf("want one E_INVALID_SUPERTYPE for Mid extends P0, got %d: %v", n, res)
 	}
 	if !strings.Contains(reported[0], `"P0"`) {
 		t.Errorf("reported on %q; want the first part type in the chain, P0", reported[0])

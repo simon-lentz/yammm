@@ -5,9 +5,9 @@
 // # Internal Package
 //
 // This package is internal to the YAMMM module and is not importable by external
-// consumers per Go's internal/ package semantics. It is used by the instance
-// validation layer (instance/internal/eval) for type coercion and constraint
-// evaluation.
+// consumers per Go's internal/ package semantics. The validator, the expression
+// evaluator, the graph, the snapshot reader and the neo4j write path read a value
+// by it.
 //
 // # Value Comparison
 //
@@ -24,26 +24,31 @@
 //   - bool (false < true)
 //   - integers: int, int8-64, uint, uint8-64, uintptr
 //   - floats: float32, float64 (with special handling: -Inf < finite < +Inf < NaN)
-//   - [encoding/json.Number], as the integer it spells when it is an integer
-//     literal and as a float otherwise
-//   - string and *regexp.Regexp (regexp compared via String())
+//   - [encoding/json.Number] that is a JSON number literal, as the integer it
+//     spells when it is an integer literal and as a float otherwise; one
+//     holding other text is no number and has no strata
+//   - string
 //   - slices of supported types (lexicographic comparison)
 //
 // This package is the single authority on what a value IS. A predeclared type
-// is answered by a type switch; anything else falls back to its underlying
-// kind, so a pointer takes the strata and the extracted value of what it points
-// at, and a named scalar (type MyInt int) takes those of its base. The fallback
+// is answered by a type switch; anything else is read in the one form [Scalar]
+// defines. A pointer is a value of no form, a nil one too: it has no strata,
+// it is not absent, and every check refuses it. A non-nil slice is a list, as
+// [ListElems] reads one, and a nil one holds none and is [NilStrata]; a named
+// scalar (type MyInt int) takes the strata and value of its base. The fallback
 // runs only when the type switch misses, so canonical input pays nothing for it.
 //
-// The named-type rule is not a convenience. adapter/gogen emits
+// The named-type rule is not a convenience. schema/gogen emits
 // `type <Name> <base>` for every DataType and inline enum, so rejecting named
 // types meant this library's own generator produced values its own validator
 // and evaluator refused.
 //
-// An [immutable.Slice] is a slice for every purpose here. It is the shape
-// Value.Unwrap returns for a List- or Vector-typed property, and it is a struct,
-// so neither a type switch over predeclared types nor a reflect.Slice test
-// names it; [TypeStrata] and [Order] both carry an explicit case.
+// A non-nil [immutable.Slice] is a slice for every purpose here, and a nil one,
+// like every nil [immutable] container ([immutable.IsNilContainer]), holds no
+// value. It is the shape Value.Any returns for a List- or Vector-typed
+// property, and it is a struct, so neither a type switch over predeclared types
+// nor a reflect.Slice test names it; [TypeStrata] and [Order] both carry an
+// explicit case.
 //
 // All slices are supported structurally, but their elements must be supported
 // types. Maps and other structs are unsupported: callers normalize to supported
@@ -62,18 +67,29 @@
 //   - [UnspecifiedKind]: Slices, unsupported or nil values
 //
 // A slice is never a scalar kind: a list or vector's shape is its constraint's
-// to judge, elementwise, in the instance layer.
+// to judge, elementwise, by [Check].
+//
+// [Read] applies Classify to every json.Number in a decoded value, at any depth
+// of its lists and string-keyed maps, and [ReadAt] does so at the position a
+// constraint describes: at a Float, and at a Vector element, a number literal is
+// its nearest float64. The .ys reader and graph.ParseKey read a number by them. The CLI's JSON reader,
+// cmd/yammm/internal/jsondata, reads a number by its own rule, which keeps -0 a
+// json.Number for the validator to read at the property's kind.
 //
 // # json.Number Handling
 //
 // [Classify] determines what a value IS, not what it should be per schema. It
-// reads a json.Number by its spelling ([immutable.IsIntegerLiteral]):
-//   - json.Number("42") → IntKind (no '.', 'e' or 'E')
+// reads a json.Number by its spelling, and only a JSON number literal
+// ([IsNumberLiteral]) is a number: an
+// integer literal is an integer, and any other literal is a float:
+//   - json.Number("42") → IntKind (an optional '-' and digits alone)
 //   - json.Number("3.0") → FloatKind (has a decimal point)
 //   - json.Number("1e2") → FloatKind (has an exponent), though its value is whole
 //   - json.Number("3.14") → FloatKind
 //   - json.Number("-9223372036854775809") → IntKind, kept as the json.Number:
 //     an integer no int64 holds, which an Integer check refuses
+//   - json.Number("+5"), ("007"), ("1_000"), ("0x1p4"), (".5") →
+//     UnspecifiedKind: no JSON number literal, though strconv reads each
 //
 // The Integer check at instance validation refuses every FloatKind value, "3.0"
 // and 3.0 included: a float is never an Integer, whole or not.
@@ -104,10 +120,10 @@
 // convert the float to integer (not vice versa) when the float is a whole number,
 // avoiding the precision loss that occurs when large integers are converted to float64.
 //
-// An integer takes the exact path whatever carries it: a json.Number spelled as
-// an integer that an int64 or a uint64 holds is compared as that integer, and a
-// json.Number carrying '.', 'e' or 'E' is compared as a float. A json.Number
-// spelled as an integer neither int64 nor uint64 holds is compared exactly, as
+// An integer takes the exact path whatever carries it: a JSON integer literal
+// that an int64 or a uint64 holds is compared as that integer, and any other
+// JSON number literal is compared as a float. An integer literal neither int64
+// nor uint64 holds is compared exactly, as
 // a rational, so it equals a float64 only when that float64 is the same integer
 // exactly (2^64 is; the float64 nearest 2^64+1 is not). The order is therefore
 // transitive across every supported value:
@@ -127,17 +143,20 @@
 // constraint defines. Timestamp, UUID and Date each accept more than one Go
 // representation and store one, a List over one of them is rebuilt at its
 // elements, and every other kind passes through. It is the
-// temporal and UUID half of the stored-form rule: the instance layer's
-// CoerceValue — the rule itself — calls it for those kinds, and the graph
+// temporal and UUID half of the stored-form rule: [Coerce], the rule itself,
+// calls it for those kinds, and the graph
 // writer and the snapshot wire call it directly for a value that reached them
 // without validation.
 //
 // # Dependencies
 //
-//	internal/value  ──imports──▶  immutable, schema, github.com/google/uuid
+//	internal/value  ──imports──▶  diag, immutable, internal/expr, schema, github.com/google/uuid
 //
-// Comparison and kind detection depend on stdlib and immutable; [Canonical] is what
-// reaches schema and github.com/google/uuid, because a canonical form is
-// defined by a constraint. The edge is one-directional: schema does not import
+// Comparison and kind detection depend on stdlib and immutable. [Check],
+// [Coerce] and [Canonical] reach schema, because a constraint defines what each
+// judges or renders, and diag for [diag.QuoteValue], the rule a message that
+// repeats a value follows. They and [Scalar] reach github.com/google/uuid,
+// whose UUID each reads as itself. [Check] reaches internal/expr for the
+// compiled pattern of a Pattern constraint. The edge is one-directional: schema does not import
 // this package, and adding that edge would create a cycle.
 package value

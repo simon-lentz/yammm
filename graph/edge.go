@@ -12,16 +12,22 @@ import (
 //
 // Edge is safe for concurrent read access from multiple goroutines.
 //
-// Edges are accessed via [Snapshot.Edges].
-type Edge struct {
+// Edges are accessed via [Snapshot.Edges] and [Snapshot.EdgesFrom].
+type Edge struct{ *edgeState }
+
+// IsZero reports whether the handle names no record.
+func (e Edge) IsZero() bool { return e.edgeState == nil }
+
+// edgeState is the record a [Edge] names.
+type edgeState struct {
 	// relation is the DSL relation name (e.g., "OWNER", "WORKS_AT").
 	relation string
 
 	// source is the instance that declares the relationship.
-	source *Instance
+	source Instance
 
 	// target is the instance being referenced.
-	target *Instance
+	target Instance
 
 	// properties contains optional edge property values.
 	// May be empty if the relationship has no declared properties.
@@ -32,8 +38,8 @@ type Edge struct {
 //
 // This is the relation name as declared in the schema (e.g., "OWNER"),
 // not the field name used in instance data (the lower-case relation name).
-func (e *Edge) Relation() string {
-	if e == nil {
+func (e Edge) Relation() string {
+	if e.IsZero() {
 		return ""
 	}
 	return e.relation
@@ -41,22 +47,22 @@ func (e *Edge) Relation() string {
 
 // Source returns the instance that declares this relationship.
 //
-// The source instance is always non-nil for edges returned by [Snapshot.Edges].
-func (e *Edge) Source() *Instance {
-	if e == nil {
-		return nil
+// The source instance is never zero for edges returned by [Snapshot.Edges].
+func (e Edge) Source() Instance {
+	if e.IsZero() {
+		return Instance{}
 	}
 	return e.source
 }
 
 // Target returns the instance being referenced.
 //
-// The target instance is always non-nil for resolved edges returned by
+// The target instance is never zero for resolved edges returned by
 // [Snapshot.Edges]. Unresolved edges (where the target is not in the graph)
 // are reported separately via [Snapshot.Unresolved].
-func (e *Edge) Target() *Instance {
-	if e == nil {
-		return nil
+func (e Edge) Target() Instance {
+	if e.IsZero() {
+		return Instance{}
 	}
 	return e.target
 }
@@ -65,9 +71,10 @@ func (e *Edge) Target() *Instance {
 // Returns (zero Value, false) if the property does not exist.
 //
 // Edge properties are declared on relationships in the schema. Not all
-// relationships have properties; use [Edge.HasProperties] to check.
-func (e *Edge) Property(name string) (immutable.Value, bool) {
-	if e == nil {
+// relationships have properties; [Edge.HasProperties] reports whether this edge
+// holds any.
+func (e Edge) Property(name string) (immutable.Value, bool) {
+	if e.IsZero() {
 		return immutable.Value{}, false
 	}
 	return e.properties.Get(name)
@@ -75,18 +82,18 @@ func (e *Edge) Property(name string) (immutable.Value, bool) {
 
 // Properties returns all edge property values.
 //
-// Returns an empty Properties if the edge has no properties.
-// The returned Properties is immutable.
-func (e *Edge) Properties() immutable.Properties {
-	if e == nil {
+// An edge with no property holds the zero Properties on every path, so
+// [immutable.Properties.Clone] answers nil for it. The returned Properties is immutable.
+func (e Edge) Properties() immutable.Properties {
+	if e.IsZero() {
 		return immutable.Properties{}
 	}
 	return e.properties
 }
 
 // HasProperties reports whether this edge has any properties.
-func (e *Edge) HasProperties() bool {
-	if e == nil {
+func (e Edge) HasProperties() bool {
+	if e.IsZero() {
 		return false
 	}
 	return e.properties.Len() > 0
@@ -94,11 +101,11 @@ func (e *Edge) HasProperties() bool {
 
 // newEdge creates an Edge from graph-internal data.
 // This is an internal constructor; edges are created during graph construction.
-func newEdge(relation string, source, target *Instance, properties immutable.Properties) *Edge {
-	return &Edge{
+func newEdge(relation string, source, target Instance, properties immutable.Properties) Edge {
+	return Edge{&edgeState{
 		relation:   relation,
 		source:     source,
 		target:     target,
 		properties: properties,
-	}
+	}}
 }

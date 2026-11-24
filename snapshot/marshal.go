@@ -7,10 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
-	"unicode"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -19,77 +18,66 @@ import (
 
 // Marshal serializes a Snapshot to the yammm snapshot persistence format
 // (.ys). Output is deterministic by default — created_at is omitted unless
-// [WithCreatedAt] or [WithCreatedAtFrom] opts in — so one snapshot and one
+// [WithCreatedAt] opts in — so one snapshot and one
 // option set always produce identical bytes. Marshal checks ctx.Err() at the
 // start and once per type group during emission, returning Fatal
 // E_CONTEXT_CANCELLED on cancellation.
 //
-// A property value the wire cannot carry — a non-finite float, or a Go value
-// encoding/json refuses — returns nil bytes with Error E_SNAPSHOT_MALFORMED
-// naming the property and where it sits: the root or duplicate record by type
-// and key, the composition path to a composed child, and for an edge property
-// the relation. Only a value no validator judged is one. It reaches the
-// snapshot on an unjudged instance through [graph.Graph.Add],
-// [graph.Graph.AddComposed] or [graph.RebuildSnapshot], or through
-// [graph.Graph.AddOrMerge], which installs an unjudged instance's edge
-// properties on the instance the graph holds. A snapshot nested
-// deeper than the reader accepts returns nil bytes with Error
-// E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises, so
-// the bound reads identically from both sides. Fatal E_INTERNAL marks only a
-// broken invariant of the snapshot itself. Panics if snap is nil.
+// Every snapshot came from a validator or a document, so the wire has a form for
+// every value it holds, and no tree in it is nested deeper than the reader
+// accepts. Fatal E_INTERNAL marks only a broken invariant of the snapshot
+// itself. Panics if snap is zero or ctx is nil.
 //
-// Two further refusals, both Error: an indent that is not whitespace, which
-// would produce bytes that are not JSON ([diag.E_SNAPSHOT_MALFORMED]); and a
-// denoted type whose schema is outside the entry schema's import closure, which
-// the document has no portable name for ([diag.E_SNAPSHOT_UNKNOWN_TYPE]).
-func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
-	if snap == nil {
-		panic("snapshot.Marshal: nil Snapshot")
+// Four further refusals, each Error [diag.E_SNAPSHOT_MALFORMED]: an indent that is
+// not JSON whitespace, which would produce bytes that are not JSON; a created_at
+// time that has no RFC 3339 form, which no reader would return as that time;
+// and a metadata key or value, or an instance provenance's source name or
+// path, that is not valid UTF-8, which encoding/json would write as U+FFFD.
+// Each failure returns nil and a *[diag.ResultError]; Marshal draws no warning.
+// It takes [WithIndent], [WithCreatedAt] and [WithMetadata], and refuses any
+// other option with an error naming it.
+func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, error) {
+	if snap.IsZero() {
+		panic("snapshot.Marshal: zero Snapshot")
+	}
+	if ctx == nil {
+		panic("snapshot.Marshal: nil context")
+	}
+	cfg := newConfig(opts)
+	if err := cfg.refuse("Marshal", optIndent, optCreatedAt, optMetadata); err != nil {
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-		return nil, c.Result()
+		return nil, cancelled(err)
 	}
 
-	cfg := applyOptions(opts)
 	if bad, ok := nonWhitespaceIndent(cfg.indent); ok {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			fmt.Sprintf("indent must be whitespace; it is written between JSON tokens and %q produces a document that is not JSON", bad)).
+		return nil, failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("indent must be JSON whitespace; it is written between JSON tokens and %q produces a document that is not JSON", bad)).
 			Build())
-		return nil, c.Result()
+	}
+	createdAt, err := createdAtMember(cfg.createdAt)
+	if err != nil {
+		return nil, failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
+	}
+	if err := invalidMetadata(cfg.metadata); err != nil {
+		return nil, failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
 	}
 	s := snap.Schema()
 
 	// Step 1: Compute schema structural hash.
 	schemaHash := schema.StructuralHash(s)
-	schemaSource := s.SourceID().String()
 
 	// Step 2: Read the snapshot once, then serialize the payload sections —
 	// identity lives in the types table, every other position is a row index.
 	names := newSchemaNames(s)
 	view := newWriterView(snap, names)
-	// Refused before a byte is written: a type the closure cannot name has no
-	// portable rendering, and writing its source path instead would put a
-	// machine-local path into the one field the re-key exists to keep free of
-	// them — in a document that would otherwise look well-formed.
-	if id, ok := names.requireDenotable(snap.Types()); !ok {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
-			fmt.Sprintf("cannot write type %s: its schema is not in the entry schema's import closure, so the document has no portable name for it", id)).
-			WithDetail(diag.DetailKeyTypeName, id.String()).
-			Build())
-		return nil, c.Result()
-	}
 	tt := buildTypeTable(view, names)
 
 	groups, err := marshalInstances(ctx, view, s, tt)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			c := diag.NewCollector(0)
-			c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, ctxErr.Error()).Build())
-			return nil, c.Result()
+			return nil, cancelled(ctxErr)
 		}
 		return nil, marshalFatalErr("instances", err)
 	}
@@ -112,12 +100,6 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 		return nil, marshalFatalErr("diagnostics", marshalErr)
 	}
 
-	// Build header and assemble document.
-	createdAt := cfg.createdAtText
-	if createdAt == "" && !cfg.createdAt.IsZero() {
-		createdAt = cfg.createdAt.UTC().Format(time.RFC3339)
-	}
-
 	features := []string{}
 	var metadata map[string]string
 	if len(cfg.metadata) > 0 {
@@ -133,7 +115,7 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 	}
 
 	return assembleDocument(
-		schemaHash, s.Name(), schemaSource, createdAt, features, metadata,
+		schemaHash, s.Name(), createdAt, features, metadata,
 		attWire,
 		typesJSON, instancesJSON, diagJSON,
 		cfg.indent, currentVersion,
@@ -159,30 +141,29 @@ func marshalSection(v any, indent string) ([]byte, error) {
 // instance's own identity.
 type writerGroup struct {
 	id        schema.TypeID
-	instances []*graph.Instance
+	instances []graph.Instance
 }
 
-// writerView is one read of the snapshot the writer emits from, so the table
-// pass and the emit pass see the same data without re-walking the snapshot's
-// defensive-copy accessors.
+// writerView holds the groups and diagnostic records the table pass and the emit
+// pass both read, in one order. Each pass reads an instance's edges from the
+// snapshot itself.
 type writerView struct {
+	snap       graph.Snapshot
 	groups     []writerGroup
-	edges      map[*graph.Instance][]*graph.Edge
-	duplicates []*graph.Duplicate
-	unresolved []*graph.UnresolvedEdge
+	duplicates []graph.Duplicate
+	unresolved []graph.UnresolvedEdge
 }
 
 // newWriterView reads the snapshot once. Instances are grouped by their own
 // TypeID — the filing key is a container detail, and an instance whose group
 // differs from its identity would otherwise be silently rebound on load —
 // and a type the snapshot holds with no instances keeps an empty group.
-func newWriterView(snap *graph.Snapshot, names schemaNames) *writerView {
-	// Types returns a fresh defensive copy per call, so it is taken once.
+func newWriterView(snap graph.Snapshot, names schemaNames) *writerView {
+	// Types returns a fresh slice per call, so it is taken once.
 	snapTypes := snap.Types()
 
-	byID := make(map[schema.TypeID][]*graph.Instance)
+	byID := make(map[schema.TypeID][]graph.Instance)
 	order := make([]schema.TypeID, 0, len(snapTypes))
-	edges := make(map[*graph.Instance][]*graph.Edge)
 
 	addGroup := func(id schema.TypeID) {
 		if _, ok := byID[id]; !ok {
@@ -193,20 +174,17 @@ func newWriterView(snap *graph.Snapshot, names schemaNames) *writerView {
 
 	for _, typeID := range snapTypes {
 		addGroup(typeID)
-		for _, inst := range snap.InstancesOf(typeID) {
+		for inst := range snap.InstancesOf(typeID) {
 			id := inst.TypeID()
 			addGroup(id)
 			byID[id] = append(byID[id], inst)
-			if es := snap.EdgesFrom(inst); len(es) > 0 {
-				edges[inst] = es
-			}
 		}
 	}
 
 	groups := make([]writerGroup, 0, len(order))
 	for _, id := range order {
 		insts := byID[id]
-		slices.SortFunc(insts, func(a, b *graph.Instance) int {
+		slices.SortFunc(insts, func(a, b graph.Instance) int {
 			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
 		})
 		groups = append(groups, writerGroup{id: id, instances: insts})
@@ -225,16 +203,16 @@ func newWriterView(snap *graph.Snapshot, names schemaNames) *writerView {
 
 	return &writerView{
 		groups:     groups,
-		edges:      edges,
-		duplicates: snap.Duplicates(),
-		unresolved: snap.Unresolved(),
+		snap:       snap,
+		duplicates: slices.Collect(snap.Duplicates()),
+		unresolved: slices.Collect(snap.Unresolved()),
 	}
 }
 
 // marshalInstances builds the instances section: one entry per group, in
 // table-row order. A type denoted only as a reference target has no group
 // and no entry.
-func marshalInstances(ctx context.Context, view *writerView, s *schema.Schema, tt *typeTable) ([]instanceGroupWire, error) {
+func marshalInstances(ctx context.Context, view *writerView, s schema.Schema, tt *typeTable) ([]instanceGroupWire, error) {
 	groups := make([]instanceGroupWire, 0, len(view.groups))
 	for _, group := range view.groups {
 		if err := ctx.Err(); err != nil {
@@ -246,7 +224,7 @@ func marshalInstances(ctx context.Context, view *writerView, s *schema.Schema, t
 		}
 		items := make([]instWire, 0, len(group.instances))
 		for _, inst := range group.instances {
-			w, err := marshalInstance(inst, view.edges[inst], s, tt, false, 0)
+			w, err := marshalInstance(inst, view.snap, s, tt, false)
 			if err != nil {
 				return nil, err
 			}
@@ -261,31 +239,17 @@ func marshalInstances(ctx context.Context, view *writerView, s *schema.Schema, t
 // only where the position already denotes the type: a root instance (its
 // group entry) and a duplicate's rejected instance (its record).
 func marshalInstance(
-	inst *graph.Instance,
-	edges []*graph.Edge,
-	s *schema.Schema,
+	inst graph.Instance,
+	snap graph.Snapshot,
+	s schema.Schema,
 	tt *typeTable,
 	carryType bool,
-	depth int,
 ) (instWire, error) {
-	// The same bound the reader enforces, so Marshal never writes a document
-	// Load and Verify refuse whole.
-	if depth > maxComposedDepth {
-		return instWire{}, &depthExceededError{
-			depth: depth,
-			ref:   tt.ref(inst.TypeID()),
-			key:   inst.PrimaryKey().String(),
-		}
-	}
 	id := inst.TypeID()
 	t, _ := s.TypeByID(id)
-	props, bad := wireProps(inst.Properties(), t)
-	if bad != "" {
-		return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), property: bad}
-	}
 	w := instWire{
 		Key:        inst.PrimaryKey().Clone(),
-		Properties: props,
+		Properties: wireProps(inst.Properties(), t),
 	}
 
 	if carryType {
@@ -296,47 +260,35 @@ func marshalInstance(
 		w.Type = row
 	}
 
-	if len(edges) > 0 {
-		edgeMap := make(map[string][]edgeWire)
-		for _, e := range edges {
-			var rel *schema.Relation
-			if t != nil {
-				rel, _ = t.Relation(e.Relation())
-			}
-			row, err := tt.rowRef(e.Target().TypeID(), "edge target")
-			if err != nil {
-				return instWire{}, err
-			}
-			eprops, bad := wireEdgeProps(e.Properties(), rel)
-			if bad != "" {
-				return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), relation: e.Relation(), property: bad}
-			}
-			ew := edgeWire{
-				TargetType: row,
-				TargetKey:  e.Target().PrimaryKey().Clone(),
-				Properties: eprops,
-			}
-			if ew.Properties == nil {
-				ew.Properties = map[string]any{}
-			}
-			edgeMap[e.Relation()] = append(edgeMap[e.Relation()], ew)
+	var edgeMap map[string][]edgeWire
+	for e := range snap.EdgesFrom(inst) {
+		if edgeMap == nil {
+			edgeMap = make(map[string][]edgeWire)
 		}
-		w.Edges = edgeMap
+		rel, _ := t.Relation(e.Relation())
+		row, err := tt.rowRef(e.Target().TypeID(), "edge target")
+		if err != nil {
+			return instWire{}, err
+		}
+		ew := edgeWire{
+			TargetType: row,
+			TargetKey:  e.Target().PrimaryKey().Clone(),
+			Properties: wireEdgeProps(e.Properties(), rel),
+		}
+		if ew.Properties == nil {
+			ew.Properties = map[string]any{}
+		}
+		edgeMap[e.Relation()] = append(edgeMap[e.Relation()], ew)
 	}
+	w.Edges = edgeMap
 
 	compRels := inst.ComposedRelations()
 	if len(compRels) > 0 {
 		compMap := make(map[string][]instWire, len(compRels))
 		for _, relName := range compRels {
-			children := inst.Composed(relName)
-			childWires := make([]instWire, 0, len(children))
-			for i, child := range children {
-				cw, err := marshalInstance(child, nil, s, tt, true, depth+1)
-				if ue, ok := errors.AsType[*unwritableValueError](err); ok {
-					// Readdressed at each level, so the refusal names the root.
-					ue.ref, ue.key = tt.ref(id), inst.PrimaryKey().String()
-					ue.path = append([]string{fmt.Sprintf("%s[%d]", relName, i)}, ue.path...)
-				}
+			childWires := make([]instWire, 0, inst.ComposedCount(relName))
+			for child := range inst.Composed(relName) {
+				cw, err := marshalInstance(child, snap, s, tt, true)
 				if err != nil {
 					return instWire{}, err
 				}
@@ -347,66 +299,42 @@ func marshalInstance(
 		w.Composed = compMap
 	}
 
-	w.Provenance = marshalProvenance(inst)
+	prov, err := marshalProvenance(inst)
+	if err != nil {
+		return instWire{}, err
+	}
+	w.Provenance = prov
 	return w, nil
 }
 
 // marshalDiagnostics builds the diagnostics section. Every duplicate record
-// states its conflict's address; the graph API guarantees the invariants
-// checked here, so a violation is a caller-assembled inconsistency.
-func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diagWire, error) {
+// states its conflict's address. Every constructor of a snapshot gives a
+// duplicate a conflict and an unresolved record a source.
+func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagWire, error) {
 	dupWires := make([]dupWire, 0, len(view.duplicates))
 	for _, d := range view.duplicates {
 		row, err := tt.rowRef(d.Instance().TypeID(), "duplicate type")
 		if err != nil {
 			return diagWire{}, err
 		}
-		inst, err := marshalInstance(d.Instance(), nil, s, tt, false, 0)
-		if ue, ok := errors.AsType[*unwritableValueError](err); ok {
-			ue.duplicate = true
-		}
+		inst, err := marshalInstance(d.Instance(), view.snap, s, tt, false)
 		if err != nil {
 			return diagWire{}, err
-		}
-		if d.Conflict() == nil {
-			return diagWire{}, fmt.Errorf("duplicate %s[%s] carries no conflict instance",
-				d.Instance().TypeID(), d.Instance().PrimaryKey())
 		}
 		conflictRow, err := tt.rowRef(d.Conflict().TypeID(), "duplicate conflict type")
 		if err != nil {
 			return diagWire{}, err
 		}
-		conflict := &conflictWire{Type: conflictRow}
-		if key := d.Conflict().PrimaryKey(); key.Len() > 0 {
-			conflict.Key = key.Clone()
-		}
-		dw := dupWire{
+		dupWires = append(dupWires, dupWire{
 			Type:     row,
 			Key:      d.Instance().PrimaryKey().Clone(),
 			Instance: inst,
-			Conflict: conflict,
-		}
-		if d.Relation() != "" {
-			if d.Parent() == nil {
-				return diagWire{}, fmt.Errorf("duplicate %s[%s] carries relation %q with no parent",
-					d.Instance().TypeID(), d.Instance().PrimaryKey(), d.Relation())
-			}
-			parentRow, err := tt.rowRef(d.Parent().TypeID(), "duplicate parent type")
-			if err != nil {
-				return diagWire{}, err
-			}
-			dw.ParentType = parentRow
-			dw.ParentKey = d.Parent().PrimaryKey().Clone()
-			dw.Relation = d.Relation()
-		}
-		dupWires = append(dupWires, dw)
+			Conflict: &conflictWire{Type: conflictRow, Key: d.Conflict().PrimaryKey().Clone()},
+		})
 	}
 
 	unresWires := make([]unresolvedWire, 0, len(view.unresolved))
 	for _, u := range view.unresolved {
-		if u.Source() == nil {
-			return diagWire{}, fmt.Errorf("unresolved edge record for relation %q carries no source instance", u.Relation())
-		}
 		sourceID := u.Source().TypeID()
 		sourceRow, err := tt.rowRef(sourceID, "unresolved source type")
 		if err != nil {
@@ -422,27 +350,23 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 			Relation:   u.Relation(),
 			TargetType: targetRow,
 			Required:   u.Required(),
-			Reason:     u.Reason(),
+			Reason:     u.Reason().String(),
 		}
 		switch u.Reason() {
-		case "absent", "empty":
+		case graph.ReasonAbsent, graph.ReasonEmpty:
 			uw.TargetKey = nil
 		default:
 			key, err := parseTargetKey(u.TargetKey())
 			if err != nil {
 				return diagWire{}, fmt.Errorf("unresolved record %s[%s].%s: %w",
-					tt.ref(sourceID), u.Source().PrimaryKey(), u.Relation(), err)
+					tt.ref(sourceID), diag.CutValue(u.Source().PrimaryKey().String()), u.Relation(), err)
 			}
 			uw.TargetKey = key
-			var rel *schema.Relation
+			var rel schema.Relation
 			if srcType, ok := s.TypeByID(sourceID); ok {
 				rel, _ = srcType.Relation(u.Relation())
 			}
-			uprops, bad := wireEdgeProps(u.Properties(), rel)
-			if bad != "" {
-				return diagWire{}, &unwritableValueError{ref: tt.ref(sourceID), key: u.Source().PrimaryKey().String(), relation: u.Relation(), property: bad}
-			}
-			uw.Properties = uprops
+			uw.Properties = wireEdgeProps(u.Properties(), rel)
 		}
 		unresWires = append(unresWires, uw)
 	}
@@ -450,37 +374,37 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 	return diagWire{Duplicates: dupWires, Unresolved: unresWires}, nil
 }
 
-// marshalProvenance converts an instance's provenance to its wire form,
-// preferring the raw path a load kept, for a path that failed to parse or
-// parsed to another spelling.
-func marshalProvenance(inst *graph.Instance) *provenanceWire {
+// errInvalidProvenance marks a provenance text that is not valid UTF-8, which
+// [Marshal] refuses as it refuses such metadata.
+var errInvalidProvenance = errors.New("provenance text is not valid UTF-8")
+
+// marshalProvenance converts an instance's provenance to its wire form. The
+// path is written as it is held, so a document's own path comes back as its
+// bytes.
+func marshalProvenance(inst graph.Instance) (*provenanceWire, error) {
 	prov := inst.Provenance()
-	if prov == nil {
-		return nil
+	if prov.IsZero() {
+		return nil, nil //nolint:nilnil // an instance with no provenance writes none, which is no failure
 	}
-	// A recorded raw path is written back verbatim, INCLUDING an empty one.
-	// Reading RawPath() alone could not tell a recorded "" from no record, so
-	// a document that carried an empty path came back carrying "$" — and the
-	// W_SNAPSHOT_PATH_FALLBACK warning that named the substitution was gone by
-	// the second read.
 	pathStr := prov.Path().String()
-	if prov.HasRawPath() {
-		pathStr = prov.RawPath()
+	if !utf8.ValidString(prov.SourceName()) || !utf8.ValidString(pathStr) {
+		return nil, fmt.Errorf("%w: source name %s, path %s of %s[%s]", errInvalidProvenance,
+			diag.QuoteValue(prov.SourceName()), diag.QuoteValue(pathStr), inst.TypeName(), diag.CutValue(inst.PrimaryKey().String()))
 	}
-	return &provenanceWire{SourceName: prov.SourceName(), Path: pathStr}
+	return &provenanceWire{SourceName: prov.SourceName(), Path: pathStr}, nil
 }
 
 // assembleDocument builds the full .ys document with integrity hash.
 func assembleDocument(
-	schemaHash, schemaName, schemaSource, createdAt string,
+	schemaHash, schemaName string, createdAt json.RawMessage,
 	features []string, metadata map[string]string,
 	attestation *attestationWire,
 	typesJSON, instancesJSON, diagJSON []byte,
 	indent string, version int,
-) ([]byte, diag.Result) {
+) ([]byte, error) {
 	// Step 3-5: Build canonical-form document (integrity_hash = "").
 	canonBytes := buildDocument(
-		schemaHash, schemaName, schemaSource, createdAt, features, metadata,
+		schemaHash, schemaName, createdAt, features, metadata,
 		attestation,
 		"", // integrity_hash placeholder
 		typesJSON, instancesJSON, diagJSON,
@@ -492,23 +416,47 @@ func assembleDocument(
 
 	// Step 7: Re-assemble with computed hash.
 	finalBytes := buildDocument(
-		schemaHash, schemaName, schemaSource, createdAt, features, metadata,
+		schemaHash, schemaName, createdAt, features, metadata,
 		attestation,
 		integrityHash,
 		typesJSON, instancesJSON, diagJSON,
 		indent, version,
 	)
 
-	return finalBytes, diag.OK()
+	return finalBytes, nil
 }
 
-// nonWhitespaceIndent reports the first non-whitespace rune in an indent, if
-// any. The indent is emitted verbatim between JSON tokens, so anything else
-// makes the output unparseable — and the writer returned OK on it, leaving a
-// caller to discover the corruption at the next read.
+// createdAtMember returns the created_at member's JSON text for t, nil for a
+// zero t. It is t.Format(time.RFC3339Nano) in t's own offset, as encoding/json
+// writes a [time.Time]. It refuses the times encoding/json refuses and a time
+// whose offset is no whole number of minutes, which have no RFC 3339 form for
+// a reader to return.
+func createdAtMember(t time.Time) (json.RawMessage, error) {
+	if t.IsZero() {
+		return nil, nil
+	}
+	// RFC 3339 states an offset in whole minutes, and Format drops the seconds
+	// of any other, so the time a reader returned would not equal t.
+	if _, offset := t.Zone(); offset%60 != 0 {
+		return nil, fmt.Errorf("created_at %s has no RFC 3339 form: its offset of %d seconds is no whole number of minutes", t.String(), offset)
+	}
+	member, err := json.Marshal(t)
+	if err != nil {
+		return nil, fmt.Errorf("created_at %s has no RFC 3339 form: %w", t.String(), err)
+	}
+	return member, nil
+}
+
+// nonWhitespaceIndent reports the first rune in an indent that is not JSON
+// whitespace, if any: space, tab, line feed and carriage return are the four
+// RFC 8259 allows between tokens. The indent is emitted verbatim between JSON
+// tokens, so anything else, a vertical tab or a no-break space among them,
+// makes the output unparseable.
 func nonWhitespaceIndent(indent string) (string, bool) {
 	for _, r := range indent {
-		if !unicode.IsSpace(r) {
+		switch r {
+		case ' ', '\t', '\n', '\r':
+		default:
 			return string(r), true
 		}
 	}
@@ -517,7 +465,7 @@ func nonWhitespaceIndent(indent string) (string, bool) {
 
 // buildDocument assembles a complete .ys document from pre-serialized sections.
 func buildDocument(
-	schemaHash, schemaName, schemaSource, createdAt string,
+	schemaHash, schemaName string, createdAt json.RawMessage,
 	features []string, metadata map[string]string,
 	attestation *attestationWire,
 	integrityHash string,
@@ -526,7 +474,6 @@ func buildDocument(
 ) []byte {
 	hdr := marshalHeaderWire{
 		SchemaName:    schemaName,
-		SchemaSource:  schemaSource,
 		SchemaHash:    schemaHash,
 		IntegrityHash: integrityHash,
 		Features:      features,
@@ -570,10 +517,6 @@ func buildHeaderCompact(hdr marshalHeaderWire, version, hashAlgo int) []byte {
 	b.WriteString(`,"schema_name":`)
 	writeJSONString(&b, hdr.SchemaName)
 
-	// schema_source
-	b.WriteString(`,"schema_source":`)
-	writeJSONString(&b, hdr.SchemaSource)
-
 	// schema_hash
 	b.WriteString(`,"schema_hash":`)
 	writeJSONString(&b, hdr.SchemaHash)
@@ -592,9 +535,9 @@ func buildHeaderCompact(hdr marshalHeaderWire, version, hashAlgo int) []byte {
 	b.Write(featJSON)
 
 	// created_at (omitempty)
-	if hdr.CreatedAt != "" {
+	if len(hdr.CreatedAt) > 0 {
 		b.WriteString(`,"created_at":`)
-		writeJSONString(&b, hdr.CreatedAt)
+		b.Write(hdr.CreatedAt)
 	}
 
 	// metadata (omitempty)
@@ -634,12 +577,6 @@ func buildHeaderIndented(hdr marshalHeaderWire, indent string, version, hashAlgo
 	b.WriteString(`"schema_name": `)
 	writeJSONString(&b, hdr.SchemaName)
 
-	// schema_source
-	b.WriteString(",\n")
-	b.WriteString(pfx)
-	b.WriteString(`"schema_source": `)
-	writeJSONString(&b, hdr.SchemaSource)
-
 	// schema_hash
 	b.WriteString(",\n")
 	b.WriteString(pfx)
@@ -666,11 +603,11 @@ func buildHeaderIndented(hdr marshalHeaderWire, indent string, version, hashAlgo
 	b.Write(featJSON)
 
 	// created_at (omitempty)
-	if hdr.CreatedAt != "" {
+	if len(hdr.CreatedAt) > 0 {
 		b.WriteString(",\n")
 		b.WriteString(pfx)
 		b.WriteString(`"created_at": `)
-		writeJSONString(&b, hdr.CreatedAt)
+		b.Write(hdr.CreatedAt)
 	}
 
 	// metadata (omitempty)
@@ -750,7 +687,7 @@ func parseTargetKey(keyStr string) ([]any, error) {
 	}
 	values, err := graph.ParseKey(keyStr)
 	if err != nil {
-		return nil, fmt.Errorf("target key %s: graph.ParseKey: %w", keyStr, err)
+		return nil, fmt.Errorf("target key %s: graph.ParseKey: %w", diag.CutValue(keyStr), err)
 	}
 	return values, nil
 }
@@ -761,35 +698,13 @@ func writeJSONString(b *strings.Builder, s string) {
 	b.Write(encoded)
 }
 
-// marshalFatalErr reports a marshal failure: Error E_SNAPSHOT_MALFORMED for a
-// value the wire cannot carry, Error E_SNAPSHOT_DEPTH_EXCEEDED for a tree nested
-// past the reader's bound, Fatal E_INTERNAL for any other.
-func marshalFatalErr(section string, err error) diag.Result {
-	c := diag.NewCollector(0)
-	// A value the wire cannot carry is caller data held by an instance no
-	// validator judged, not a fault of the writer.
-	if ue, ok := errors.AsType[*unwritableValueError](err); ok {
-		b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+ue.Error()).
-			WithDetail(diag.DetailKeyTypeName, ue.ref).
-			WithDetail(diag.DetailKeyPrimaryKey, ue.key).
-			WithDetail(diag.DetailKeyPropertyName, ue.property)
-		if ue.relation != "" {
-			b = b.WithDetail(diag.DetailKeyRelationName, ue.relation)
-		}
-		c.Collect(b.Build())
-		return c.Result()
+// marshalFatalErr reports a marshal failure. A text [errInvalidProvenance] names
+// is the caller's to correct; any other failure is a broken invariant of the
+// snapshot: every value a snapshot holds is one the wire carries.
+func marshalFatalErr(section string, err error) error {
+	if errors.Is(err, errInvalidProvenance) {
+		return failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
 	}
-	// The composed-nesting bound is a property of the snapshot, not of the
-	// writer, and the reader already names it. Reporting it as an internal
-	// failure would leave a caller unable to tell the two apart.
-	if de, ok := errors.AsType[*depthExceededError](err); ok {
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DEPTH_EXCEEDED, de.Error()).
-			WithDetail(diag.DetailKeyDepth, strconv.Itoa(de.depth)).
-			WithDetail(diag.DetailKeyTypeName, de.ref).
-			Build())
-		return c.Result()
-	}
-	c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+	return failure(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 		fmt.Sprintf("snapshot.Marshal: failed to serialize %s: %v", section, err)).Build())
-	return c.Result()
 }

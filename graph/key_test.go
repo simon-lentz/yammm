@@ -5,9 +5,7 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -103,17 +101,16 @@ func TestFormatKey_PanicOnUnmarshalable(t *testing.T) {
 	graph.FormatKey(ch)
 }
 
-func timestampKeySchema(t *testing.T) *schema.Schema {
+func timestampKeySchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("stamped").
-		WithSourceID(location.MustNewSourceID("test://stamped.yammm")).
-		AddType("Event").
-		WithPrimaryKey("observed_at", schema.TimestampConstraint{}).
-		Done().
-		Build()
-	if result.HasErrors() {
-		t.Fatalf("building the timestamp-key schema: %s", result.String())
+	s, err := schema.LoadString(t.Context(), `schema "stamped"
+
+type Event {
+	observed_at Timestamp primary
+}
+`, "stamped.yammm")
+	if err != nil {
+		t.Fatalf("building the timestamp-key schema: %s", err)
 	}
 	return s
 }
@@ -141,33 +138,23 @@ func TestGraph_TimestampKeyIdentityIsCanonical(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.spelling, func(t *testing.T) {
 			s := timestampKeySchema(t)
-			eventType, ok := s.Type("Event")
-			if !ok {
-				t.Fatal("Event not found in the timestamp-key schema")
-			}
 			parsed, err := time.Parse(time.RFC3339, tt.spelling)
 			if err != nil {
 				t.Fatalf("parse %q: %v", tt.spelling, err)
 			}
 
 			g := graph.New(s)
-			first := instance.NewValidInstance("Event", eventType.ID(),
-				immutable.WrapKey([]any{tt.spelling}),
-				immutable.WrapProperties(map[string]any{"observed_at": tt.spelling}),
-				nil, nil, nil)
-			if r := g.Add(t.Context(), first); !r.OK() {
-				t.Fatalf("adding the string-keyed instance: %s", r.String())
+			first := instancetest.Valid(t, s, "Event", map[string]any{"observed_at": tt.spelling})
+			if err := g.Add(t.Context(), first); err != nil {
+				t.Fatalf("adding the string-keyed instance: %s", err)
 			}
 
-			second := instance.NewValidInstance("Event", eventType.ID(),
-				immutable.WrapKey([]any{parsed}),
-				immutable.WrapProperties(map[string]any{"observed_at": parsed}),
-				nil, nil, nil)
-			result := g.Add(t.Context(), second)
+			second := instancetest.Valid(t, s, "Event", map[string]any{"observed_at": parsed})
+			addErr := g.Add(t.Context(), second)
 
-			if gotDuplicate := !result.OK(); gotDuplicate != tt.wantDuplicate {
+			if gotDuplicate := addErr != nil; gotDuplicate != tt.wantDuplicate {
 				t.Errorf("adding the time.Time-keyed instance: duplicate=%v, want %v (%s)",
-					gotDuplicate, tt.wantDuplicate, result.String())
+					gotDuplicate, tt.wantDuplicate, addErr)
 			}
 		})
 	}

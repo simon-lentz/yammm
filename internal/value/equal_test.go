@@ -36,21 +36,21 @@ func TestEqual(t *testing.T) {
 		{"nan nan", math.NaN(), math.NaN(), true},
 		{"list list", []any{int64(1), "a"}, []any{int64(1), "a"}, true},
 		{"list shorter", []any{int64(1)}, []any{int64(1), int64(2)}, false},
-		{"list immutable", []any{int64(1), int64(2)}, immutable.Wrap([]any{int64(1), int64(2)}).Unwrap(), true},
+		{"list immutable", []any{int64(1), int64(2)}, immutable.Wrap([]any{int64(1), int64(2)}).Any(), true},
 		{"map map", m("a", int64(1), "b", "x"), m("a", int64(1), "b", "x"), true},
 		{"map value differs", m("a", int64(1)), m("a", int64(2)), false},
 		{"map key differs", m("a", int64(1)), m("b", int64(1)), false},
 		{"map subset", m("a", int64(1)), m("a", int64(1), "b", int64(2)), false},
 		{"map nested", m("a", m("x", []any{int64(1)})), m("a", m("x", []any{int64(1)})), true},
-		{"map immutable both", immutable.Wrap(m("a", int64(1))).Unwrap(), immutable.Wrap(m("a", int64(1))).Unwrap(), true},
-		{"map immutable mixed", immutable.Wrap(m("a", int64(1))).Unwrap(), m("a", int64(1)), true},
+		{"map immutable both", immutable.Wrap(m("a", int64(1))).Any(), immutable.Wrap(m("a", int64(1))).Any(), true},
+		{"map immutable mixed", immutable.Wrap(m("a", int64(1))).Any(), m("a", int64(1)), true},
 		{"map vs list", m("a", int64(1)), []any{int64(1)}, false},
 		{"map vs scalar", m("a", int64(1)), int64(1), false},
 		{"unrankable struct", struct{ X int }{1}, struct{ X int }{1}, false},
 		{"properties both", immutable.WrapProperties(m("a", int64(1), "b", "x")), immutable.WrapProperties(m("a", int64(1), "b", "x")), true},
 		{"properties differ", immutable.WrapProperties(m("a", int64(1))), immutable.WrapProperties(m("a", int64(2))), false},
 		{"properties vs map", immutable.WrapProperties(m("a", int64(1))), m("a", int64(1)), true},
-		{"properties vs immutable map", immutable.WrapProperties(m("a", int64(1))), immutable.Wrap(m("a", int64(1))).Unwrap(), true},
+		{"properties vs immutable map", immutable.WrapProperties(m("a", int64(1))), immutable.Wrap(m("a", int64(1))).Any(), true},
 		{"typed map both", map[string]string{"a": "x"}, map[string]string{"a": "x"}, true},
 		{"typed map vs map", map[string]string{"a": "x"}, m("a", "x"), true},
 		{"typed map differs", map[string]string{"a": "x"}, map[string]string{"a": "y"}, false},
@@ -76,8 +76,8 @@ func TestEqual_ComparesWrappedMapsWithoutMaterialising(t *testing.T) {
 	for i := range 20 {
 		m[string(rune('a'+i))] = int64(i)
 	}
-	a := immutable.Wrap(m).Unwrap()
-	b := immutable.Wrap(m).Unwrap()
+	a := immutable.Wrap(m).Any()
+	b := immutable.Wrap(m).Any()
 	if !value.Equal(a, b) {
 		t.Fatal("fixture: the two wrapped maps are not equal")
 	}

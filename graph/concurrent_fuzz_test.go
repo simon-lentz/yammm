@@ -2,14 +2,16 @@ package graph_test
 
 import (
 	"context"
+	"errors"
 	"math/rand"
+	"slices"
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -60,33 +62,28 @@ func FuzzGraph_ConcurrentOperations(f *testing.F) {
 }
 
 // buildFuzzSchema creates a simple schema for fuzz testing.
-func buildFuzzSchema(t *testing.T) *schema.Schema {
+func buildFuzzSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("fuzz").
-		WithSourceID(location.MustNewSourceID("test://fuzz.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("FRIEND", schema.LocalTypeRef("Person", location.Span{}), true, false).
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "fuzz"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build fuzz schema: %s", result.String())
+type Person {
+	id String primary
+	name String required
+	--> FRIEND (_:one) Person
+}
+`, "fuzz.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build fuzz schema: %s", err)
 	}
 	return s
 }
 
 // runFuzzOperations performs random graph operations.
-func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx context.Context, r *rand.Rand, workerID, numOps int) {
+func runFuzzOperations(t *testing.T, g *graph.Graph, s schema.Schema, ctx context.Context, r *rand.Rand, workerID, numOps int) {
 	t.Helper()
 
-	personType, ok := s.Type("Person")
-	if !ok {
-		t.Fatal("Person type not found")
-	}
+	validator := instance.NewValidator(s)
 
 	for range numOps {
 		op := r.Intn(4) // 0=Add, 1=Snapshot, 2=Check, 3=InstanceByKey
@@ -94,32 +91,31 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 		switch op {
 		case 0: // Add
 			id := r.Intn(100) // Use limited ID space to create some duplicates
-			pk := []any{formatID(workerID, id)}
+			data := map[string]any{"id": formatID(workerID, id), "name": formatName(workerID, id)}
 			// Half the instances carry a friend reference, so edges and
 			// unresolved records both form and the oracle's edge block runs.
-			var edges map[string]*instance.ValidEdgeData
 			if r.Intn(2) == 0 {
-				edges = edgeData("FRIEND", nil, []any{formatID(workerID, r.Intn(100))})
+				data["friend"] = map[string]any{"_target_id": formatID(workerID, r.Intn(100))}
 			}
-			inst := instance.NewValidInstance(
-				"Person",
-				personType.ID(),
-				immutable.WrapKey(pk),
-				immutable.WrapProperties(map[string]any{"id": pk[0], "name": formatName(workerID, id)}),
-				edges, nil, nil,
-			)
+			inst, err := validator.ValidateOne(ctx, "Person", instance.RawInstance{Properties: data})
+			if err != nil {
+				t.Errorf("validate Person: %s", err)
+				return
+			}
 			// Ignore results - we just want to test for races/panics
-			g.Add(ctx, inst)
+			if err := g.Add(ctx, inst); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+				t.Errorf("Add: %v", err)
+			}
 
 		case 1: // Snapshot
 			snap := g.Snapshot()
 			// Read from snapshot to ensure no concurrent modification issues
 			_ = snap.Types()
-			_ = snap.Edges()
-			_ = snap.Unresolved()
+			_ = slices.Collect(snap.Edges())
+			_ = slices.Collect(snap.Unresolved())
 
 		case 2: // Check
-			g.Check(ctx)
+			_ = g.Check(ctx)
 
 		case 3: // InstanceByKey
 			id := r.Intn(100)
@@ -146,7 +142,7 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 	// Basic consistency checks
 	types := snap.Types()
 	for _, typeName := range types {
-		instances := snap.InstancesOf(typeName)
+		instances := slices.Collect(snap.InstancesOf(typeName))
 		// Each instance should be retrievable by key
 		for _, inst := range instances {
 			_, ok := snap.InstanceByKey(typeName, inst.PrimaryKey().String())
@@ -160,14 +156,14 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 	// of every unresolved record is too. The corpus must produce edges for
 	// this to mean anything; runFuzzOperations gives half its instances a
 	// friend reference for that reason.
-	for _, edge := range snap.Edges() {
-		for _, endpoint := range []*graph.Instance{edge.Source(), edge.Target()} {
+	for edge := range snap.Edges() {
+		for _, endpoint := range []graph.Instance{edge.Source(), edge.Target()} {
 			if _, ok := snap.InstanceByKey(endpoint.TypeID(), endpoint.PrimaryKey().String()); !ok {
 				t.Errorf("Edge endpoint %s/%s not in graph", endpoint.TypeID(), endpoint.PrimaryKey())
 			}
 		}
 	}
-	for _, unres := range snap.Unresolved() {
+	for unres := range snap.Unresolved() {
 		if _, ok := snap.InstanceByKey(unres.Source().TypeID(), unres.Source().PrimaryKey().String()); !ok {
 			t.Errorf("Unresolved source %s/%s not in graph", unres.Source().TypeID(), unres.Source().PrimaryKey())
 		}
@@ -186,7 +182,6 @@ func FuzzGraph_AddSequence(f *testing.F) {
 		g := graph.New(s)
 		ctx := t.Context()
 
-		personType, _ := s.Type("Person")
 		r := rand.New(rand.NewSource(seed)) //nolint:gosec // fuzz test
 
 		// Generate a sequence of 20 random instance IDs
@@ -198,14 +193,10 @@ func FuzzGraph_AddSequence(f *testing.F) {
 		// Add instances in the random order
 		for _, id := range ids {
 			pk := []any{"p" + string(rune('0'+id))}
-			inst := instance.NewValidInstance(
-				"Person",
-				personType.ID(),
-				immutable.WrapKey(pk),
-				immutable.WrapProperties(map[string]any{"id": pk[0], "name": "Person-" + string(rune('0'+id))}),
-				nil, nil, nil,
-			)
-			g.Add(ctx, inst)
+			inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk[0], "name": "Person-" + string(rune('0'+id))})
+			if err := g.Add(ctx, inst); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+				t.Errorf("Add: %v", err)
+			}
 		}
 
 		// Count unique IDs we tried to add
@@ -216,7 +207,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 
 		// Graph should have exactly the unique instances (duplicates ignored)
 		snap := g.Snapshot()
-		instanceCount := len(snap.InstancesOf(mustTypeID(t, s, "Person")))
+		instanceCount := len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person"))))
 		if instanceCount != len(uniqueIDs) {
 			t.Errorf("Expected %d instances, got %d", len(uniqueIDs), instanceCount)
 		}

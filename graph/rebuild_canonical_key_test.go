@@ -1,79 +1,33 @@
 package graph_test
 
 import (
-	"context"
 	"fmt"
 	"maps"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
-
-// oneKeyedPartSchema declares a (one) composition to a keyed part type.
-func oneKeyedPartSchema(t *testing.T) *schema.Schema {
-	t.Helper()
-	const src = `schema "one_keyed"
-
-type Order {
-	id String primary
-	*-> ADDRESS (one) Address
-}
-
-part type Address {
-	line String primary
-}
-`
-	s, res := schema.LoadString(t.Context(), src, "one_keyed.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
-	}
-	return s
-}
-
-// TestRebuildSnapshot_RefusesAKeylessOccupantOfAKeyedPart holds a keyed
-// part's occupant to the key rule Graph.Add applies, so no loaded document
-// installs a keyed child with no key.
-func TestRebuildSnapshot_RefusesAKeylessOccupantOfAKeyedPart(t *testing.T) {
-	t.Parallel()
-	s := oneKeyedPartSchema(t)
-	orderID := mustTypeID(t, s, "Order")
-	addressID := mustTypeID(t, s, "Address")
-
-	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{orderID},
-		Instances: []graph.InstanceParts{
-			{
-				TypeID:     orderID,
-				PrimaryKey: immutable.WrapKey([]any{"o1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "o1"}),
-				Composed: map[string][]graph.InstanceParts{
-					"ADDRESS": {{
-						TypeID:     addressID,
-						Properties: immutable.WrapProperties(map[string]any{"line": "first"}),
-					}},
-				},
-			},
-		},
-	})
-	if !res.HasErrors() {
-		t.Fatal("a keyed part's occupant with no key was rebuilt")
-	}
-	assertHasCode(t, res, diag.E_GRAPH_INVALID_PK)
-}
 
 // canonicalKeySchema declares a canonicalizing kind at every position the Add
 // path fills: a root property, a composed child's key and a child property,
 // and an association whose TARGET KEY canonicalizes, so the agreement test
 // reaches an edge position as well as an instance one.
-func canonicalKeySchema(t *testing.T) *schema.Schema {
+func canonicalKeySchema(t *testing.T) schema.Schema {
 	t.Helper()
-	const src = `schema "canon_add_path"
+	s, err := schema.LoadString(t.Context(), canonicalKeySource, "canon_add_path.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
+	}
+	return s
+}
+
+const canonicalKeySource = `schema "canon_add_path"
 
 type Site {
 	established_at Timestamp primary
@@ -93,25 +47,20 @@ part type Reading {
 	logged_at Timestamp
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "canon_add_path.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
-	}
-	return s
-}
 
 // TestCanonicalization_AddAndRebuildAgree is the second implementation for
-// the Add path: one record built through Graph.Add and the same record
-// rebuilt from parts must hold the same key and the same properties at every
-// position, because the rebuild path canonicalizes both and the graph shares
-// one canonicalizer with it.
+// the Add path: one record built through Graph.Add, its Timestamps handed over as
+// time.Time, and the same record rebuilt from a document's text hold the same key
+// and the same properties at every position, because the rebuild path stores the
+// form a validator stores. The document's keys are the stored text, as the
+// reader requires; its properties spell the instant another way.
 func TestCanonicalization_AddAndRebuildAgree(t *testing.T) {
 	t.Parallel()
 	s := canonicalKeySchema(t)
 	sensorID := mustTypeID(t, s, "Sensor")
 	readingID := mustTypeID(t, s, "Reading")
 
-	const spelled = "2020-01-02T03:04:05+00:00"
+	const spelled, stored = "2020-01-02T03:04:05+00:00", "2020-01-02T03:04:05Z"
 	parsed, err := time.Parse(time.RFC3339, spelled)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -119,69 +68,60 @@ func TestCanonicalization_AddAndRebuildAgree(t *testing.T) {
 
 	siteID := mustTypeID(t, s, "Site")
 
-	reading := instance.NewValidInstance("Reading", readingID,
-		immutable.WrapKey([]any{spelled}),
-		immutable.WrapProperties(map[string]any{"taken_at": spelled, "logged_at": parsed}),
-		nil, nil, nil)
-	site := instance.NewValidInstance("Site", siteID,
-		immutable.WrapKey([]any{spelled}),
-		immutable.WrapProperties(map[string]any{"established_at": spelled}),
-		nil, nil, nil)
-	// The edge names its target by the RAW spelling: both paths canonicalize
-	// an edge address, so the position must agree whichever spelling is used.
-	sensor := instance.NewValidInstance("Sensor", sensorID,
-		immutable.WrapKey([]any{"s1"}),
-		immutable.WrapProperties(map[string]any{"id": "s1", "created_at": parsed}),
-		edgeData("SITE", map[string]any{"label": "north"}, []any{spelled}),
-		map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading})}, nil)
+	site := instancetest.Valid(t, s, "Site", map[string]any{"established_at": spelled})
+	// The edge names its target by the RAW spelling: the validator stores the
+	// canonical text, which the document's edge holds.
+	sensor := instancetest.Valid(t, s, "Sensor", map[string]any{
+		"id":         "s1",
+		"created_at": parsed,
+		"site":       map[string]any{"_target_established_at": spelled, "label": "north"},
+		"readings":   []any{map[string]any{"taken_at": spelled, "logged_at": parsed}},
+	})
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), site); !r.OK() {
-		t.Fatalf("add site: %s", r)
+	if err := g.Add(t.Context(), site); err != nil {
+		t.Fatalf("add site: %s", err)
 	}
-	if r := g.Add(t.Context(), sensor); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), sensor); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	added := g.Snapshot()
 
-	rebuilt, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	rebuilt := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{sensorID, siteID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     siteID,
-				PrimaryKey: immutable.WrapKey([]any{spelled}),
+				PrimaryKey: immutable.WrapKey([]any{stored}),
 				Properties: immutable.WrapProperties(map[string]any{"established_at": spelled}),
 			},
 			{
 				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "s1", "created_at": parsed}),
-				Composed: map[string][]graph.InstanceParts{
+				Properties: immutable.WrapProperties(map[string]any{"id": "s1", "created_at": spelled}),
+				Composed: map[string][]snapparts.Instance{
 					"READINGS": {{
 						TypeID:     readingID,
-						PrimaryKey: immutable.WrapKey([]any{spelled}),
-						Properties: immutable.WrapProperties(map[string]any{"taken_at": spelled, "logged_at": parsed}),
+						PrimaryKey: immutable.WrapKey([]any{stored}),
+						Properties: immutable.WrapProperties(map[string]any{"taken_at": spelled, "logged_at": spelled}),
 					}},
 				},
 			},
 		},
-		Edges: []graph.EdgeParts{{
+		Edges: []snapparts.Edge{{
 			Relation:   "SITE",
 			SourceType: sensorID,
 			SourceKey:  immutable.WrapKey([]any{"s1"}),
-			TargetKey:  immutable.WrapKey([]any{spelled}),
+			TargetKey:  immutable.WrapKey([]any{stored}),
 			Properties: immutable.WrapProperties(map[string]any{"label": "north"}),
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 
-	a := added.InstancesOf(sensorID)[0]
-	b := rebuilt.InstancesOf(sensorID)[0]
+	a := slices.Collect(added.InstancesOf(sensorID))[0]
+	b := slices.Collect(rebuilt.InstancesOf(sensorID))[0]
 	assertSameInstance(t, "Sensor", a, b)
-	assertSameInstance(t, "Reading", a.Composed("READINGS")[0], b.Composed("READINGS")[0])
-	assertSameInstance(t, "Site", added.InstancesOf(siteID)[0], rebuilt.InstancesOf(siteID)[0])
+	assertSameInstance(t, "Reading", slices.Collect(a.Composed("READINGS"))[0], slices.Collect(b.Composed("READINGS"))[0])
+	assertSameInstance(t, "Site", slices.Collect(added.InstancesOf(siteID))[0], slices.Collect(rebuilt.InstancesOf(siteID))[0])
 	assertSameEdges(t, added, rebuilt)
 }
 
@@ -204,20 +144,20 @@ func assertSameProperties(t *testing.T, what string, a, b immutable.Properties) 
 		case !inAdd:
 			t.Errorf("%s property %q: absent on the Add path", what, name)
 		case !inRebuild:
-			t.Errorf("%s property %q: absent on the RebuildSnapshot path", what, name)
-		case got.Unwrap() != want.Unwrap():
-			t.Errorf("%s property %q: Add %v (%T), RebuildSnapshot %v (%T)",
-				what, name, got.Unwrap(), got.Unwrap(), want.Unwrap(), want.Unwrap())
+			t.Errorf("%s property %q: absent on the rebuild path", what, name)
+		case got.Any() != want.Any():
+			t.Errorf("%s property %q: Add %v (%T), rebuild %v (%T)",
+				what, name, got.Any(), got.Any(), want.Any(), want.Any())
 		}
 	}
 }
 
 // assertSameInstance compares the key and every property of two instances by
 // the rendered form the wire carries, over both sides' name sets.
-func assertSameInstance(t *testing.T, what string, a, b *graph.Instance) {
+func assertSameInstance(t *testing.T, what string, a, b graph.Instance) {
 	t.Helper()
 	if a.PrimaryKey().String() != b.PrimaryKey().String() {
-		t.Errorf("%s key: Add %s, RebuildSnapshot %s", what, a.PrimaryKey(), b.PrimaryKey())
+		t.Errorf("%s key: Add %s, rebuild %s", what, a.PrimaryKey(), b.PrimaryKey())
 	}
 	assertSameProperties(t, what, a.Properties(), b.Properties())
 }
@@ -225,7 +165,7 @@ func assertSameInstance(t *testing.T, what string, a, b *graph.Instance) {
 // edgePosition renders the address an edge occupies: its relation and both
 // endpoints as the graph holds them. Two edges agree on position when this
 // string is equal, and the properties at that position are then comparable.
-func edgePosition(e *graph.Edge) string {
+func edgePosition(e graph.Edge) string {
 	return fmt.Sprintf("%s: %s%s -> %s%s",
 		e.Relation(),
 		e.Source().TypeName(), e.Source().PrimaryKey(),
@@ -236,11 +176,11 @@ func edgePosition(e *graph.Edge) string {
 // properties at each. An instance-only comparison cannot see an edge address
 // or an edge property diverging between the two paths, which is the half of
 // the agreement contract [assertSameInstance] does not reach.
-func assertSameEdges(t *testing.T, added, rebuilt *graph.Snapshot) {
+func assertSameEdges(t *testing.T, added, rebuilt graph.Snapshot) {
 	t.Helper()
-	index := func(snap *graph.Snapshot) map[string]*graph.Edge {
-		out := map[string]*graph.Edge{}
-		for _, e := range snap.Edges() {
+	index := func(snap graph.Snapshot) map[string]graph.Edge {
+		out := map[string]graph.Edge{}
+		for e := range snap.Edges() {
 			pos := edgePosition(e)
 			if _, dup := out[pos]; dup {
 				t.Errorf("two edges share the position %s; the comparison cannot pair them", pos)
@@ -264,156 +204,9 @@ func assertSameEdges(t *testing.T, added, rebuilt *graph.Snapshot) {
 		case !inAdd:
 			t.Errorf("edge position %s: absent on the Add path", pos)
 		case !inRebuild:
-			t.Errorf("edge position %s: absent on the RebuildSnapshot path", pos)
+			t.Errorf("edge position %s: absent on the rebuild path", pos)
 		default:
 			assertSameProperties(t, "edge "+pos, ae.Properties(), be.Properties())
 		}
 	}
-}
-
-// TestBatchAssembler_Finalize_SnapshotIsTakenOnce pins that a retry after a
-// cancelled Finalize reuses the snapshot the first call built: the graph is
-// unchanged between the two, so the clone of every instance and edge happens
-// once, while the cancelled outcome itself stays unmemoized.
-func TestBatchAssembler_Finalize_SnapshotIsTakenOnce(t *testing.T) {
-	t.Parallel()
-	s := batchAssemblerTestSchema(t)
-	ba := graph.NewBatchAssembler(t.Context(), s)
-	if err := ba.Add("Person", personRaw("alice", "Alice")); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-
-	cancelled, cancel := context.WithCancel(t.Context())
-	cancel()
-	first, err := ba.Finalize(cancelled)
-	if err == nil {
-		t.Fatal("Finalize with a cancelled context reported success")
-	}
-	if first.Snapshot == nil {
-		t.Fatal("the cancelled Finalize returned a nil Snapshot")
-	}
-
-	second, err := ba.Finalize(t.Context())
-	if err != nil {
-		t.Fatalf("the retry failed: %v", err)
-	}
-	if second.Snapshot != first.Snapshot {
-		t.Error("the retry re-took the snapshot; the graph did not change between the two calls")
-	}
-}
-
-// linkedTimestampSchema declares a Timestamp-keyed target and a type that
-// addresses it through an association.
-func linkedTimestampSchema(t *testing.T) *schema.Schema {
-	t.Helper()
-	const src = `schema "linked"
-
-type Event {
-	observed_at Timestamp primary
-}
-
-type Note {
-	id String primary
-	--> ABOUT (_) Event
-}
-`
-	s, res := schema.LoadString(t.Context(), src, "linked.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
-	}
-	return s
-}
-
-// rawKeyedEventParts builds parts holding one Event whose key is spelled
-// non-canonically, plus one Note addressing it under the given spelling.
-func rawKeyedEventParts(t *testing.T, s *schema.Schema, edgeSpelling string) graph.SnapshotParts {
-	t.Helper()
-	eventID, noteID := mustTypeID(t, s, "Event"), mustTypeID(t, s, "Note")
-	const raw = "2020-01-02T03:04:05+00:00"
-	return graph.SnapshotParts{
-		Types: []schema.TypeID{eventID, noteID},
-		Instances: []graph.InstanceParts{
-			{
-				TypeID: eventID, PrimaryKey: immutable.WrapKey([]any{raw}),
-				Properties: immutable.WrapProperties(map[string]any{"observed_at": raw}),
-			},
-			{
-				TypeID: noteID, PrimaryKey: immutable.WrapKey([]any{"n1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "n1"}),
-			},
-		},
-		Edges: []graph.EdgeParts{{
-			Relation: "ABOUT", SourceType: noteID, SourceKey: immutable.WrapKey([]any{"n1"}),
-			TargetKey: immutable.WrapKey([]any{edgeSpelling}),
-		}},
-	}
-}
-
-// TestRebuildSnapshot_IndexesByTheCanonicalKey pins that the rebuilt
-// snapshot's instance carries the canonical key and is found by it and by
-// the caller's raw spelling alike; [TestRebuildSnapshot_IndexKeyIsTheCanonicalKey]
-// pins the index's own keying, which a lookup that canonicalizes cannot show.
-func TestRebuildSnapshot_IndexesByTheCanonicalKey(t *testing.T) {
-	t.Parallel()
-	s := linkedTimestampSchema(t)
-	eventID := mustTypeID(t, s, "Event")
-	parts := rawKeyedEventParts(t, s, "2020-01-02T03:04:05Z")
-	parts.Edges = nil
-	snap, res := graph.RebuildSnapshot(s, parts)
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
-	inst := snap.InstancesOf(eventID)[0]
-	if got, want := inst.PrimaryKey().String(), graph.FormatKey("2020-01-02T03:04:05Z"); got != want {
-		t.Fatalf("instance key = %s, want %s", got, want)
-	}
-	if _, ok := snap.InstanceByKey(eventID, inst.PrimaryKey().String()); !ok {
-		t.Error("InstanceByKey by the instance's own key misses")
-	}
-	if got, ok := snap.InstanceByKey(eventID, graph.FormatKey("2020-01-02T03:04:05+00:00")); !ok || got != inst {
-		t.Errorf("InstanceByKey by the raw spelling = %v, %v; want the one instance, found", got, ok)
-	}
-}
-
-// TestRebuildSnapshot_EdgeResolvesAgainstARawSpelledKey pins that an edge
-// resolves against a rebuilt instance whichever spelling either side used.
-func TestRebuildSnapshot_EdgeResolvesAgainstARawSpelledKey(t *testing.T) {
-	t.Parallel()
-	s := linkedTimestampSchema(t)
-	for _, spelling := range []string{"2020-01-02T03:04:05+00:00", "2020-01-02T03:04:05Z"} {
-		snap, res := graph.RebuildSnapshot(s, rawKeyedEventParts(t, s, spelling))
-		if res.HasErrors() {
-			t.Fatalf("edge target spelled %q: %s", spelling, res)
-		}
-		if n := len(snap.Edges()); n != 1 {
-			t.Errorf("edge target spelled %q: edges = %d, want 1", spelling, n)
-		}
-	}
-}
-
-// TestRebuildSnapshot_RefusesTwoInstancesAtOneCanonicalAddress pins the
-// invariant the index enforces: two parts that spell one key two ways are
-// one address, and a caller handing in both is refused rather than given a
-// snapshot whose slice and index disagree.
-func TestRebuildSnapshot_RefusesTwoInstancesAtOneCanonicalAddress(t *testing.T) {
-	t.Parallel()
-	s := linkedTimestampSchema(t)
-	eventID := mustTypeID(t, s, "Event")
-	event := func(at string) graph.InstanceParts {
-		return graph.InstanceParts{
-			TypeID: eventID, PrimaryKey: immutable.WrapKey([]any{at}),
-			Properties: immutable.WrapProperties(map[string]any{"observed_at": at}),
-		}
-	}
-	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{eventID},
-		Instances: []graph.InstanceParts{
-			event("2020-01-02T03:04:05Z"),
-			event("2020-01-02T03:04:05+00:00"),
-		},
-	})
-	if snap != nil || !res.HasFatal() {
-		t.Fatalf("two spellings of one key were admitted as two instances: snap=%v %s", snap != nil, res)
-	}
-	assertHasCode(t, res, diag.E_INTERNAL)
 }

@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/hostpath"
 )
 
 // ScanEntry is one directory entry's state during a [ScanDir] iteration.
@@ -19,8 +21,7 @@ import (
 // Name and Path are populated on every per-file yield — including
 // corrupt-file and per-file I/O-failure paths — so consumers can log or
 // pass entries across package boundaries without reassembling paths via
-// [filepath.Join]. Header is nil whenever Result has error-severity
-// issues.
+// [filepath.Join]. Header is nil whenever Err is not.
 //
 // The zero value (ScanEntry{}) is only yielded alongside an iterator-level
 // error (dir-open failure or ctx cancellation); both Name and Path are empty
@@ -30,22 +31,20 @@ type ScanEntry struct {
 	Name string
 	// Path is the full filesystem path, equivalent to filepath.Join(dir, Name).
 	Path string
-	// Header holds the parsed header; nil whenever Result has
-	// error-severity issues (malformed header, per-file I/O failure).
-	Header *HeaderInfo
-	// Result carries per-file diagnostics. OK() is true on the happy
-	// path; HasErrors() is true when the file could not be parsed or
-	// opened. See the package documentation for the diagnostic codes
-	// emitted on each failure path.
-	Result diag.Result
+	// Header holds the parsed header; nil whenever Err is not.
+	Header *Header
+	// Err is nil when the file's header parsed, and otherwise a
+	// *[diag.ResultError] holding why it did not: a Fatal E_SNAPSHOT_IO for a
+	// file that does not open, or a refusal [ReadHeader] makes.
+	Err error
 	// FileSize is the file's size on disk in bytes, or zero when unknown.
 	//
 	// It is populated whenever the file was opened, including when the header
 	// then failed to parse — a corrupt file still occupies disk, and a caller
 	// accounting for space needs its size before it branches on Header. Zero
-	// means the file could not be opened or could not be stat'd; no diagnostic
-	// is raised for the latter, because a scan that succeeds today must not
-	// start failing over a size nobody asked for.
+	// means the file is empty, could not be opened or could not be stat'd; no
+	// diagnostic is raised for a failed stat, because a scan that succeeds
+	// today must not start failing over a size nobody asked for.
 	FileSize int64
 	// ModTime is the file's modification time, or the zero Time when unknown.
 	// It comes from the same stat as FileSize and carries the same contract:
@@ -53,25 +52,31 @@ type ScanEntry struct {
 	ModTime time.Time
 }
 
-// ScanDir iterates over every .ys file in dir, yielding one
-// (ScanEntry, nil) per file. The iterator is lazy: the directory is
+// ScanDir iterates over the .ys files in dir that the filtering below admits,
+// yielding one (ScanEntry, nil) per file. The iterator is lazy: the directory is
 // read once on first iteration, and each file's header is parsed
-// on-demand via [HeaderOnlyRead]. Callers can break early without
+// on-demand via [ReadHeader]. Callers can break early without
 // paying the parse cost for remaining files.
 //
-// ScanDir inherits [HeaderOnlyRead]'s limit: it validates each file's
-// header and types table, never the document's outermost shape. It does
+// ScanDir inherits [ReadHeader]'s limit: it validates each file's
+// header and types table, and judges neither the document's outermost shape
+// nor its member names beyond refusing a top level that is no JSON object, a first
+// section other than the header and a missing types section. It does
 // not accept a misshapen document by omission — it does not see one. Use
-// [HeaderOnly], [Verify] or [Load] when that matters.
+// [Stat], [Verify] or [Unmarshal] when that matters.
 //
 // dir is cleaned before it is read, so a ".." cancels the element before it
 // rather than following a symbolic link, and each yielded Path names an entry
-// of the directory listed.
+// of the directory listed. An empty dir names no directory: it fails as a missing
+// one does, and never lists the working directory. A cleaned dir whose element
+// is not a directory, or sits under one that is not, fails with an error
+// matching [syscall.ENOTDIR] on every host. An element a ".." cancels is never
+// read, so "a.ys/.." lists the directory that holds a.ys.
 //
 // Filtering:
-//   - Only regular files and broken symlinks are included. A symlink is
-//     followed and included when its target is a regular file or cannot
-//     be stat'd; a directory, FIFO, socket, or device is skipped whatever
+//   - Only regular files and symlinks are included, and a symlink only
+//     when its target is a regular file or cannot be stat'd, a broken link
+//     among them; a directory, FIFO, socket, or device is skipped whatever
 //     its name.
 //   - Of those, only files whose basename ends with ".ys" are included.
 //   - Files whose basename ends with [TmpSuffix] are skipped (the
@@ -88,37 +93,32 @@ type ScanEntry struct {
 //
 // The iterator's second yielded value is non-nil ONLY for
 // operation-level failures that end iteration:
-//   - Dir-open error (ENOENT, EACCES, ENOTDIR, ...): yields exactly
-//     one (ScanEntry{}, err) pair wrapping the os error and ends.
-//   - Context cancellation observed between files: yields exactly
+//   - Dir-open error (ENOENT, EACCES, ...): yields exactly one
+//     (ScanEntry{}, err) pair wrapping the os error and ends; a dir whose
+//     element is a file, or sits under one, wraps hostpath.ErrNotDirectory
+//     in its place.
+//   - Context cancellation observed at entry or between files: yields exactly
 //     one (ScanEntry{}, ctx.Err()) pair (context.Canceled or
 //     context.DeadlineExceeded) and ends.
 //
 // Per-file errors (corrupt header, per-file os.Open / Read failure)
-// live on the yielded ScanEntry.Result; the iterator's error is nil
+// live on the yielded ScanEntry.Err; the iterator's error is nil
 // for those and iteration continues. This cleanly separates "stop
 // iterating" (err != nil) from "this entry failed; try the next"
-// (entry.Result.HasErrors()). Context cancellation between files
+// (entry.Err != nil). Context cancellation between files
 // takes precedence over any concurrent per-file I/O failure.
 //
 // Typical caller:
 //
 //	for entry, err := range snapshot.ScanDir(ctx, dir) {
 //	    if err != nil { return fmt.Errorf("scan: %w", err) }
-//	    if entry.Result.HasErrors() { log.Warn(...); continue }
+//	    if entry.Err != nil { log.Warn(...); continue }
 //	    use(entry.Header)
 //	}
-//
-// [ScanDirWith] is the same iteration under [ScanOption] values.
 func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error] {
-	return ScanDirWith(ctx, dir)
-}
-
-// ScanDirWith is [ScanDir] with options. Given none it is [ScanDir] exactly:
-// same order, same filtering, same two-category error surface.
-// [WithScanFilter] narrows the set before any file is opened.
-func ScanDirWith(ctx context.Context, dir string, opts ...ScanOption) iter.Seq2[ScanEntry, error] {
-	cfg := applyScanOptions(opts)
+	if ctx == nil {
+		panic("snapshot.ScanDir: nil context")
+	}
 	return func(yield func(ScanEntry, error) bool) {
 		// Check cancellation at entry so an already-cancelled ctx doesn't
 		// pay the os.ReadDir cost.
@@ -126,12 +126,16 @@ func ScanDirWith(ctx context.Context, dir string, opts ...ScanOption) iter.Seq2[
 			yield(ScanEntry{}, err)
 			return
 		}
-		// Cleaned as the yielded paths are, so a ".." cancels the element
-		// before it rather than following a link, and each Path names an
-		// entry of the directory read.
-		dirents, err := os.ReadDir(filepath.Clean(dir))
+		// Cleaned as the yielded paths are, so a ".." cancels the element before
+		// it rather than following a link, and each Path names an entry of the
+		// directory read. Clean turns "" into ".", which os.ReadDir would list.
+		listed := dir
+		if dir != "" {
+			listed = filepath.Clean(dir)
+		}
+		dirents, err := os.ReadDir(listed)
 		if err != nil {
-			yield(ScanEntry{}, fmt.Errorf("open dir %q: %w", dir, err))
+			yield(ScanEntry{}, fmt.Errorf("open dir %q: %w", dir, notDirectory(listed, err)))
 			return
 		}
 		for _, dirent := range dirents {
@@ -146,8 +150,7 @@ func ScanDirWith(ctx context.Context, dir string, opts ...ScanOption) iter.Seq2[
 				continue
 			}
 			path := filepath.Join(dir, name)
-			st := &statOnce{path: path}
-			if !isRegular(dirent, st) {
+			if !isRegular(dirent, path) {
 				continue
 			}
 			// Belt-and-braces: a file named *.ys.tmp already fails the
@@ -156,34 +159,12 @@ func ScanDirWith(ctx context.Context, dir string, opts ...ScanOption) iter.Seq2[
 			if strings.HasSuffix(name, TmpSuffix) {
 				continue
 			}
-			// Last: isRegular's FIFO guard must precede caller code.
-			if cfg.keep != nil && !cfg.keep(ScanCandidate{Name: name, Path: path, stat: st.get}) {
-				continue
-			}
-			entry := scanFile(ctx, name, path, cfg.open)
+			entry := scanFile(ctx, name, path)
 			if !yield(entry, nil) {
 				return
 			}
 		}
 	}
-}
-
-// statOnce resolves path at most once and gives every caller the same answer,
-// success or failure. Only a symlink makes [isRegular] stat, so a filter that
-// reads [ScanCandidate.Info] on a regular file pays that one stat itself.
-type statOnce struct {
-	path string
-	info fs.FileInfo
-	err  error
-	done bool
-}
-
-func (s *statOnce) get() (fs.FileInfo, error) {
-	if !s.done {
-		s.info, s.err = os.Stat(s.path)
-		s.done = true
-	}
-	return s.info, s.err
 }
 
 // isRegular reports whether the walk should descend to opening this entry.
@@ -197,7 +178,7 @@ func (s *statOnce) get() (fs.FileInfo, error) {
 // A stat failure — a broken symlink, most likely — falls through to the open,
 // which reports it as the documented per-file E_SNAPSHOT_IO entry rather than
 // vanishing from the walk.
-func isRegular(dirent os.DirEntry, st *statOnce) bool {
+func isRegular(dirent os.DirEntry, path string) bool {
 	mode := dirent.Type()
 	if mode.IsRegular() {
 		return true
@@ -205,34 +186,32 @@ func isRegular(dirent os.DirEntry, st *statOnce) bool {
 	if mode&os.ModeSymlink == 0 {
 		return false
 	}
-	info, err := st.get()
+	info, err := os.Stat(path)
 	if err != nil {
 		return true
 	}
 	return info.Mode().IsRegular()
 }
 
-// scanFile opens path and parses its header via HeaderOnlyRead. On open
-// failure it synthesizes a Fatal E_SNAPSHOT_IO issue on the returned
-// entry's Result; otherwise it delegates to HeaderOnlyRead and returns
-// whatever (header, result) pair that produces.
+// scanFile opens path and parses its header via ReadHeader. On open
+// failure it synthesizes a Fatal E_SNAPSHOT_IO issue in the returned
+// entry's Err; otherwise it delegates to ReadHeader and returns
+// whatever (header, err) pair that produces.
 //
 // The size is read from the open handle rather than from the DirEntry: fstat
 // answers for the file that was actually opened, where the directory read's
 // lstat answers for the symlink, and there is no window between the two reads
 // for the file to change underneath.
-func scanFile(ctx context.Context, name, path string, open func(string) (*os.File, error)) ScanEntry {
-	f, err := open(path)
+func scanFile(ctx context.Context, name, path string) ScanEntry {
+	f, err := os.Open(path)
 	if err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(
+		return ScanEntry{Name: name, Path: path, Err: failure(
 			diag.NewIssue(diag.Fatal, diag.E_SNAPSHOT_IO,
 				fmt.Sprintf("open %q: %v", path, err)).
 				WithDetail(diag.DetailKeyFilePath, path).
 				WithDetail(diag.DetailKeyDetail, err.Error()).
 				Build(),
-		)
-		return ScanEntry{Name: name, Path: path, Result: c.Result()}
+		)}
 	}
 	defer f.Close()
 
@@ -243,59 +222,20 @@ func scanFile(ctx context.Context, name, path string, open func(string) (*os.Fil
 		modTime = info.ModTime()
 	}
 
-	header, res := HeaderOnlyRead(ctx, f)
-	if header != nil {
-		header.FileSize = size
-	}
-	return ScanEntry{Name: name, Path: path, Header: header, Result: res, FileSize: size, ModTime: modTime}
+	header, err := ReadHeader(ctx, f)
+	return ScanEntry{Name: name, Path: path, Header: header, Err: err, FileSize: size, ModTime: modTime}
 }
 
-// ScanDirSlice is a convenience wrapper that materializes the full
-// [ScanDir] iterator into a slice. Useful when the caller wants a
-// complete snapshot of the directory state for further processing. The
-// outer diag.Result surfaces operation-level errors (dir does not
-// exist, permission denied, context cancellation); per-file errors
-// live on each [ScanEntry]'s Result.
-//
-// Context cancellation returns partial results: the returned slice
-// contains entries processed before cancellation, and the outer
-// diag.Result carries a Fatal E_CONTEXT_CANCELLED issue. Callers that
-// want fail-fast-on-cancel check result.HasFatal() before using the
-// slice; callers that want partial results read the slice directly
-// and treat the outer Result as advisory.
-//
-// [ScanDirSliceWith] is the same wrapper under [ScanOption] values.
-func ScanDirSlice(ctx context.Context, dir string) ([]ScanEntry, diag.Result) {
-	return ScanDirSliceWith(ctx, dir)
-}
-
-// ScanDirSliceWith is [ScanDirSlice] with options, and materializes
-// [ScanDirWith] the way [ScanDirSlice] materializes [ScanDir]. A file a filter
-// rejects is absent from the slice and contributes nothing to the outer
-// Result; a rejection is not an error.
-func ScanDirSliceWith(ctx context.Context, dir string, opts ...ScanOption) ([]ScanEntry, diag.Result) {
-	var out []ScanEntry
-	var collector *diag.Collector
-	for entry, err := range ScanDirWith(ctx, dir, opts...) {
-		if err != nil {
-			collector = diag.NewCollector(0)
-			code := diag.E_SNAPSHOT_IO
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				code = diag.E_CONTEXT_CANCELLED
-			}
-			// The os error goes in a detail, not only the message: three
-			// documents promise an operator can recover the concrete cause
-			// structurally, and that promise covers the dir-level failure as
-			// well as the per-file one.
-			collector.Collect(diag.NewIssue(diag.Fatal, code, err.Error()).
-				WithDetail(diag.DetailKeyDetail, err.Error()).
-				Build())
-			break
-		}
-		out = append(out, entry)
+// notDirectory returns err with [hostpath.ErrNotDirectory] in place of the
+// host's error when listed, read as a directory, names a file or sits under
+// one. Windows answers such a read ERROR_PATH_NOT_FOUND, which reads as a
+// missing path.
+func notDirectory(listed string, err error) error {
+	if listed == "" || !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+		return err
 	}
-	if collector != nil {
-		return out, collector.Result()
+	if hostpath.RefusedRead(listed+string(filepath.Separator)) == nil {
+		return err
 	}
-	return out, diag.OK()
+	return &fs.PathError{Op: "open", Path: listed, Err: hostpath.ErrNotDirectory}
 }

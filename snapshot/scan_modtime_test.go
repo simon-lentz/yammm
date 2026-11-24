@@ -51,7 +51,7 @@ func TestScanDir_PopulatesModTimeForACorruptEntry(t *testing.T) {
 			t.Fatalf("ScanDir: %v", err)
 		}
 		seen++
-		if !entry.Result.HasErrors() {
+		if entry.Err == nil {
 			t.Fatal("the corrupt fixture parsed cleanly, so this asserts nothing")
 		}
 		if entry.Header != nil {
@@ -117,7 +117,7 @@ func TestScanDir_BrokenSymlinkLeavesModTimeZero(t *testing.T) {
 			t.Fatalf("ScanDir: %v", err)
 		}
 		seen++
-		if !entry.Result.HasErrors() {
+		if entry.Err == nil {
 			t.Error("broken.ys reported no error")
 		}
 		if !entry.ModTime.IsZero() {

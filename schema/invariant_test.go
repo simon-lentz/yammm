@@ -3,27 +3,30 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 func TestNewInvariant(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://invariant"),
-		Start:  location.Position{Line: 10, Column: 1, Byte: 100},
-		End:    location.Position{Line: 10, Column: 50, Byte: 150},
+		Source: sourcetest.ID("test://invariant"),
+		Start:  location.Position{Line: 10, Column: 1, Offset: 100},
+		End:    location.Position{Line: 10, Column: 50, Offset: 150},
 	}
 	doc := "Age must be positive"
 	e := expr.NewLiteral(true) // use a real expression
 
-	inv := schema.TestNewInvariant("age must be positive", e, span, doc)
+	inv := schema.TestNewInvariant("age must be positive", "true", e, span, doc)
 
-	assert.NotNil(t, inv)
+	assert.False(t, inv.IsZero())
 	assert.Equal(t, "age must be positive", inv.Name())
-	assert.Equal(t, e, inv.Expression())
+	assert.Equal(t, "true", inv.Expression())
+	assert.Equal(t, e, expr.InvariantExpression(inv))
 	assert.Equal(t, span, inv.Span())
 	assert.Equal(t, doc, inv.Documentation())
 }
@@ -41,7 +44,7 @@ func TestInvariant_Name(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inv := schema.TestNewInvariant(tt.message, nil, location.Span{}, "")
+			inv := schema.TestNewInvariant(tt.message, "", nil, location.Span{}, "")
 			assert.Equal(t, tt.expected, inv.Name())
 		})
 	}
@@ -59,26 +62,26 @@ func TestInvariant_Expression(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inv := schema.TestNewInvariant("test", tt.expr, location.Span{}, "")
-			assert.Equal(t, tt.expr, inv.Expression())
+			inv := schema.TestNewInvariant("test", "", tt.expr, location.Span{}, "")
+			assert.Equal(t, tt.expr, expr.InvariantExpression(inv))
 		})
 	}
 }
 
 func TestInvariant_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
-		Start:  location.Position{Line: 15, Column: 5, Byte: 200},
-		End:    location.Position{Line: 15, Column: 40, Byte: 235},
+		Source: sourcetest.ID("test://span"),
+		Start:  location.Position{Line: 15, Column: 5, Offset: 200},
+		End:    location.Position{Line: 15, Column: 40, Offset: 235},
 	}
 
-	inv := schema.TestNewInvariant("test", nil, span, "")
+	inv := schema.TestNewInvariant("test", "", nil, span, "")
 
 	result := inv.Span()
 	assert.Equal(t, span.Source, result.Source)
 	assert.Equal(t, 15, result.Start.Line)
 	assert.Equal(t, 5, result.Start.Column)
-	assert.Equal(t, 200, result.Start.Byte)
+	assert.Equal(t, 200, result.Start.Offset)
 }
 
 func TestInvariant_Documentation(t *testing.T) {
@@ -93,7 +96,7 @@ func TestInvariant_Documentation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inv := schema.TestNewInvariant("test", nil, location.Span{}, tt.doc)
+			inv := schema.TestNewInvariant("test", "", nil, location.Span{}, tt.doc)
 			assert.Equal(t, tt.doc, inv.Documentation())
 		})
 	}

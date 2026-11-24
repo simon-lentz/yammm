@@ -5,31 +5,32 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+
+	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // canonicalizerSchema declares one type whose key canonicalizes and one whose
 // key does not, in a schema that declares a canonicalizing kind, so the
 // canonicalizer is active for both.
-func canonicalizerSchema(t *testing.T) *schema.Schema {
+func canonicalizerSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.NewBuilder().
-		WithName("canon").
-		WithSourceID(location.MustNewSourceID("test://canon.yammm")).
-		AddType("Plain").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Stamped").
-		WithPrimaryKey("observed_at", schema.TimestampConstraint{}).
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), `schema "canon"
+
+type Plain {
+	id String primary
+}
+
+type Stamped {
+	observed_at Timestamp primary
+}
+`, "canon.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
@@ -88,39 +89,23 @@ func TestCanonicalizerAddress_PlainKeyAllocatesNothing(t *testing.T) {
 	}
 }
 
-// TestRebuildSnapshot_IndexKeyIsTheCanonicalKey pins the index's own keying,
-// which a lookup that canonicalizes its address cannot show: a rebuilt
-// Timestamp-keyed instance entered by a raw spelling is indexed once, under
-// the canonical text, on the rebuild path and on the Add path alike.
-func TestRebuildSnapshot_IndexKeyIsTheCanonicalKey(t *testing.T) {
+// TestAdd_IndexKeyIsTheCanonicalKey pins the index's own keying, which a
+// lookup that canonicalizes its address cannot show: a Timestamp-keyed
+// instance entered by a raw spelling is indexed once, under the canonical text.
+func TestAdd_IndexKeyIsTheCanonicalKey(t *testing.T) {
 	s := canonicalizerSchema(t)
 	stamped, _ := s.Type("Stamped")
 	const raw, canonical = "2020-01-02T03:04:05+00:00", `["2020-01-02T03:04:05Z"]`
-	rebuilt, res := RebuildSnapshot(s, SnapshotParts{
-		Types: []schema.TypeID{stamped.ID()},
-		Instances: []InstanceParts{
-			{
-				TypeID: stamped.ID(), PrimaryKey: immutable.WrapKey([]any{raw}),
-				Properties: immutable.WrapProperties(map[string]any{"observed_at": raw}),
-			},
-		},
-	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 	g := New(s)
-	if r := g.Add(t.Context(), instance.NewValidInstance("Stamped", stamped.ID(), immutable.WrapKey([]any{raw}),
-		immutable.WrapProperties(map[string]any{"observed_at": raw}), nil, nil, nil)); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), instancetest.Valid(t, s, "Stamped", map[string]any{"observed_at": raw})); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	for name, snap := range map[string]*Snapshot{"RebuildSnapshot": rebuilt, "Add": g.Snapshot()} {
-		idx := snap.instanceIndex[stamped.ID()]
-		if len(idx) != 1 {
-			t.Errorf("%s path: index holds %d entries, want 1", name, len(idx))
-		}
-		if _, ok := idx[canonical]; !ok {
-			t.Errorf("%s path: index keys = %v, want %s", name, slices.Collect(maps.Keys(idx)), canonical)
-		}
+	idx := g.Snapshot().instanceIndex[stamped.ID()]
+	if len(idx) != 1 {
+		t.Errorf("index holds %d entries, want 1", len(idx))
+	}
+	if _, ok := idx[canonical]; !ok {
+		t.Errorf("index keys = %v, want %s", slices.Collect(maps.Keys(idx)), canonical)
 	}
 }
 
@@ -129,21 +114,21 @@ func TestRebuildSnapshot_IndexKeyIsTheCanonicalKey(t *testing.T) {
 // source name and a zero span, so two otherwise identical records order by
 // source name and tie within one.
 func TestCompareDuplicates_LoadedRecordsOrderBySourceName(t *testing.T) {
-	id := schema.NewTypeID(location.MustNewSourceID("test://dup.yammm"), "T")
+	id := instancetest.TypeID(t, "dup.yammm", "T")
 	key := immutable.WrapKey([]any{"k"})
-	conflict := newInstance("T", id, key, immutable.WrapProperties(nil), nil, false)
+	conflict := newInstance("T", id, key, immutable.WrapProperties(nil), instance.Provenance{}, false)
 	// The shape the decoder produces, built here because graph cannot import
 	// snapshot. That a LOADED instance actually has this shape is pinned on the
 	// snapshot side, by TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne.
-	loaded := func(source string) *Duplicate {
-		prov := location.NewProvenance(source, path.Root(), location.Span{})
+	loaded := func(source string) Duplicate {
+		prov := instance.NewProvenance(source, path.Root, location.Span{})
 		inst := newInstance("T", id, key, immutable.WrapProperties(nil), prov, false)
-		return newDuplicate(inst, conflict, nil, "", diag.Issue{})
+		return newDuplicate(inst, conflict)
 	}
-	if c := compareDuplicates(loaded("a.json"), loaded("b.json")); c >= 0 {
+	if c := compareDuplicates(nil, loaded("a.json"), loaded("b.json")); c >= 0 {
 		t.Errorf("a.json against b.json = %d; want negative, ordered by source name", c)
 	}
-	if c := compareDuplicates(loaded("a.json"), loaded("a.json")); c != 0 {
+	if c := compareDuplicates(nil, loaded("a.json"), loaded("a.json")); c != 0 {
 		t.Errorf("a.json against a.json = %d; want a tie within one source name", c)
 	}
 }

@@ -1,0 +1,352 @@
+package instance_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"maps"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/value"
+)
+
+const nilContainerSchema = `schema "p"
+
+type T {
+	id String primary
+	reqTags List<String> required
+	optTags List<String>
+	reqVec Vector[2] required
+	optVec Vector[2]
+	stamps List<Timestamp>
+	nested List<List<String>>
+	name String
+}
+`
+
+// A nil slice at a required List or Vector is a missing property, whatever
+// its element type, and draws E_MISSING_REQUIRED alone.
+func TestValidate_ANilSliceAtARequiredListIsMissing(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nilContainerSchema))
+	for name, props := range map[string]map[string]any{
+		"a nil []any list":       {"id": "x", "reqTags": []any(nil), "reqVec": []float64{1, 2}},
+		"a nil []string list":    {"id": "x", "reqTags": []string(nil), "reqVec": []float64{1, 2}},
+		"a nil []float64 vector": {"id": "x", "reqTags": []any{"a"}, "reqVec": []float64(nil)},
+	} {
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+		})
+		if got := codes(res); !slices.Equal(got, []string{diag.E_MISSING_REQUIRED.String()}) {
+			t.Errorf("%s: got %v, want E_MISSING_REQUIRED alone", name, got)
+		}
+	}
+}
+
+// The validator reads a nil slice or map as encoding/json writes it, null: an
+// instance and its JSON form draw the same issues, word for word, and store the
+// same properties, so a value no validator judged round-trips to the same verdict.
+func TestValidate_ANilContainerAgreesWithItsJSONForm(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nilContainerSchema))
+	base := func(extra map[string]any) map[string]any {
+		props := map[string]any{"id": "x", "reqTags": []any{"a"}, "reqVec": []float64{1, 2}}
+		maps.Copy(props, extra)
+		return props
+	}
+	for name, props := range map[string]map[string]any{
+		"a required nil list":                      base(map[string]any{"reqTags": []any(nil)}),
+		"an optional nil list":                     base(map[string]any{"optTags": []string(nil)}),
+		"an optional nil vector":                   base(map[string]any{"optVec": []float64(nil)}),
+		"an optional nil timestamp list":           base(map[string]any{"stamps": []any(nil)}),
+		"an empty list":                            base(map[string]any{"optTags": []any{}}),
+		"a nil map at a list":                      base(map[string]any{"optTags": map[string]any(nil)}),
+		"a nil inner list":                         base(map[string]any{"nested": []any{[]any{"a"}, []any(nil)}}),
+		"a nil slice at a string":                  base(map[string]any{"name": []string(nil)}),
+		"a nil required list and a nil inner list": base(map[string]any{"reqTags": []any(nil), "nested": []any{[]any(nil)}}),
+	} {
+		encoded, err := json.Marshal(props)
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", name, err)
+		}
+		dec := json.NewDecoder(bytes.NewReader(encoded))
+		dec.UseNumber()
+		var decoded map[string]any
+		if err := dec.Decode(&decoded); err != nil {
+			t.Fatalf("%s: decode: %v", name, err)
+		}
+		goValid, goRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+		})
+		jsonValid, jsonRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: decoded})
+		})
+		if goRes.String() != jsonRes.String() {
+			t.Errorf("%s: the Go value drew\n%s\nits JSON form %s drew\n%s", name, goRes, encoded, jsonRes)
+			continue
+		}
+		if goValid.IsZero() || jsonValid.IsZero() {
+			continue
+		}
+		for _, prop := range []string{"optTags", "optVec", "stamps", "nested", "name"} {
+			_, goStored := goValid.Property(prop)
+			_, jsonStored := jsonValid.Property(prop)
+			if goStored != jsonStored {
+				t.Errorf("%s: %s stored = %v from the Go value, %v from its JSON form %s", name, prop, goStored, jsonStored, encoded)
+			}
+		}
+	}
+}
+
+// value.Check accepts a nil slice under a List as a value that holds none, and
+// the validator stores no value for it, never an empty list.
+func TestCheck_ANilSliceAtAListHoldsNoValue(t *testing.T) {
+	t.Parallel()
+	s := loadT(t, nilContainerSchema)
+	typ, _ := s.Type("T")
+	v := instance.NewValidator(s)
+	for _, prop := range []string{"stamps", "optTags"} {
+		p, _ := typ.Property(prop)
+		for _, nilSlice := range []any{[]any(nil), []string(nil)} {
+			if err := value.Check(nilSlice, p.Constraint()); err != nil {
+				t.Errorf("value.Check(%#v, %s) = %v, want nil", nilSlice, p.Constraint(), err)
+			}
+			inst, validateErr := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
+				"id": "x", "reqTags": []any{"a"}, "reqVec": []float64{1, 2}, prop: nilSlice,
+			}})
+			if validateErr != nil {
+				t.Fatalf("%s = %#v: %s", prop, nilSlice, validateErr)
+			}
+			if stored, ok := inst.Property(prop); ok && stored.Any() != nil {
+				t.Errorf("%s = %#v stored %#v, want no value", prop, nilSlice, stored.Any())
+			}
+		}
+	}
+}
+
+const nilRelationSchema = `schema "p"
+
+type Co {
+	id String primary
+}
+
+part type Line {
+	id String primary
+}
+
+type T {
+	id String primary
+	--> ONE (_) Co
+	--> MANY (many) Co
+	--> PROPS (_) Co {
+		role String required
+		note String
+	}
+	*-> LINES (many) Line
+	*-> HEAD (one) Line
+}
+`
+
+// A nil slice or map at a relation's value, at an element of a (many)
+// association or a composition, at an edge property and at a foreign-key field
+// is the null its JSON form holds there: both draw the same issues, word for
+// word.
+func TestValidate_ANilContainerAtARelationAgreesWithItsJSONForm(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nilRelationSchema))
+	line := map[string]any{"id": "l"}
+	for name, props := range map[string]map[string]any{
+		"a nil map at a (one) association":        {"one": map[string]any(nil)},
+		"a nil slice at a (one) association":      {"one": []any(nil)},
+		"a nil slice at a (many) association":     {"many": []any(nil)},
+		"a nil map at a (many) association":       {"many": map[string]any(nil)},
+		"a nil map in a (many) association":       {"many": []any{map[string]any(nil)}},
+		"a nil slice in a (many) association":     {"many": []any{[]any(nil)}},
+		"a nil slice at a foreign-key field":      {"one": map[string]any{"_target_id": []any(nil)}},
+		"a nil slice at a required edge property": {"props": map[string]any{"_target_id": "c", "role": []any(nil)}},
+		"a nil map at an optional edge property":  {"props": map[string]any{"_target_id": "c", "role": "r", "note": map[string]any(nil)}},
+		"a nil slice at a (many) composition":     {"lines": []any(nil)},
+		"a nil map in a (many) composition":       {"lines": []any{line, map[string]any(nil)}},
+		"a nil slice in a (many) composition":     {"lines": []any{[]any(nil)}},
+		"a nil slice at a (one) composition":      {"head": []any(nil)},
+	} {
+		props["id"] = "x"
+		if _, ok := props["head"]; !ok {
+			props["head"] = []any{line}
+		}
+		encoded, err := json.Marshal(props)
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", name, err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			t.Fatalf("%s: unmarshal: %v", name, err)
+		}
+		_, goRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+		})
+		_, jsonRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: decoded})
+		})
+		if (diagtest.Err(goRes) == nil) != (diagtest.Err(jsonRes) == nil) || goRes.String() != jsonRes.String() {
+			t.Errorf("%s: the Go value drew\n%s\nits JSON form %s drew\n%s", name, goRes, encoded, jsonRes)
+		}
+	}
+}
+
+// A nil immutable container holds no value, as immutable.IsNilContainer reads it:
+// at a property it is the absent case, and value.Absent reports it.
+func TestValidate_ANilImmutableContainerIsNull(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nilContainerSchema))
+	base := map[string]any{"id": "x", "reqTags": []any{"a"}, "reqVec": []float64{1, 2}}
+	for name, none := range map[string]any{
+		"a nil Properties": immutable.WrapProperties(nil),
+		"a nil Key":        immutable.WrapKey(nil),
+		"a nil Slice":      immutable.WrapSlice(nil),
+	} {
+		if !value.Absent(none) {
+			t.Errorf("value.Absent(%s) = false", name)
+		}
+		for _, prop := range []string{"optTags", "name"} {
+			props := maps.Clone(base)
+			props[prop] = none
+			nulled := maps.Clone(base)
+			nulled[prop] = nil
+			_, got := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+			})
+			_, want := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: nulled})
+			})
+			if got.String() != want.String() {
+				t.Errorf("%s at %s drew\n%s\nwhere null drew\n%s", name, prop, got, want)
+			}
+		}
+	}
+}
+
+// A struct that embeds a nil immutable container is a struct, not the container:
+// it holds a value, and draws the issues any other struct draws there.
+func TestValidate_AStructEmbeddingANilContainerIsAStruct(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nilContainerSchema))
+	base := map[string]any{"id": "x", "reqTags": []any{"a"}, "reqVec": []float64{1, 2}}
+	for name, embedding := range map[string]any{
+		"a nil Slice":      struct{ immutable.Slice }{},
+		"a nil Properties": struct{ immutable.Properties }{},
+	} {
+		if value.Absent(embedding) {
+			t.Errorf("value.Absent(a struct embedding %s) = true", name)
+		}
+		for _, prop := range []string{"optTags", "name"} {
+			props := maps.Clone(base)
+			props[prop] = embedding
+			plain := maps.Clone(base)
+			plain[prop] = struct{ A int }{}
+			_, got := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+			})
+			_, want := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: plain})
+			})
+			if !slices.Equal(codes(got), codes(want)) || diagtest.Err(got) == nil {
+				t.Errorf("a struct embedding %s at %s drew %v; want %v, as any struct", name, prop, codes(got), codes(want))
+			}
+		}
+	}
+}
+
+// An immutable map or slice at a relation reads as the Go map or slice it
+// wraps, each entry as the container holds it, as at a property: the two draw
+// the same issues and store the same targets and children, and a field no
+// reader reads is never walked.
+func TestValidate_AnImmutableContainerAtARelationReadsAsWhatItHolds(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nilRelationSchema))
+	co := map[string]any{"_target_id": "c"}
+	line := map[string]any{"id": "l"}
+	for name, plain := range map[string]map[string]any{
+		"a (one) association":        {"one": co},
+		"a (many) association":       {"many": []any{co, map[string]any{"_target_id": "d"}}},
+		"an association with props":  {"props": map[string]any{"_target_id": "c", "role": "r"}},
+		"a (many) composition":       {"lines": []any{line}},
+		"a refused target":           {"one": map[string]any{"_target_id": 5}},
+		"a list at a (one) relation": {"one": []any{co}},
+		"a map at a (many) relation": {"many": co},
+		"a Key at an edge property":  {"props": map[string]any{"_target_id": "c", "role": "r", "note": immutable.WrapKey([]any{"a"})}},
+	} {
+		plain["id"] = "x"
+		plain["head"] = []any{line}
+		wrapped := immutable.WrapProperties(plain)
+		held := make(map[string]any, len(plain))
+		for k, val := range wrapped.All() {
+			held[k] = val.Any()
+		}
+		plainValid, plainRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: plain})
+		})
+		heldValid, heldRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: held})
+		})
+		if plainRes.String() != heldRes.String() {
+			t.Errorf("%s: the Go value drew\n%s\nits immutable form drew\n%s", name, plainRes, heldRes)
+			continue
+		}
+		if plainValid.IsZero() || heldValid.IsZero() {
+			continue
+		}
+		for rel, edge := range plainValid.Edges() {
+			heldEdge, ok := heldValid.Edge(rel)
+			if !ok || len(slices.Collect(heldEdge.Targets())) != len(slices.Collect(edge.Targets())) {
+				t.Errorf("%s: edge %s holds %d targets from the Go value, %v from its immutable form", name, rel, len(slices.Collect(edge.Targets())), heldEdge)
+			}
+		}
+		for rel := range plainValid.Type().AllCompositions() {
+			got, want := slices.Collect(heldValid.Composed(rel.Name())), slices.Collect(plainValid.Composed(rel.Name()))
+			if len(got) != len(want) {
+				t.Errorf("%s: %s composes %d children from the Go value, %d from its immutable form", name, rel.Name(), len(want), len(got))
+			}
+		}
+	}
+
+	props := func(one any) map[string]any {
+		return map[string]any{"id": "x", "head": []any{line}, "one": one}
+	}
+	valid, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(immutable.WrapProperties(co))})
+	})
+	if edge, ok := valid.Edge("ONE"); diagtest.Err(res) != nil || !ok || len(slices.Collect(edge.Targets())) != 1 {
+		t.Errorf("a Properties at a (one) relation drew\n%s\nwant the one target", res)
+	}
+	for value, want := range map[any]string{time.Time{}: "time.Time", &co: "*map[string]interface {}"} {
+		_, res = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(value)})
+		})
+		if !strings.Contains(res.String(), "expected object, got "+want) {
+			t.Errorf("%s at a (one) relation drew\n%s\nwant its type named", want, res)
+		}
+	}
+	unread := map[string]any{"_target_id": "c", "junk": map[int]any{0: []any{"x"}}}
+	_, plainRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(unread)})
+	})
+	_, heldRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(immutable.WrapProperties(unread))})
+	})
+	if plainRes.String() != heldRes.String() {
+		t.Errorf("a field no reader reads drew\n%s\nfrom the Go value and\n%s\nfrom its immutable form", plainRes, heldRes)
+	}
+	_, res = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(map[int]any{1: "c"})})
+	})
+	if !strings.Contains(res.String(), "expected object, got map[int]interface {}") {
+		t.Errorf("a map keyed by no string at a (one) relation drew\n%s\nwant its type named", res)
+	}
+}

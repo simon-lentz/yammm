@@ -7,26 +7,22 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
 // instance_index correlates a diagnostic with the element of the batch the
-// CALLER passed: the root's index through Validate, the child's through
-// ValidateForComposition, and never both.
+// caller passed: the root's index, never its composed child's.
 func TestValidate_StampsInstanceIndexOnce(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, docSrc))
 	raws := []instance.RawInstance{
 		{Properties: map[string]any{"id": "d0", "lines": []any{map[string]any{"n": "a", "qty": 1}}}},
 		{Properties: map[string]any{"id": "d1", "lines": []any{map[string]any{"n": "b", "qty": "x"}}}},
 	}
-	_, res := v.Validate(t.Context(), "Doc", raws)
-	yammmtest.Diff(t, []string{"1"}, detailValues(mustIssue(t, res, instance.ErrTypeMismatch), diag.DetailKeyInstanceIndex))
-
-	_, res = v.ValidateForComposition(t.Context(), "Doc", "LINES", []instance.RawInstance{
-		{Properties: map[string]any{"n": "a", "qty": 1}},
-		{Properties: map[string]any{"n": "b", "qty": "x"}},
+	_, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(t.Context(), "Doc", raws)
 	})
-	yammmtest.Diff(t, []string{"1"}, detailValues(mustIssue(t, res, instance.ErrTypeMismatch), diag.DetailKeyInstanceIndex))
+	yammmtest.Diff(t, []string{"1"}, detailValues(mustIssue(t, res, diag.E_TYPE_MISMATCH), diag.DetailKeyInstanceIndex))
 }
 
 func manyUnknownFields(n int) map[string]any {
@@ -49,8 +45,12 @@ type Person {
 func TestValidate_PreservesTruncation(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, personOnly))
 	props := manyUnknownFields(150)
-	_, one := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props})
-	_, batch := v.Validate(t.Context(), "Person", []instance.RawInstance{{Properties: props}})
+	_, one := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props})
+	})
+	_, batch := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(t.Context(), "Person", []instance.RawInstance{{Properties: props}})
+	})
 	if !one.LimitReached() {
 		t.Fatal("the single-instance result is not truncated; the test is vacuous")
 	}
@@ -69,7 +69,9 @@ func TestUnknownFields_DeterministicUnderCap(t *testing.T) {
 	props := manyUnknownFields(150)
 	var first string
 	for i := range 20 {
-		_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props})
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props})
+		})
 		got := res.String()
 		if i == 0 {
 			first = got
@@ -85,10 +87,12 @@ func TestUnknownFields_DeterministicUnderCap(t *testing.T) {
 // slice that survives the shape filter.
 func TestComposition_DuplicateKeyIndicesAreInputIndices(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, docSrc))
-	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
-		"id": "d", "lines": []any{map[string]any{"n": "a", "qty": 1}, "not-an-object", map[string]any{"n": "a", "qty": 1}},
-	}})
-	is := mustIssue(t, res, instance.ErrDuplicateComposedPK)
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
+			"id": "d", "lines": []any{map[string]any{"n": "a", "qty": 1}, "not-an-object", map[string]any{"n": "a", "qty": 1}},
+		}})
+	})
+	is := mustIssue(t, res, diag.E_DUPLICATE_COMPOSED_PK)
 	if !strings.Contains(is.Message(), "indices 0 and 2") {
 		t.Errorf("message = %q", is.Message())
 	}
@@ -111,7 +115,9 @@ type Person extends Base {
     age Integer
 }
 `))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "age": 3}})
-	is := mustIssue(t, res, instance.ErrMissingRequired)
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "age": 3}})
+	})
+	is := mustIssue(t, res, diag.E_MISSING_REQUIRED)
 	yammmtest.Diff(t, []string{"name"}, detailValues(is, diag.DetailKeyPropertyName))
 }

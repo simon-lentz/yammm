@@ -5,16 +5,15 @@
 //
 // This package is internal to the YAMMM module and is not importable by
 // external consumers per Go's internal/ package semantics. It is used by the
-// gogen adapter to derive Go identifiers.
+// schema/gogen generator to derive Go identifiers.
 //
 // # CamelCase Conversion
 //
-// The [Capitalize], [ToUpperCamel], and [ToLowerCamel] functions provide
-// rune-aware CamelCase conversion with acronym preservation:
+// [ToUpperCamelInitialisms] provides rune-aware CamelCase conversion with acronym
+// preservation:
 //
-//	http_server -> HttpServer  (Capitalize/ToUpperCamel)
-//	http_server -> httpServer  (ToLowerCamel)
-//	HTTPServer  -> HTTPServer  (Capitalize preserves acronyms)
+//	http_server -> HttpServer
+//	HTTPServer  -> HTTPServer
 //
 // # Thread Safety
 //

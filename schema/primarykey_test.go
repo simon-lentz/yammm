@@ -13,23 +13,22 @@ func TestIsPrimaryKeyAllowed(t *testing.T) {
 		want bool
 	}{
 		// Allowed PK kinds.
-		{"String", NewStringConstraint(), true},
-		{"UUID", NewUUIDConstraint(), true},
-		{"Date", NewDateConstraint(), true},
-		{"Timestamp", NewTimestampConstraint(), true},
+		{"String", newStringConstraint(), true},
+		{"UUID", newUUIDConstraint(), true},
+		{"Date", newDateConstraint(), true},
+		{"Timestamp", newTimestampConstraint(), true},
 		// Disallowed kinds.
-		{"Integer", NewIntegerConstraint(), false},
-		{"Float", NewFloatConstraint(), false},
-		{"Boolean", NewBooleanConstraint(), false},
-		{"Enum", NewEnumConstraint([]string{"a", "b"}), false},
-		{"Pattern", NewPatternConstraint(nil), false},
-		{"Vector", NewVectorConstraint(3), false},
-		{"List", NewListConstraint(NewStringConstraint()), false},
-		// An alias unwraps to its resolved kind; an unresolved alias and nil are not allowed.
-		{"Alias->String", NewAliasConstraint("X", NewStringConstraint()), true},
-		{"Alias->Integer", NewAliasConstraint("X", NewIntegerConstraint()), false},
-		{"Alias-unresolved", NewAliasConstraint("X", nil), false},
-		{"nil", nil, false},
+		{"Integer", newIntegerConstraint(), false},
+		{"Float", newFloatConstraint(), false},
+		{"Boolean", newBooleanConstraint(), false},
+		{"Enum", parsedEnumConstraint([]string{"a", "b"}), false},
+		{"Pattern", PatternConstraint{}, false},
+		{"Vector", newVectorConstraint(3), false},
+		{"List", newListConstraint(newStringConstraint()), false},
+		// An alias unwraps to its resolved kind; an unresolved alias is not allowed.
+		{"Alias->String", newAliasConstraint("X", newStringConstraint()), true},
+		{"Alias->Integer", newAliasConstraint("X", newIntegerConstraint()), false},
+		{"Alias-unresolved", newAliasConstraint("X", nil), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

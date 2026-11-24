@@ -15,9 +15,9 @@ import (
 // to the builtins that hold it, not to the reader.
 func TestListElems(t *testing.T) {
 	t.Parallel()
-	wrapped := immutable.Wrap([]any{int64(1), "a", []any{int64(2)}}).Unwrap()
+	wrapped := immutable.Wrap([]any{int64(1), "a", []any{int64(2)}}).Any()
 	if _, ok := wrapped.(immutable.Slice); !ok {
-		t.Fatalf("fixture: Wrap([]any).Unwrap() is %T, want immutable.Slice", wrapped)
+		t.Fatalf("fixture: Wrap([]any).Any() is %T, want immutable.Slice", wrapped)
 	}
 	id := uuid.MustParse("123e4567-e89b-12d3-a456-426614174000")
 	for _, tc := range []struct {
@@ -32,9 +32,11 @@ func TestListElems(t *testing.T) {
 		// module (uuid.UUID is [16]byte), never how a list arrives: JSON gives
 		// []any, the wire an immutable.Slice, a caller a []T.
 		{"array", [3]int64{1, 2, 3}, nil, false},
-		{"immutable.Slice", wrapped, []any{int64(1), "a", immutable.Wrap([]any{int64(2)}).Unwrap()}, true},
+		{"immutable.Slice", wrapped, []any{int64(1), "a", immutable.Wrap([]any{int64(2)}).Any()}, true},
 		{"empty", []any{}, []any{}, true},
 		{"nil", nil, nil, false},
+		{"a nil slice holds no value", []any(nil), nil, false},
+		{"a nil typed slice holds no value", []string(nil), nil, false},
 		{"string", "abc", nil, false},
 		{"map", map[string]any{"a": 1}, nil, false},
 		{"scalar", int64(7), nil, false},

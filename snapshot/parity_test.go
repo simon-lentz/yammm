@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -33,7 +35,7 @@ type visibility int
 const (
 	// fromShape means the defect is in the header, the types table, or the
 	// top-level key sequence — every surface holding the whole document can see
-	// it: Load, Verify, Info, HeaderOnly and UpdateMetadata. HeaderOnlyRead and
+	// it: Load, Verify, Info, ReadHeader and UpdateMetadata. ReadHeader and
 	// ScanDir are excluded by construction, not by omission: they read through a
 	// reader capped at MaxHeaderSize and never hold the body.
 	fromShape visibility = iota
@@ -41,25 +43,6 @@ const (
 	// decoded, so UpdateMetadata cannot see it and is not asked to.
 	fromBody
 )
-
-// withoutIntegrityHash blanks the stored hash so every surface sees the same
-// bytes and the structural verdict is what the test observes. Info takes no
-// skip-integrity option, so blanking is the only way to compare all four.
-func withoutIntegrityHash(t *testing.T, data []byte) []byte {
-	t.Helper()
-	const anchor = `"integrity_hash":"`
-	start := bytes.Index(data, []byte(anchor))
-	if start < 0 {
-		t.Fatalf("fixture shape changed; %s not found", anchor)
-	}
-	valueStart := start + len(anchor)
-	end := bytes.IndexByte(data[valueStart:], '"')
-	if end < 0 {
-		t.Fatalf("fixture shape changed; integrity_hash value is unterminated")
-	}
-	out := append([]byte{}, data[:valueStart]...)
-	return append(out, data[valueStart+end:]...)
-}
 
 // spliceAfter inserts text immediately before the document's final brace.
 func spliceAfter(t *testing.T, data []byte, text string) []byte {
@@ -89,7 +72,7 @@ func swapSections(t *testing.T, data []byte) []byte {
 func TestParity_EverySurfaceAgrees(t *testing.T) {
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
-	clean := withoutIntegrityHash(t, v3Doc(t))
+	clean := v3Doc(t)
 
 	cases := []struct {
 		name string
@@ -147,7 +130,7 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 		}},
 		{"a group row out of range", fromBody, func(t *testing.T, d []byte) []byte {
 			t.Helper()
-			out := bytes.Replace(d, []byte(`{"type":0,`), []byte(`{"type":99,`), 1)
+			out := bytes.Replace(d, []byte(`{"type":1,"items"`), []byte(`{"type":99,"items"`), 1)
 			if bytes.Equal(out, d) {
 				t.Fatalf("fixture shape changed; no group row to re-point:\n%s", d)
 			}
@@ -163,17 +146,29 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 			}
 
 			verdicts := map[string]bool{
-				"Load":   refusedBy(t, func() diag.Result { _, r := snapshot.Load(ctx, edited, s); return r }),
-				"Verify": refusedBy(t, func() diag.Result { return snapshot.Verify(ctx, edited, s) }),
-				"Info":   refusedBy(t, func() diag.Result { _, r := snapshot.Info(ctx, edited); return r }),
+				"Load": refusedBy(t, func() diag.Result {
+					_, r := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+						return snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithWarnings(warn))
+					})
+					return r
+				}),
+				"Verify": refusedBy(t, func() diag.Result {
+					return diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+						return snapshot.Verify(ctx, rehashDocument(t, edited), s, snapshot.WithWarnings(warn))
+					})
+				}),
+				"Info": refusedBy(t, func() diag.Result {
+					_, r := diagtest.Issues(t, func() (*snapshot.Info, error) {
+						return snapshot.Stat(ctx, rehashDocument(t, edited))
+					})
+					return r
+				}),
 			}
 			if tc.seen == fromShape {
 				verdicts["UpdateMetadata"] = refusedBy(t, func() diag.Result {
-					_, r := snapshot.UpdateMetadata(ctx, edited, nil)
-					return r
-				})
-				verdicts["HeaderOnly"] = refusedBy(t, func() diag.Result {
-					_, r := snapshot.HeaderOnly(ctx, edited)
+					_, r := diagtest.Issues(t, func() ([]byte, error) {
+						return snapshot.UpdateMetadata(ctx, edited, nil)
+					})
 					return r
 				})
 			}
@@ -197,36 +192,34 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 func TestParity_EverySurfaceAcceptsAWellFormedDocument(t *testing.T) {
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
-	clean := withoutIntegrityHash(t, v3Doc(t))
+	clean := v3Doc(t)
 
-	if _, res := snapshot.Load(ctx, clean, s); res.HasErrors() {
-		t.Errorf("Load refused a well-formed document: %v", res)
+	if _, err := snapshot.Unmarshal(ctx, rehashDocument(t, clean), s); err != nil {
+		t.Errorf("Load refused a well-formed document: %v", err)
 	}
-	if res := snapshot.Verify(ctx, clean, s); res.HasErrors() {
-		t.Errorf("Verify refused a well-formed document: %v", res)
+	if err := snapshot.Verify(ctx, rehashDocument(t, clean), s); err != nil {
+		t.Errorf("Verify refused a well-formed document: %v", err)
 	}
-	if info, res := snapshot.Info(ctx, clean); res.HasErrors() || info == nil {
-		t.Errorf("Info refused a well-formed document: %v", res)
+	if info, err := snapshot.Stat(ctx, rehashDocument(t, clean)); err != nil || info == nil {
+		t.Errorf("Info refused a well-formed document: %v", err)
 	}
-	if out, res := snapshot.UpdateMetadata(ctx, clean, map[string]string{"k": "v"}); res.HasErrors() || len(out) == 0 {
-		t.Errorf("UpdateMetadata refused a well-formed document: %v", res)
+	if out, err := snapshot.UpdateMetadata(ctx, clean, map[string]string{"k": "v"}); err != nil || len(out) == 0 {
+		t.Errorf("UpdateMetadata refused a well-formed document: %v", err)
 	}
-	if h, res := snapshot.HeaderOnly(ctx, clean); res.HasErrors() || h == nil {
-		t.Errorf("HeaderOnly refused a well-formed document: %v", res)
+	if h, err := snapshot.ReadHeader(ctx, bytes.NewReader(clean)); err != nil || h == nil {
+		t.Errorf("ReadHeader refused a well-formed document: %v", err)
 	}
 }
 
 // refusedBy reports whether a surface returned an Error-severity diagnostic.
 func refusedBy(t *testing.T, run func() diag.Result) bool {
 	t.Helper()
-	return run().HasErrors()
+	return diagtest.Err(run()) != nil
 }
 
-// tiedUnresolvedSchema declares a (many) association carrying edge properties,
-// so one instance can name one missing target twice and differ only in the
-// properties. Those two unresolved records agree on every field an ordering
-// built from identity, key and relation can see.
-const tiedUnresolvedSchema = `schema "tied"
+// unresolvedSchema declares a (many) association carrying an edge property,
+// so each source can name several missing targets.
+const unresolvedSchema = `schema "tied"
 
 type Person {
 	id String primary
@@ -238,17 +231,14 @@ type Company {
 }
 `
 
-// TestMarshal_IsDeterministicWhenUnresolvedRecordsTie pins Marshal's documented
-// determinism against the one input that breaks a non-total ordering.
 // Graph.pending is a map, so each Snapshot call collects the unresolved records
-// in a fresh iteration order; if any two of them compare equal, the sort leaves
-// their positions to that order and the same graph writes different bytes.
-// Snapshot is called once per round precisely to redraw that order.
-func TestMarshal_IsDeterministicWhenUnresolvedRecordsTie(t *testing.T) {
+// in a fresh iteration order. Marshal writes one document whatever that order,
+// and Snapshot is called once per round to redraw it.
+func TestMarshal_IsDeterministicOverUnresolvedRecords(t *testing.T) {
 	ctx := context.Background()
-	s, res := schema.LoadString(t.Context(), tiedUnresolvedSchema, "tied.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), unresolvedSchema, "tied.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
 
@@ -256,36 +246,36 @@ func TestMarshal_IsDeterministicWhenUnresolvedRecordsTie(t *testing.T) {
 	for i := range 40 {
 		raw := instance.RawInstance{Properties: map[string]any{
 			"id": fmt.Sprintf("p%02d", i),
-			"EMPLOYERS": []any{
+			"employers": []any{
 				map[string]any{"_target_id": fmt.Sprintf("c%02d", i), "since": "2020-01-01T00:00:00Z"},
-				map[string]any{"_target_id": fmt.Sprintf("c%02d", i), "since": "2021-01-01T00:00:00Z"},
+				map[string]any{"_target_id": fmt.Sprintf("c%02d", i+1), "since": "2021-01-01T00:00:00Z"},
 			},
 		}}
-		valid, vres := v.ValidateOne(ctx, "Person", raw)
-		if vres.HasErrors() {
-			t.Fatalf("validate p%02d: %s", i, vres)
+		valid, err := v.ValidateOne(ctx, "Person", raw)
+		if err != nil {
+			t.Fatalf("validate p%02d: %s", i, err)
 		}
-		if r := g.Add(ctx, valid); r.HasErrors() {
-			t.Fatalf("add p%02d: %s", i, r)
+		if err := g.Add(ctx, valid); err != nil {
+			t.Fatalf("add p%02d: %s", i, err)
 		}
 	}
 
-	if n := len(g.Snapshot().Unresolved()); n != 80 {
-		t.Fatalf("fixture is vacuous: %d unresolved records, want 80 tied pairs", n)
+	if n := len(slices.Collect(g.Snapshot().Unresolved())); n != 80 {
+		t.Fatalf("fixture is vacuous: %d unresolved records, want 80", n)
 	}
 
 	var first []byte
 	for round := range 12 {
-		data, mres := snapshot.Marshal(ctx, g.Snapshot())
-		if mres.HasErrors() {
-			t.Fatalf("marshal round %d: %s", round, mres)
+		data, err := snapshot.Marshal(ctx, g.Snapshot())
+		if err != nil {
+			t.Fatalf("marshal round %d: %s", round, err)
 		}
 		if round == 0 {
 			first = data
 			continue
 		}
 		if !bytes.Equal(data, first) {
-			t.Fatalf("round %d wrote different bytes from round 0: the unresolved ordering is not total, so map-iteration order reaches the document", round)
+			t.Fatalf("round %d wrote different bytes from round 0: map-iteration order reaches the document", round)
 		}
 	}
 }

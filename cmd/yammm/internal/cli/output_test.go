@@ -8,36 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 )
-
-func TestParseOutputFormat(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		input   string
-		want    OutputFormat
-		wantErr bool
-	}{
-		{"text", FormatText, false},
-		{"json", FormatJSON, false},
-		{"yaml", "", true},
-		{"", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-			got, err := ParseOutputFormat(tt.input)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Equal(t, ExitUsage, ExitForError(err), "an unknown format is the invocation's mistake")
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
 
 func TestExitForResult(t *testing.T) {
 	t.Parallel()
@@ -49,7 +21,7 @@ func TestExitForResult(t *testing.T) {
 
 	t.Run("error result", func(t *testing.T) {
 		t.Parallel()
-		c := diag.NewCollectorUnlimited()
+		c := diag.NewCollector(diag.NoLimit)
 		c.Collect(diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, "test error").Build())
 		assert.Equal(t, ExitValidation, ExitForResult(c.Result()))
 	})
@@ -58,7 +30,7 @@ func TestExitForResult(t *testing.T) {
 func TestRenderResult_Text(t *testing.T) {
 	t.Parallel()
 
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "something went wrong").Build())
 
 	renderer := diag.NewRenderer()
@@ -71,7 +43,7 @@ func TestRenderResult_Text(t *testing.T) {
 func TestRenderResult_JSON(t *testing.T) {
 	t.Parallel()
 
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "json test").Build())
 
 	renderer := diag.NewRenderer()
@@ -124,7 +96,7 @@ func TestRenderResult_Text_SurfacesTruncationOnOKResult(t *testing.T) {
 	// visible alongside the retained warnings.
 	res := truncatedResult(diag.Warning, 7, 5)
 	require.True(t, res.LimitReached())
-	require.True(t, res.OK())
+	require.NoError(t, diagtest.Err(res))
 
 	renderer := diag.NewRenderer()
 	var buf bytes.Buffer
@@ -155,7 +127,7 @@ func TestRenderResult_JSON_SurfacesTruncationOnOKResult(t *testing.T) {
 	// from a clean one.
 	res := truncatedResult(diag.Warning, 8, 6)
 	require.True(t, res.LimitReached())
-	require.True(t, res.OK())
+	require.NoError(t, diagtest.Err(res))
 
 	renderer := diag.NewRenderer()
 	var buf bytes.Buffer
@@ -173,10 +145,10 @@ func TestRenderResult_JSON_SurfacesTruncationOnOKResult(t *testing.T) {
 func TestRenderResult_Text_RendersWarningOnlyResult(t *testing.T) {
 	t.Parallel()
 
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, "dropped an inherited annotation").Build())
 	res := c.Result()
-	require.True(t, res.OK(), "precondition: a warnings-only result is OK")
+	require.NoError(t, diagtest.Err(res), "precondition: a warnings-only result is OK")
 
 	renderer := diag.NewRenderer()
 	var buf bytes.Buffer
@@ -188,7 +160,7 @@ func TestRenderResult_Text_RendersWarningOnlyResult(t *testing.T) {
 func TestRenderResult_JSON_RendersWarningOnlyResult(t *testing.T) {
 	t.Parallel()
 
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, "dropped an inherited annotation").Build())
 
 	renderer := diag.NewRenderer()

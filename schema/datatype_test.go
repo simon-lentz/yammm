@@ -3,6 +3,8 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/location"
@@ -10,17 +12,17 @@ import (
 )
 
 func TestNewDataType(t *testing.T) {
-	constraint := schema.NewStringConstraint()
+	constraint := schema.TestNewStringConstraint()
 	span := location.Span{
-		Source: location.MustNewSourceID("test://datatype"),
-		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
-		End:    location.Position{Line: 1, Column: 10, Byte: 10},
+		Source: sourcetest.ID("test://datatype"),
+		Start:  location.Position{Line: 1, Column: 1, Offset: 0},
+		End:    location.Position{Line: 1, Column: 10, Offset: 10},
 	}
 	doc := "Email address type"
 
 	dt := schema.TestNewDataType("Email", constraint, span, doc)
 
-	assert.NotNil(t, dt)
+	assert.False(t, dt.IsZero())
 	assert.Equal(t, "Email", dt.Name())
 	assert.Equal(t, constraint, dt.Constraint())
 	assert.Equal(t, span, dt.Span())
@@ -38,8 +40,8 @@ func TestDataType_Constraint(t *testing.T) {
 		name       string
 		constraint schema.Constraint
 	}{
-		{"with string constraint", schema.NewStringConstraint()},
-		{"with integer constraint", schema.NewIntegerConstraint()},
+		{"with string constraint", schema.TestNewStringConstraint()},
+		{"with integer constraint", schema.TestNewIntegerConstraint()},
 		{"with nil constraint", nil},
 	}
 
@@ -53,9 +55,9 @@ func TestDataType_Constraint(t *testing.T) {
 
 func TestDataType_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
-		Start:  location.Position{Line: 5, Column: 1, Byte: 40},
-		End:    location.Position{Line: 5, Column: 20, Byte: 60},
+		Source: sourcetest.ID("test://span"),
+		Start:  location.Position{Line: 5, Column: 1, Offset: 40},
+		End:    location.Position{Line: 5, Column: 20, Offset: 60},
 	}
 
 	dt := schema.TestNewDataType("Money", nil, span, "")
@@ -63,7 +65,7 @@ func TestDataType_Span(t *testing.T) {
 	result := dt.Span()
 	assert.Equal(t, span.Source, result.Source)
 	assert.Equal(t, 5, result.Start.Line)
-	assert.Equal(t, 40, result.Start.Byte)
+	assert.Equal(t, 40, result.Start.Offset)
 }
 
 func TestDataType_Documentation(t *testing.T) {

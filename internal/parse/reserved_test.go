@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
 // propertyLegalKeywords are the eleven reserved spellings that are still legal
@@ -20,7 +20,7 @@ func TestReserved_PropertyNamesAcceptContextualKeywords(t *testing.T) {
 	for _, name := range propertyLegalKeywords {
 		t.Run(name, func(t *testing.T) {
 			src := fmt.Sprintf("schema \"s\"\ntype T {\n\tid String primary\n\t%s String\n}\n", name)
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Fatalf("%q rejected as a property name: %v", name, issues)
 			}
@@ -39,7 +39,7 @@ func TestReserved_PropertyNamesRejectTheSix(t *testing.T) {
 	for name := range propertyNameExclusions {
 		t.Run(name, func(t *testing.T) {
 			src := fmt.Sprintf("schema \"s\"\ntype T {\n\tid String primary\n\t%s String\n}\n", name)
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) == 0 {
 				t.Errorf("%q accepted as a property name, want rejected", name)
 			}
@@ -53,7 +53,7 @@ func TestReserved_TypeNamesRejectDatatypeKeywords(t *testing.T) {
 	for name := range datatypeKeywords {
 		t.Run(name, func(t *testing.T) {
 			src := fmt.Sprintf("schema \"s\"\ntype %s {\n\tid String primary\n}\n", name)
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) == 0 {
 				t.Errorf("%q accepted as a type name, want rejected", name)
 			}
@@ -71,7 +71,7 @@ func TestReserved_ImportAliasRejectsEveryReservedSpelling(t *testing.T) {
 	for name := range reservedLC {
 		t.Run("lc_"+name, func(t *testing.T) {
 			src := fmt.Sprintf("schema \"s\"\nimport \"a.yammm\" as %s\ntype T {\n\tid String primary\n}\n", name)
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) == 0 {
 				t.Errorf("alias %q accepted, want rejected", name)
 			}
@@ -80,7 +80,7 @@ func TestReserved_ImportAliasRejectsEveryReservedSpelling(t *testing.T) {
 	for name := range datatypeKeywords {
 		t.Run("uc_"+name, func(t *testing.T) {
 			src := fmt.Sprintf("schema \"s\"\nimport \"a.yammm\" as %s\ntype T {\n\tid String primary\n}\n", name)
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) == 0 {
 				t.Errorf("alias %q accepted, want rejected", name)
 			}
@@ -133,7 +133,7 @@ func TestReserved_ModifierLookaheadResolvesTheNextPropertyAmbiguity(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "schema \"s\"\ntype T {\n\t" + tc.body + "\n}\n"
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Fatalf("unexpected issues: %v", issues)
 			}
@@ -161,7 +161,7 @@ func TestReserved_ModifierLookaheadResolvesTheNextPropertyAmbiguity(t *testing.T
 // on the right of '='.
 func TestReserved_DatatypeAliasTargetsAreBuiltInOnly(t *testing.T) {
 	src := "schema \"s\"\ntype Code = String[1, 8]\ntype Other = Code\ntype T {\n\tid String primary\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) == 0 {
 		t.Fatal("an alias targeting another alias was accepted, want rejected")
 	}
@@ -176,7 +176,7 @@ func TestReserved_DatatypeAliasTargetsAreBuiltInOnly(t *testing.T) {
 // is a binding rule, and it lives beside the binding.
 func TestReserved_SelfIsAGrammaticalPropertyName(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n\tself String\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("self rejected by the grammar: %v", issues)
 	}

@@ -1,15 +1,17 @@
 package snapshot_test
 
 import (
-	"strings"
+	"slices"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -17,7 +19,7 @@ import (
 // dropReasonSchema declares a required association, so a graph can hold an
 // unresolved record whose reason is "absent" — the shape whose stated target
 // key and edge properties the wire cannot carry.
-func dropReasonSchema(t *testing.T) *schema.Schema {
+func dropReasonSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "drop_reason"
 
@@ -32,109 +34,61 @@ type Source {
 	}
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "drop_reason.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "drop_reason.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
 
-// TestRebuildSnapshot_RefusesATargetOnARecordWithNoTarget pins why Marshal
-// has no drop to mark for an unresolved record: a record whose reason names no
-// target cannot carry a target key or edge properties into a snapshot, because
-// RebuildSnapshot refuses it as the reader does.
-func TestRebuildSnapshot_RefusesATargetOnARecordWithNoTarget(t *testing.T) {
+// TestMarshal_ADuplicateDrawsNoDropWarning pins that the wire carries a
+// duplicate's record whole: its issue is in the result of the Add that drew it,
+// so marshalling loses nothing a warning would name.
+func TestMarshal_ADuplicateDrawsNoDropWarning(t *testing.T) {
 	t.Parallel()
 	s := dropReasonSchema(t)
-	sourceType, _ := s.Type("Source")
-	targetType, _ := s.Type("Target")
-	for _, tc := range []struct {
-		name  string
-		key   immutable.Key
-		props immutable.Properties
-	}{
-		{"a target key", immutable.WrapKey([]any{"t1"}), immutable.Properties{}},
-		{"edge properties", immutable.Key{}, immutable.WrapProperties(map[string]any{"note": "kept nowhere"})},
-	} {
-		_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types: []schema.TypeID{sourceType.ID(), targetType.ID()},
-			Instances: []graph.InstanceParts{{
-				TypeID:     sourceType.ID(),
-				PrimaryKey: immutable.WrapKey([]any{"s1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "s1"}),
-			}},
-			Unresolved: []graph.UnresolvedParts{{
-				Relation:   "LINK",
-				SourceType: sourceType.ID(), SourceKey: immutable.WrapKey([]any{"s1"}),
-				TargetKey:  tc.key,
-				Properties: tc.props,
-				Reason:     "absent",
-			}},
-		})
-		if !res.HasCode(diag.E_INTERNAL) || !strings.Contains(res.String(), `reason "absent" carries a target key or edge properties`) {
-			t.Errorf("%s: RebuildSnapshot = %s, want the refusal", tc.name, res)
-		}
-	}
-}
 
-// TestMarshal_ADuplicatesDiagnosticIsDroppedUnmarked pins the DELIBERATE silent
-// drop the registry doc now names. The wire has no field for a duplicate's
-// Diagnostic, so it is discarded without the warning — and a consumer that
-// gated loss detection on the code alone would be told nothing was lost.
-func TestMarshal_ADuplicatesDiagnosticIsDroppedUnmarked(t *testing.T) {
-	t.Parallel()
-	s := dropReasonSchema(t)
-	targetType, _ := s.Type("Target")
-
-	row := func(key string) *instance.ValidInstance {
-		return instance.NewValidInstance("Target", targetType.ID(),
-			immutable.WrapKey([]any{key}),
-			immutable.WrapProperties(map[string]any{"id": key}), nil, nil, nil)
+	row := func(key string) instance.ValidInstance {
+		return instancetest.Valid(t, s, "Target", map[string]any{"id": key})
 	}
 	g := graph.New(s)
-	if r := g.Add(t.Context(), row("t1")); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), row("t1")); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	if r := g.Add(t.Context(), row("t1")); r.OK() {
+	if err := g.Add(t.Context(), row("t1")); err == nil {
 		t.Fatal("a duplicate primary key was accepted")
 	}
 	snap := g.Snapshot()
-	if len(snap.Duplicates()) != 1 {
-		t.Fatalf("duplicates = %d, want 1", len(snap.Duplicates()))
-	}
-	if snap.Duplicates()[0].Diagnostic().Code() == (diag.Code{}) {
-		t.Fatal("the duplicate carries no diagnostic, so this test asserts nothing")
+	if len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("duplicates = %d, want 1", len(slices.Collect(snap.Duplicates())))
 	}
 
-	data, mres := snapshot.Marshal(t.Context(), snap)
-	if mres.HasCode(diag.W_SNAPSHOT_VALUE_DROPPED) {
-		t.Errorf("the deliberate silent drop was marked: %s", mres)
+	data, err := snapshot.Marshal(t.Context(), snap)
+	if err != nil {
+		t.Errorf("marshal: %s", err)
 	}
-	loaded, lres := snapshot.Load(t.Context(), data, s)
-	if lres.HasErrors() {
-		t.Fatalf("load: %s", lres)
+	loaded, readErr := snapshot.Unmarshal(t.Context(), data, s)
+	if readErr != nil {
+		t.Fatalf("load: %s", readErr)
 	}
-	if got := loaded.Duplicates()[0].Diagnostic().Code(); got != (diag.Code{}) {
-		t.Errorf("the round trip kept the diagnostic as %q; the wire has no field for it", got)
+	if got := len(slices.Collect(loaded.Duplicates())); got != 1 {
+		t.Errorf("the round trip holds %d duplicates, want 1", got)
 	}
 }
 
-// TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne pins the claim
-// graph.provenanceKeyOf's godoc rests on. It asserted unconditionally that a
-// loaded instance carries a provenance with a zero span, while its own closing
-// sentence conditioned the same claim — and the writer emits none for an
-// instance without one, so the opening was false for any document this library
-// writes from such a graph.
+// TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne pins what graph's
+// compareProvenance rests on: a loaded instance has a provenance only when the
+// document's instance had one, and the span of that provenance is zero.
 func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 	t.Parallel()
 	s := dropReasonSchema(t)
 	targetType, _ := s.Type("Target")
 
-	build := func(prov *location.Provenance) *graph.Snapshot {
+	build := func(prov instance.Provenance) graph.Snapshot {
 		t.Helper()
-		snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		snap := snappartstest.Loaded(t, s, snapparts.Parts{
 			Types: []schema.TypeID{targetType.ID()},
-			Instances: []graph.InstanceParts{
+			Instances: []snapparts.Instance{
 				{
 					TypeID:     targetType.ID(),
 					PrimaryKey: immutable.WrapKey([]any{"t1"}),
@@ -143,28 +97,25 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 				},
 			},
 		})
-		if res.HasErrors() {
-			t.Fatalf("RebuildSnapshot: %s", res)
-		}
 		return snap
 	}
-	roundTrip := func(snap *graph.Snapshot) *graph.Instance {
+	roundTrip := func(snap graph.Snapshot) graph.Instance {
 		t.Helper()
-		data, mres := snapshot.Marshal(t.Context(), snap)
-		if mres.HasErrors() {
-			t.Fatalf("marshal: %s", mres)
+		data, err := snapshot.Marshal(t.Context(), snap)
+		if err != nil {
+			t.Fatalf("marshal: %s", err)
 		}
-		loaded, lres := snapshot.Load(t.Context(), data, s)
-		if lres.HasErrors() {
-			t.Fatalf("load: %s", lres)
+		loaded, readErr := snapshot.Unmarshal(t.Context(), data, s)
+		if readErr != nil {
+			t.Fatalf("load: %s", readErr)
 		}
-		return loaded.InstancesOf(targetType.ID())[0]
+		return slices.Collect(loaded.InstancesOf(targetType.ID()))[0]
 	}
 
 	// With a provenance in the document: one comes back, and its span is zero.
-	written := location.NewProvenance("a.json", path.Root(), location.Span{Start: location.Position{Line: 7, Column: 3}})
+	written := instance.NewProvenance("a.json", path.Root, location.Span{Start: location.Position{Line: 7, Column: 3}})
 	got := roundTrip(build(written)).Provenance()
-	if got == nil {
+	if got.IsZero() {
 		t.Fatal("a document whose instance carried a provenance loaded without one")
 	}
 	if got.SourceName() != "a.json" {
@@ -175,7 +126,7 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 	}
 
 	// With none: none comes back, which the unconditional claim denied.
-	if p := roundTrip(build(nil)).Provenance(); p != nil {
+	if p := roundTrip(build(instance.Provenance{})).Provenance(); !p.IsZero() {
 		t.Errorf("a document whose instance carried no provenance loaded with %v", p)
 	}
 }

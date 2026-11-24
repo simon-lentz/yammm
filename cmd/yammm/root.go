@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"strings"
 
@@ -16,37 +15,31 @@ func newRootCmd(version string) *cobra.Command {
 		Short: "Schema validation DSL for graph-based data infrastructure",
 		Long: `yammm is a schema validation DSL for graph-based data infrastructure.
 
+A command that succeeds prints its payload and its diagnostics, and nothing else.
+
 Global flags:
-  --format    Output format: "text" (default) or "json". It shapes the
-              diagnostics every command writes, and the stdout payload of
-              "snapshot info". Under "json" a command writes exactly one JSON
-              document to stderr, a clean run included, and suppresses its
-              status summary; "snapshot info" writes its payload to stdout.
-              A "help", "completion" or --version that succeeds writes
-              no document.
+  --json      Write diagnostics as one JSON document on stderr, a clean run
+              included, and write "snapshot info"'s payload as JSON on
+              stdout. A "help", "completion" or --version that succeeds
+              writes no document.
   --no-color  Disable ANSI color in diagnostic output.
 
-Data commands (check, load, export, snapshot save) also accept:
-  --from         Data input format override: "json" or "csv".
-                 Auto-detected from the file extension when not specified.
-                 A .tsv file is CSV whose fields split on tabs.
-  --type         Type name for single-type CSV data.
-  --type-column  Column naming each row's type, for multi-type CSV.`,
+yammm --version prints the version; the flag is the program's alone.`,
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
 
-	cmd.PersistentFlags().String("format", "text", "output format for diagnostics and for snapshot info's payload: text or json")
+	cmd.PersistentFlags().Bool("json", false, "write diagnostics, and snapshot info's payload, as JSON")
 	cmd.PersistentFlags().Bool("no-color", false, "disable ANSI color output")
+	// Defined here so cobra's version flag takes no -v shorthand.
+	cmd.Flags().Bool("version", false, "print the version")
 
 	cmd.AddCommand(
 		newValidateCmd(),
 		newFmtCmd(),
 		newCheckCmd(),
 		newNeo4jCmd(),
-		newLoadCmd(),
-		newExportCmd(),
 		newGenCmd(),
 		newSnapshotCmd(),
 	)
@@ -57,10 +50,14 @@ Data commands (check, load, export, snapshot save) also accept:
 // initHelpAndCompletion adds cobra's help and completion commands to root and
 // makes each refuse what it cannot answer: cobra's help exits 0 for a topic no
 // command answers, printing the usage or the nearest command's help, and its
-// completion parent prints help and exits 0. [execute]
-// calls it once the caller has set root's streams, since each shell command
+// completion parent prints help and exits 0. A shell command that cannot
+// write its script is a runtime failure. [execute] calls it once the caller has set root's streams, since each shell command
 // binds its output when it is created.
-func initHelpAndCompletion(root *cobra.Command) {
+//
+// It also refuses an unknown subcommand on the help and flag-error paths, through
+// [unknownSubcommand], and returns the help path's refusal, which cobra's Execute
+// cannot return: it calls the help function and returns nil.
+func initHelpAndCompletion(root *cobra.Command) (helpRefusal func() error) {
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
 	for _, c := range root.Commands() {
@@ -76,35 +73,77 @@ func initHelpAndCompletion(root *cobra.Command) {
 			}
 		case "completion":
 			c.RunE = requireSubcommand
+			// A shell's script fails only as its write fails, which is no
+			// usage error.
+			for _, shell := range c.Commands() {
+				write := shell.RunE
+				shell.RunE = func(c *cobra.Command, args []string) error { return cli.Runtime(write(c, args)) }
+			}
 		}
+	}
+
+	initHelpFlags(root)
+	root.InitDefaultVersionFlag()
+
+	var refused error
+	help := root.HelpFunc()
+	root.SetHelpFunc(func(c *cobra.Command, args []string) {
+		if err := unknownSubcommand(c); err != nil {
+			refused = err
+			return
+		}
+		help(c, args)
+	})
+	flagError := root.FlagErrorFunc()
+	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		if unknown := unknownSubcommand(c); unknown != nil {
+			return unknown
+		}
+		return flagError(c, err)
+	})
+	return func() error { return refused }
+}
+
+// initHelpFlags adds the help flag to c and every command under it. cobra adds
+// it only to the command it runs, after it has found that command, so without
+// it "yammm neo4j --help diff" reads "diff" as an unknown --help's value.
+func initHelpFlags(c *cobra.Command) {
+	c.InitDefaultHelpFlag()
+	for _, sub := range c.Commands() {
+		initHelpFlags(sub)
 	}
 }
 
-// withDiagnostics adapts a command that diagnoses to cobra's RunE. It admits
-// the output-shaping flags before the command runs and closes the sink with the
-// command's error after it returns, so no command works under a format the CLI
-// does not know, no return path leaves a diagnostic unwritten, and under
-// --format json the failure is inside the one document.
+// unknownSubcommand refuses the first word c's flags left when c holds
+// subcommands, in cobra.NoArgs's words. cobra parses flags and answers --help
+// before it judges a command's words, so without it "yammm neo4j bogus --help"
+// prints neo4j's help at exit 0 and "yammm neo4j bogus --schema x" names the flag.
+func unknownSubcommand(c *cobra.Command) error {
+	if !c.HasSubCommands() {
+		return nil
+	}
+	return cobra.NoArgs(c, c.Flags().Args())
+}
+
+// withDiagnostics adapts a command that diagnoses to cobra's RunE. It closes
+// the sink with the command's error after the command returns, so no return
+// path leaves a diagnostic unwritten, and under --json the failure is inside
+// the one document.
 //
-// Every error it returns is a [cli.ExitError]: one the command did not classify
-// takes [cli.ExitForError]'s code here, so [run] can tell a command's failure
-// from one cobra raised before any command ran.
+// Every error it returns carries an exit code: one the command did not classify
+// is a runtime failure here ([cli.Runtime]), so [run] can tell a command's
+// failure from one cobra raised before any command ran.
 func withDiagnostics(run func(*cobra.Command, []string, *cli.DiagnosticSink) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		formatStr, _ := cmd.Flags().GetString("format")
-		format, err := cli.ParseOutputFormat(formatStr)
-		if err != nil {
-			return err
+		format := cli.FormatText
+		if asJSON, _ := cmd.Flags().GetBool("json"); asJSON {
+			format = cli.FormatJSON
 		}
 		noColor, _ := cmd.Flags().GetBool("no-color")
 		// The terminal test reads the process stream while the writer is
 		// cobra's, as it was when every render built its own renderer.
 		sink := cli.NewDiagnosticSink(cmd.ErrOrStderr(), format, noColor, cli.IsTTY(os.Stderr.Fd()))
-		err = run(cmd, args, sink)
-		if _, ok := errors.AsType[*cli.ExitError](err); err != nil && !ok {
-			err = &cli.ExitError{Code: cli.ExitForError(err), Err: err}
-		}
-		return sink.Close(err)
+		return sink.Close(cli.Runtime(run(cmd, args, sink)))
 	}
 }
 

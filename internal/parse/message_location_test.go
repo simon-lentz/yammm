@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
 // Every syntax diagnostic names where the parser was when it failed. The
@@ -65,7 +65,7 @@ func TestSyntaxMessages_LocationVocabulary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, issues := Parse([]byte(tt.src), location.NewSourceID(tt.name))
+			_, issues := Parse([]byte(tt.src), sourcetest.ID(tt.name))
 			var got []string
 			for _, iss := range issues {
 				got = append(got, iss.Message())

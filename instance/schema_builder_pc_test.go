@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -17,23 +16,23 @@ import (
 // pcTestSchema is the in-package fixture for these tests. The external suite's
 // personSchema is not visible from package instance, and these tests need
 // unexported access.
-func pcTestSchema(t *testing.T) *schema.Schema {
+func pcTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("pctest").
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithRelation("KNOWS", schema.LocalTypeRef("Person", location.Span{}), false, true).
-		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), false, true).
-		Done().
-		Build()
-	if result.HasErrors() {
-		t.Fatalf("pcTestSchema: %s", result)
+	s, err := schema.LoadString(t.Context(), `schema "pctest"
+
+part type Address {
+	id String primary
+}
+
+type Person {
+	id String primary
+	name String required
+	--> KNOWS (one:many) Person
+	*-> ADDRESSES (one:many) Address
+}
+`, "pctest.yammm")
+	if err != nil {
+		t.Fatalf("pcTestSchema: %s", err)
 	}
 	return s
 }

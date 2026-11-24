@@ -29,19 +29,15 @@ type spanWire struct {
 	End    positionWire `json:"end"`
 }
 
-// positionWire is the JSON wire format for location.Position.
-//
-// byte offset encoding:
-//   - Domain -1 (unknown) → wire nil → JSON field omitted
-//   - Domain 0 → wire *0 → JSON "byte": 0
-//   - Domain N > 0 → wire *N → JSON "byte": N
+// positionWire is the JSON wire format for location.Position. A valid
+// position writes its offset, 0 included; one that is not valid writes none.
 type positionWire struct {
 	Line   int  `json:"line"`
 	Column int  `json:"column"`
-	Byte   *int `json:"byte,omitzero"` // Pointer for -1 → nil → omitted
+	Offset *int `json:"offset,omitzero"`
 }
 
-// relatedInfoWire is the JSON wire format for location.RelatedInfo.
+// relatedInfoWire is the JSON wire format for RelatedInfo.
 type relatedInfoWire struct {
 	Message string    `json:"message"`
 	Span    *spanWire `json:"span,omitzero"`
@@ -162,38 +158,21 @@ func toSpanWire(span location.Span) *spanWire {
 	}
 }
 
-// toPositionWire converts a location.Position to its JSON wire format.
-//
-// byte offset encoding:
-//   - Domain -1 (unknown) → wire nil → JSON field omitted
-//   - Domain 0 → wire *0 → JSON "byte": 0
-//   - Domain N > 0 → wire *N → JSON "byte": N
-//
-// Uses HasByte() to determine if byte offset should be emitted. This correctly
-// handles the footgun case where Position{} (Go zero value) has Byte=0 but
-// represents an unknown position - HasByte() returns false when IsZero() is true,
-// preventing accidental emission of "byte": 0 for unknown positions.
+// toPositionWire converts a Position to its JSON wire format.
 func toPositionWire(pos location.Position) positionWire {
 	wire := positionWire{
 		Line:   pos.Line,
 		Column: pos.Column,
 	}
-
-	// Byte offset encoding
-	// HasByte() returns true only when Byte >= 0 AND position is not zero/unknown.
-	// This prevents Position{} (with Byte=0) from incorrectly emitting "byte": 0.
-	if pos.HasByte() {
-		// Known byte offset on a known position: wrap in pointer
-		byteOffset := pos.Byte
-		wire.Byte = &byteOffset
+	if pos.IsValid() {
+		offset := pos.Offset
+		wire.Offset = &offset
 	}
-	// pos.Byte < 0 OR pos.IsZero(): leave wire.Byte as nil → omitted
-
 	return wire
 }
 
-// toRelatedInfoWire converts a location.RelatedInfo to its JSON wire format.
-func toRelatedInfoWire(rel location.RelatedInfo) relatedInfoWire {
+// toRelatedInfoWire converts a RelatedInfo to its JSON wire format.
+func toRelatedInfoWire(rel RelatedInfo) relatedInfoWire {
 	wire := relatedInfoWire{
 		Message: rel.Message,
 	}

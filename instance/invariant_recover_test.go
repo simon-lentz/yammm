@@ -3,27 +3,22 @@ package instance
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/location/path"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// panicHandler is a slog.Handler whose Handle panics: the evaluator logs
-// its trace op from inside EvaluateBool, so the panic lands inside the
-// window evaluateInvariants must recover.
-type panicHandler struct{}
+// panicContext panics on its first Err call, which evaluateInvariants makes
+// inside the window it must recover.
+type panicContext struct{ context.Context } //nolint:containedctx // a decorator holds the context it wraps
 
-func (panicHandler) Enabled(context.Context, slog.Level) bool  { return true }
-func (panicHandler) Handle(context.Context, slog.Record) error { panic("handler down") }
-func (h panicHandler) WithAttrs([]slog.Attr) slog.Handler      { return h }
-func (h panicHandler) WithGroup(string) slog.Handler           { return h }
+func (panicContext) Err() error { panic("context down") }
 
 func TestEvaluateInvariants_RecoversAPanicAsInternalError(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), `schema "p"
+	s, loadErr := schema.LoadString(t.Context(), `schema "p"
 
 type Doc {
     id String primary
@@ -31,15 +26,15 @@ type Doc {
     ! "m" id != ""
 }
 `, "p.yammm")
-	if !res.OK() {
-		t.Fatal(res)
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	typ, _ := s.Type("Doc")
-	v := NewValidator(s, WithLogger(slog.New(panicHandler{})))
-	collector := diag.NewCollectorUnlimited()
+	v := NewValidator(s)
+	collector := diag.NewCollector(diag.NoLimit)
 
-	inst := newValidatedInstance("Doc", typ.ID(), immutable.Key{}, immutable.WrapProperties(map[string]any{"id": "d"}), nil, nil, nil)
-	err := v.evaluateInvariants(t.Context(), typ, "Doc", inst, collector, nil, path.Root())
+	inst := newValidInstance("Doc", typ, immutable.Key{}, immutable.WrapProperties(map[string]any{"id": "d"}), nil, nil, Provenance{})
+	err := v.evaluateInvariants(panicContext{t.Context()}, typ, "Doc", inst, collector, Provenance{}, path.Root)
 	var internalErr *InternalError
 	if !errors.As(err, &internalErr) {
 		t.Fatalf("err = %v, want *InternalError", err)

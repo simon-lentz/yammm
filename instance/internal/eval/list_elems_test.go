@@ -23,7 +23,7 @@ func TestArrayIsNotAList(t *testing.T) {
 	}
 
 	_, err := eval.NewEvaluator().Evaluate(t.Context(),
-		makeBuiltinCall(lit(arr), "len", nil, nil, nil), eval.EmptyScope())
+		makeBuiltinCall(lit(arr), "Len", nil, nil, nil), eval.EmptyScope())
 	if err == nil {
 		t.Fatal("Len answered on an array")
 	}
@@ -40,8 +40,8 @@ func TestListMessagesNameAList(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct{ name, builtin string }{
-		{"a numeric receiver into a list builtin", "sum"},
-		{"a string receiver into a list builtin", "first"},
+		{"a numeric receiver into a list builtin", "Sum"},
+		{"a string receiver into a list builtin", "First"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

@@ -40,12 +40,22 @@ func TestBuild_PanicsOnABuilderNoConstructorMade(t *testing.T) {
 }
 
 // TestNewCode_PanicsOnAnEmptyValue holds NewCode to refusing an empty code, as
-// it refuses a duplicate. An empty code registers, appears in AllCodes, and can
-// be carried by no issue: IsZero reports it unset.
+// it refuses a duplicate. No issue can carry an empty code: IsZero reports it
+// unset.
 func TestNewCode_PanicsOnAnEmptyValue(t *testing.T) {
 	t.Parallel()
 
 	wantPanic(t, "empty", func() {
-		_ = NewCode("", CategorySentinel)
+		_ = NewCode("")
+	})
+}
+
+// TestNewIssue_PanicsOnTheZeroSeverity holds NewIssue to refusing the zero
+// Severity, which names no severity.
+func TestNewIssue_PanicsOnTheZeroSeverity(t *testing.T) {
+	t.Parallel()
+
+	wantPanic(t, "invalid severity 0 (must be 1-5)", func() {
+		_ = NewIssue(Severity(0), E_SYNTAX, "m")
 	})
 }

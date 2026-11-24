@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -53,7 +55,7 @@ func TestIssueLogValue_CarriesTheSourceName(t *testing.T) {
 	t.Run("omitted when unset", func(t *testing.T) {
 		t.Parallel()
 		bare := NewIssue(Error, E_SYNTAX, "no provenance").
-			WithSpan(location.Point(location.MustNewSourceID("test://x"), 1, 1)).
+			WithSpan(location.Span{Source: sourcetest.ID("test://x"), Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 			Build()
 		if _, ok := attrsOf(t, bare.LogValue())["source_name"]; ok {
 			t.Error("source_name is emitted for an issue that has none")
@@ -73,10 +75,10 @@ func attrKeys(m map[string]slog.Value) []string {
 	return out
 }
 
-// TestContextualErrorLogValue_CarriesTruncation holds the log shape to saying
+// TestResultErrorLogValue_CarriesTruncation holds the log shape to saying
 // when the issues it carries are not all of them. A consumer reading the slice
 // alone cannot tell a complete result from a truncated one.
-func TestContextualErrorLogValue_CarriesTruncation(t *testing.T) {
+func TestResultErrorLogValue_CarriesTruncation(t *testing.T) {
 	t.Parallel()
 
 	t.Run("truncated", func(t *testing.T) {
@@ -86,8 +88,8 @@ func TestContextualErrorLogValue_CarriesTruncation(t *testing.T) {
 		c.Collect(NewIssue(Error, E_INTERNAL, "dropped one").Build())
 		c.Collect(NewIssue(Error, E_INTERNAL, "dropped two").Build())
 
-		ce := &ContextualError{Result: c.Result(), Tag: "validation"}
-		attrs := attrsOf(t, ce.LogValue())
+		re := &ResultError{Result: c.Result()}
+		attrs := attrsOf(t, re.LogValue())
 
 		reached, ok := attrs["limit_reached"]
 		if !ok {
@@ -107,10 +109,10 @@ func TestContextualErrorLogValue_CarriesTruncation(t *testing.T) {
 
 	t.Run("not truncated", func(t *testing.T) {
 		t.Parallel()
-		c := NewCollectorUnlimited()
+		c := NewCollector(NoLimit)
 		c.Collect(NewIssue(Error, E_INTERNAL, "only").Build())
 
-		attrs := attrsOf(t, (&ContextualError{Result: c.Result(), Tag: "validation"}).LogValue())
+		attrs := attrsOf(t, (&ResultError{Result: c.Result()}).LogValue())
 		if _, ok := attrs["limit_reached"]; ok {
 			t.Error("limit_reached is emitted for a result that was not truncated")
 		}

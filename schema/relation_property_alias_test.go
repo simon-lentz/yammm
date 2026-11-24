@@ -1,14 +1,17 @@
 package schema_test
 
 import (
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // mustEdgeProperty digs an association's edge property out of a loaded schema.
-func mustEdgeProperty(t *testing.T, s *schema.Schema, typeName, relName, propName string) *schema.Property {
+func mustEdgeProperty(t *testing.T, s schema.Schema, typeName, relName, propName string) schema.Property {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -28,7 +31,7 @@ func mustEdgeProperty(t *testing.T, s *schema.Schema, typeName, relName, propNam
 // A DataType-typed edge property must leave completion with a resolved
 // AliasConstraint, exactly like a DataType-typed type property.
 func TestLoad_EdgePropertyDataTypeAliasResolved(t *testing.T) {
-	s, result := schema.LoadString(t.Context(), `schema "geo"
+	s, err := schema.LoadString(t.Context(), `schema "geo"
 
 type StateCode = String [2, 2]
 
@@ -43,8 +46,8 @@ type County {
 	}
 }
 `, "test.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load: %v", result.Err())
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 
 	prop := mustEdgeProperty(t, s, "County", "IN_STATE", "code_tag")
@@ -52,7 +55,7 @@ type County {
 	if !isAlias {
 		t.Fatalf("edge property constraint is %T, want AliasConstraint", prop.Constraint())
 	}
-	if !alias.IsResolved() {
+	if !schema.TestConstraintIsResolved(alias) {
 		t.Error("edge-property alias constraint must be resolved by completion")
 	}
 }
@@ -81,9 +84,9 @@ type Anchor {
 }
 `),
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load: %v", result.Err())
+	s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 
 	prop := mustEdgeProperty(t, s, "State", "TAGGED", "tag")
@@ -91,7 +94,7 @@ type Anchor {
 	if !isAlias {
 		t.Fatalf("edge property constraint is %T, want AliasConstraint", prop.Constraint())
 	}
-	if !alias.IsResolved() {
+	if !schema.TestConstraintIsResolved(alias) {
 		t.Error("imported-datatype edge-property alias must be resolved by completion")
 	}
 }
@@ -99,7 +102,7 @@ type Anchor {
 // An edge property naming an undeclared datatype is rejected at load with
 // E_UNKNOWN_TYPE, matching the type-property contract.
 func TestLoad_EdgePropertyUnknownDataTypeRejected(t *testing.T) {
-	_, result := schema.LoadString(t.Context(), `schema "geo"
+	_, err := schema.LoadString(t.Context(), `schema "geo"
 
 type State {
 	code String primary
@@ -112,18 +115,19 @@ type County {
 	}
 }
 `, "test.yammm")
-	if !result.HasErrors() {
+	if err == nil {
 		t.Fatal("an undeclared edge-property datatype must fail the load")
 	}
-	if !result.HasCode(diag.E_UNKNOWN_TYPE) {
-		t.Errorf("want E_UNKNOWN_TYPE, got: %v", result.Err())
+	if !errors.Is(err, diag.E_UNKNOWN_TYPE) {
+		t.Errorf("want E_UNKNOWN_TYPE, got: %v", err)
 	}
 }
 
 // A datatype alias that resolves to Vector cannot appear on an edge property:
 // the Vector-on-edge ban applies through aliases.
 func TestLoad_EdgePropertyVectorAliasRejected(t *testing.T) {
-	_, result := schema.LoadString(t.Context(), `schema "geo"
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "geo"
 
 type Emb = Vector [3]
 
@@ -137,19 +141,27 @@ type County {
 		e Emb
 	}
 }
-`, "test.yammm")
-	if !result.HasErrors() {
+`, "test.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(result) == nil {
 		t.Fatal("a Vector-aliased edge property must fail the load")
 	}
-	if !result.HasCode(diag.E_INVALID_CONSTRAINT) {
-		t.Errorf("want E_INVALID_CONSTRAINT, got: %v", result.Err())
+	issues := slices.Collect(result.Issues())
+	if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_EDGE_PROPERTY_TYPE {
+		t.Fatalf("want one E_INVALID_EDGE_PROPERTY_TYPE, got: %v", result)
+	}
+	if want := `relationship property "e" cannot use Vector type`; issues[0].Message() != want {
+		t.Errorf("message %q, want %q", issues[0].Message(), want)
+	}
+	if line := issues[0].Span().Start.Line; line != 12 {
+		t.Errorf("the issue stands on line %d, want the property's line 12", line)
 	}
 }
 
 // A datatype alias that resolves to List cannot appear on an edge property:
 // the List-on-edge ban applies through aliases.
 func TestLoad_EdgePropertyListAliasRejected(t *testing.T) {
-	_, result := schema.LoadString(t.Context(), `schema "geo"
+	_, err := schema.LoadString(t.Context(), `schema "geo"
 
 type Lst = List <String>
 
@@ -164,10 +176,10 @@ type County {
 	}
 }
 `, "test.yammm")
-	if !result.HasErrors() {
+	if err == nil {
 		t.Fatal("a List-aliased edge property must fail the load")
 	}
-	if !result.HasCode(diag.E_LIST_ON_EDGE) {
-		t.Errorf("want E_LIST_ON_EDGE, got: %v", result.Err())
+	if !errors.Is(err, diag.E_INVALID_EDGE_PROPERTY_TYPE) {
+		t.Errorf("want E_INVALID_EDGE_PROPERTY_TYPE, got: %v", err)
 	}
 }

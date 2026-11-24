@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"fmt"
 	"maps"
 	"strings"
@@ -32,9 +30,6 @@ merged file's own created_at forward.`,
 	}
 
 	cmd.Flags().StringP("output", "o", "", "output path for the .ys file (required unless --into is given, which defaults it to the merged file)")
-	cmd.Flags().String("from", "", "input format override: json or csv (auto-detected if not set)")
-	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
-	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
 	cmd.Flags().StringArrayP("metadata", "m", nil, "key=value metadata pair (repeatable)")
 	cmd.Flags().Bool("timestamp", false, "include created_at timestamp in header (breaks determinism)")
 	cmd.Flags().Bool("indent", false, "produce indented output for human inspection")
@@ -51,7 +46,18 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	indent, _ := cmd.Flags().GetBool("indent")
 	intoPath, _ := cmd.Flags().GetString("into")
 
-	// Validate output destination: either --output or --into must be set.
+	// A path flag given empty names no file, so it is refused rather than read
+	// as absent: -o "" with --into would otherwise overwrite the --into file.
+	if cmd.Flags().Changed("output") {
+		if err := cli.CheckOperand("output file", outputPath); err != nil {
+			return err
+		}
+	}
+	if cmd.Flags().Changed("into") {
+		if err := cli.CheckOperand("snapshot file", intoPath); err != nil {
+			return err
+		}
+	}
 	if outputPath == "" && intoPath == "" {
 		return cli.Usagef("either --output or --into is required")
 	}
@@ -66,8 +72,8 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	}
 
 	schemaPath := args[0]
-	in, err := dataInputOf(cmd, args[1:]...)
-	if err != nil {
+	dataPaths := args[1:]
+	if err := checkDataOperands(dataPaths...); err != nil {
 		return err
 	}
 
@@ -75,55 +81,35 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	if err != nil {
 		return err
 	}
-	// Judged when given, as an empty value is: it names no file either.
-	if cmd.Flags().Changed("into") {
-		if err := cli.CheckOperand("snapshot file", intoPath); err != nil {
-			return err
-		}
-	}
-
 	// Load schema.
 	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
 		return err
 	}
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+	s, loadErr := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, loadErr); err != nil {
 		return err
 	}
 
-	// Load existing snapshot if --into is set. A warning the load raises (a
-	// provenance path that falls back, say) reaches the operator whether or not
-	// this command gets as far as writing anything.
+	// Load existing snapshot if --into is set. What the load reports reaches
+	// the operator whether or not this command gets as far as writing anything.
 	var g *graph.Graph
-	var imported *snapshot.HeaderInfo
+	var imported *snapshot.Header
 	if intoPath != "" {
-		snap, header, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
-		if loadErr != nil {
-			return cli.Runtimef("%v", loadErr)
+		snap, header, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
+		if err := sink.AddSnapshot(loadErr); err != nil {
+			return err
 		}
-		sink.Add(loadResult)
-		if loadResult.HasErrors() {
-			return &cli.ExitError{Code: cli.ExitForResult(loadResult)}
-		}
-		var importResult diag.Result
-		g, importResult = graph.NewFromSnapshot(s, snap)
-		sink.Add(importResult)
-		if importResult.HasErrors() {
-			return &cli.ExitError{Code: cli.ExitForResult(importResult)}
-		}
+		g = graph.NewFromSnapshot(snap)
 		imported = header
 	}
 
-	a, err := assembleGraph(cmd, sink, s, in, g)
+	g, err = assembleGraph(cmd, sink, s, dataPaths, g)
 	if err != nil {
 		return err
 	}
-	g = a.graph
-	// The data file's own read failure rides this result for a streamed format,
-	// so the exit rule decides: an I/O failure outranks a validation one.
-	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
+	if cli.Failed(sink.Result()) {
+		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}
 
 	// Create snapshot and marshal.
@@ -132,11 +118,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	var opts []snapshot.Option
 	switch {
 	case timestamp:
-		opts = append(opts, snapshot.WithCreatedAt(time.Now()))
+		opts = append(opts, snapshot.WithCreatedAt(time.Now().UTC().Truncate(time.Second)))
 	case imported != nil:
-		// Exclusive, not additive: WithCreatedAtFrom wins over WithCreatedAt,
-		// so appending both would make --timestamp silently do nothing.
-		opts = append(opts, snapshot.WithCreatedAtFrom(imported))
+		opts = append(opts, snapshot.WithCreatedAt(imported.CreatedAt))
 	}
 	if indent {
 		opts = append(opts, snapshot.WithIndent("\t"))
@@ -145,12 +129,11 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		opts = append(opts, snapshot.WithMetadata(merged))
 	}
 
-	// Marshal reports a failure, a value it could not put on the wire included,
-	// as a diagnostic, so it reaches the sink and the exit rule decides.
-	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
-	sink.Add(marshalResult)
-	if marshalResult.Err() != nil {
-		return &cli.ExitError{Code: cli.ExitForResult(marshalResult)}
+	// Marshal reports a failure as a diagnostic, so it reaches the sink and the
+	// exit rule decides.
+	data, marshalErr := snapshot.Marshal(cmd.Context(), snap, opts...)
+	if err := sink.AddSnapshot(marshalErr); err != nil {
+		return err
 	}
 
 	// One primitive whether or not --into names the same file, so the write is
@@ -162,39 +145,19 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// Raised only once the file exists: the code states that a snapshot was
 	// written where a reader that discovers snapshots by extension will not find it.
 	if !strings.HasSuffix(outputPath, ".ys") {
-		c := diag.NewCollectorUnlimited()
+		c := diag.NewCollector(diag.NoLimit)
 		c.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_EXTENSION,
 			fmt.Sprintf("output path %q does not use the .ys extension", outputPath)).
 			WithPath(outputPath, "").Build())
 		sink.Add(c.Result())
 	}
-
-	// Every diagnostic this invocation can produce is in the sink by now, so
-	// flushing here keeps them above the line that says the work finished.
-	sink.Flush()
-	instanceCount, typeCount := countSnapshot(cmd.Context(), snap, data)
-	sink.Statusf("saved snapshot: %d instances of %d types\n", instanceCount, typeCount)
-
 	return nil
-}
-
-// countSnapshot counts what the written document holds: its root instances
-// from the graph, and its types from the type table the bytes carry, which
-// lists a composed child's type and is the set `snapshot info` reports.
-func countSnapshot(ctx context.Context, snap *graph.Snapshot, data []byte) (instances, types int) {
-	for _, id := range snap.Types() {
-		instances += len(snap.InstancesOf(id))
-	}
-	if header, _ := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data)); header != nil {
-		types = len(header.Types)
-	}
-	return instances, types
 }
 
 // mergeMetadata overlays flag pairs onto the imported header's. The header's
 // annotations survive a merge that does not name them, and a flag wins on a
 // key that appears in both.
-func mergeMetadata(imported *snapshot.HeaderInfo, flags map[string]string) map[string]string {
+func mergeMetadata(imported *snapshot.Header, flags map[string]string) map[string]string {
 	merged := make(map[string]string, len(flags))
 	if imported != nil {
 		maps.Copy(merged, imported.Metadata)

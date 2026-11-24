@@ -14,20 +14,16 @@ import (
 //
 // Direct struct literal construction bypasses validity checks and will cause
 // panics when the issue is collected via [Collector.Collect].
-//
-// Zero-value note: The Go zero value for Severity is Fatal (value 0). When
-// constructing Issue literals in tests, set severity explicitly to avoid
-// unintentionally creating Fatal issues.
 type Issue struct {
-	span       location.Span          // source location; check HasSpan() or span.IsZero()
-	sourceName string                 // instance provenance label (e.g., "data.json")
-	path       string                 // canonical instance path (e.g., "$.Car[0].regNbr")
-	severity   Severity               // issue severity level
-	code       Code                   // stable programmatic identifier
-	message    string                 // human-readable description (no embedded locations)
-	hint       string                 // optional resolution suggestion
-	related    []location.RelatedInfo // additional locations (e.g., "previous definition here")
-	details    []Detail               // additional key-value context
+	span       location.Span // source location; check HasSpan() or span.IsZero()
+	sourceName string        // instance provenance label (e.g., "data.json")
+	path       string        // instance path (e.g., "$.Car[0].regNbr")
+	severity   Severity      // issue severity level
+	code       Code          // stable programmatic identifier
+	message    string        // human-readable description
+	hint       string        // optional resolution suggestion
+	related    []RelatedInfo // additional locations (e.g., "previous definition here")
+	details    []Detail      // additional key-value context
 }
 
 // Severity returns the issue's severity level.
@@ -42,8 +38,8 @@ func (i Issue) Code() Code {
 
 // Message returns the human-readable description.
 //
-// Messages should not contain embedded locations; use [Issue.Span],
-// [Issue.SourceName], and [Issue.Path] for location information.
+// A message can name a path or a line, but [Issue.Span], [Issue.SourceName]
+// and [Issue.Path] carry the issue's own location as data.
 func (i Issue) Message() string {
 	return i.message
 }
@@ -63,7 +59,7 @@ func (i Issue) SourceName() string {
 	return i.sourceName
 }
 
-// Path returns the canonical instance path.
+// Path returns the instance path, as the validator was given or built it.
 //
 // This is a JSONPath-like path identifying the location within instance data
 // (e.g., "$.Car[0].regNbr").
@@ -96,7 +92,8 @@ func (i Issue) IsZero() bool {
 // An issue is valid if it has:
 //   - A valid code (not zero)
 //   - A non-empty message
-//   - A valid severity (not an undefined value like Severity(255))
+//   - A valid severity, Fatal through Hint (not the zero Severity or an
+//     undefined value like Severity(255))
 //
 // [IssueBuilder.Build], [FromIssue] and every [Collector] method that takes an
 // issue directly — [Collector.Collect], [Collector.CollectAll],
@@ -107,7 +104,7 @@ func (i Issue) IsZero() bool {
 func (i Issue) IsValid() bool {
 	return !i.code.IsZero() &&
 		i.message != "" &&
-		i.severity <= Hint // Hint (4) is the highest valid severity value
+		i.severity >= Fatal && i.severity <= Hint
 }
 
 // Related returns a copy of the related location information.
@@ -119,11 +116,11 @@ func (i Issue) IsValid() bool {
 // (e.g., import cycles, call chains), slice order is significant: index 0
 // is the first step, index N-1 is the last. For unordered collections,
 // order is arbitrary but stable.
-func (i Issue) Related() []location.RelatedInfo {
+func (i Issue) Related() []RelatedInfo {
 	if len(i.related) == 0 {
 		return nil
 	}
-	cp := make([]location.RelatedInfo, len(i.related))
+	cp := make([]RelatedInfo, len(i.related))
 	copy(cp, i.related)
 	return cp
 }
@@ -141,39 +138,19 @@ func (i Issue) Details() []Detail {
 	return cp
 }
 
-// Clone returns a deep copy of the issue.
-//
-// INVARIANT: All slice element types (RelatedInfo, Detail) must not contain
-// mutable reference fields (maps, slices, pointers, funcs, chans). Strings
-// are permitted (immutable). If mutable reference fields are ever added to
-// these types, this method must be updated to deep-copy their targets to
-// preserve immutability guarantees.
-func (i Issue) Clone() Issue {
-	clone := i
-	if len(i.related) > 0 {
-		clone.related = make([]location.RelatedInfo, len(i.related))
-		copy(clone.related, i.related)
-	}
-	if len(i.details) > 0 {
-		clone.details = make([]Detail, len(i.details))
-		copy(clone.details, i.details)
-	}
-	return clone
-}
-
 // LogValue implements [slog.LogValuer] for structured logging.
 //
 // Returns a GroupValue with the following attributes:
 //
 //   - "severity" (string): one of "fatal", "error", "warning", "info",
 //     "hint" — matches [Severity.String] and is part of the wire-format
-//     stability guarantee. Always emitted.
+//     stability guarantee; the zero Issue's is "unknown". Always emitted.
 //   - "message" (string): the human-readable description. Always emitted.
 //   - "code" (string): the stable [Code] identifier. Omitted when
 //     [Code.IsZero] is true.
 //   - "source_name" (string): the document the issue came from. Omitted when
 //     empty.
-//   - "path" (string): the canonical instance path. Omitted when empty.
+//   - "path" (string): the instance path. Omitted when empty.
 //   - "location" (group): {source, line, column} derived from the issue's
 //     span. Omitted when [Issue.HasSpan] is false.
 //   - "hint" (string): the optional remediation hint. Omitted when empty.
@@ -185,7 +162,7 @@ func (i Issue) Clone() Issue {
 //	logger.LogAttrs(ctx, slog.LevelError, "validation failed",
 //	    slog.Any("issue", issue))
 //
-// For the issues-slice shape surfaced by [ContextualError.LogValue],
+// For the issues-slice shape surfaced by [ResultError.LogValue],
 // each entry is materialized via [issueLogMap] (not [Issue.LogValue]) so that
 // [slog.JSONHandler] and other encoding/json-based handlers render a
 // JSON array of objects; slog does not recurse through [slog.LogValuer]
@@ -230,7 +207,7 @@ func (i Issue) LogValue() slog.Value {
 // issueLogMap is the map-shaped sibling of [Issue.LogValue].
 //
 // The two produce the same structural shape; the map form is used by
-// [ContextualError.LogValue] to populate the "issues" slice because
+// [ResultError.LogValue] to populate the "issues" slice because
 // slog handlers do not recurse through [slog.LogValuer] within slice
 // elements — passing []slog.Value would make handlers that route
 // through encoding/json (notably [slog.JSONHandler]) emit empty objects

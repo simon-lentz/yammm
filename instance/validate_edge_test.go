@@ -1,6 +1,8 @@
 package instance_test
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -8,42 +10,55 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // fkSchema builds the canonical two-type FK schema — Company(id) plus
 // Person(id) with an "employer" relation to Company — parameterized on the
 // relation's (optional, many) multiplicity.
-func fkSchema(t *testing.T, optional, many bool) *schema.Schema {
+func fkSchema(t *testing.T, optional, many bool) schema.Schema {
 	t.Helper()
-	return mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), optional, many).
-		Done())
+	multiplicity := "one"
+	switch {
+	case optional && many:
+		multiplicity = "many"
+	case optional:
+		multiplicity = "_:one"
+	case many:
+		multiplicity = "one:many"
+	}
+	return mustLoad(t, fmt.Sprintf(`schema "test"
+
+type Company {
+	id String primary
+}
+
+type Person {
+	id String primary
+	--> EMPLOYER (%s) Company
+}
+`, multiplicity))
 }
 
 // compositeFKSchema builds the canonical composite-PK FK schema —
 // Enrollment(region, studentId) plus Person(id) with an optional-one
 // "enrollment" relation to Enrollment.
-func compositeFKSchema(t *testing.T) *schema.Schema {
+func compositeFKSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	return mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Enrollment").
-		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("ENROLLMENT", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
-		Done())
+	return mustLoad(t, `schema "test"
+
+type Enrollment {
+	region String primary
+	studentId String primary
+}
+
+type Person {
+	id String primary
+	--> ENROLLMENT (_:one) Enrollment
+}
+`)
 }
 
 // issueProjection renders a result's issues as a stable, JSON-serializable
@@ -77,16 +92,16 @@ func TestValidateEdges_SingleFK(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
-	assert.Len(t, edge.Targets(), 1)
-	assert.Equal(t, `["42"]`, edge.Targets()[0].TargetKey().String())
+	require.False(t, edge.IsZero())
+	assert.Len(t, slices.Collect(edge.Targets()), 1)
+	assert.Equal(t, `["42"]`, slices.Collect(edge.Targets())[0].TargetKey().String())
 }
 
 func TestValidateEdges_Many(t *testing.T) {
@@ -105,15 +120,15 @@ func TestValidateEdges_Many(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
-	assert.Len(t, edge.Targets(), 3)
+	require.False(t, edge.IsZero())
+	assert.Len(t, slices.Collect(edge.Targets()), 3)
 }
 
 func TestValidateEdges_Optional_Nil(t *testing.T) {
@@ -128,15 +143,15 @@ func TestValidateEdges_Optional_Nil(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 
 	// No edge should be present
 	edge, ok := valid.Edge("EMPLOYER")
 	assert.False(t, ok)
-	assert.Nil(t, edge)
+	assert.True(t, edge.IsZero())
 }
 
 func TestValidateEdges_Required_Absent(t *testing.T) {
@@ -154,15 +169,15 @@ func TestValidateEdges_Required_Absent(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 
 	// No edge data should be present
 	edge, ok := valid.Edge("EMPLOYER")
 	assert.False(t, ok)
-	assert.Nil(t, edge)
+	assert.True(t, edge.IsZero())
 }
 
 func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
@@ -177,10 +192,12 @@ func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "expected object")
 }
 
@@ -196,10 +213,12 @@ func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "expected array")
 }
 
@@ -215,10 +234,12 @@ func TestValidateEdges_MissingFK(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "_target_id")
 }
 
@@ -237,36 +258,18 @@ func TestValidateEdges_UnknownField(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "unknown field")
 }
 
-func TestValidateEdges_UnknownField_Allowed(t *testing.T) {
-	s := fkSchema(t, true, false)
-
-	validator := instance.NewValidator(s, instance.WithAllowUnknownFields(true))
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id": "1",
-			"employer": map[string]any{
-				"_target_id":    "42",
-				"unknown_field": "value", // Should be ignored
-			},
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
-}
-
 func TestValidateEdges_EdgePropertyValidation(t *testing.T) {
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "test"
 type Company {
     id String primary
 }
@@ -275,8 +278,9 @@ type Person {
     --> EMPLOYER (_) Company {
         role String required
     }
-}`, "test.yammm")
-	require.False(t, result.HasErrors(), "schema: %s", result)
+}`, "test.yammm", schema.WithWarnings(warn))
+	})
+	require.NoError(t, diagtest.Err(result), "schema: %s", result)
 
 	validator := instance.NewValidator(s)
 
@@ -290,26 +294,29 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, diagtest.Err(result))
+	require.False(t, valid.IsZero())
 
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
-	assert.Len(t, edge.Targets(), 1)
+	require.False(t, edge.IsZero())
+	assert.Len(t, slices.Collect(edge.Targets()), 1)
 
 	// Check edge property
-	roleVal, ok := edge.Targets()[0].Properties().Get("role")
+	roleVal, ok := slices.Collect(edge.Targets())[0].Properties().Get("role")
 	require.True(t, ok)
-	role, ok := roleVal.String()
+	role, ok := roleVal.AsString()
 	require.True(t, ok)
 	assert.Equal(t, "engineer", role)
 }
 
 func TestValidateEdges_MissingRequiredEdgeProperty(t *testing.T) {
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "test"
 type Company {
     id String primary
 }
@@ -318,8 +325,9 @@ type Person {
     --> EMPLOYER (_) Company {
         role String required
     }
-}`, "test.yammm")
-	require.False(t, result.HasErrors(), "schema: %s", result)
+}`, "test.yammm", schema.WithWarnings(warn))
+	})
+	require.NoError(t, diagtest.Err(result), "schema: %s", result)
 
 	validator := instance.NewValidator(s)
 
@@ -333,15 +341,18 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "missing required edge property")
 }
 
 func TestValidateEdges_EdgePropertyInvalid(t *testing.T) {
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "test"
 type Company {
     id String primary
 }
@@ -350,8 +361,9 @@ type Person {
     --> EMPLOYER (_) Company {
         rating Integer required
     }
-}`, "test.yammm")
-	require.False(t, result.HasErrors(), "schema: %s", result)
+}`, "test.yammm", schema.WithWarnings(warn))
+	})
+	require.NoError(t, diagtest.Err(result), "schema: %s", result)
 
 	validator := instance.NewValidator(s)
 
@@ -365,10 +377,12 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "rating")
 }
 
@@ -386,10 +400,12 @@ func TestValidateEdges_FKTypeMismatch(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "_target_id")
 }
 
@@ -407,10 +423,12 @@ func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "expected object for edge target")
 }
 
@@ -426,15 +444,15 @@ func TestValidateEdges_OptionalEdgeWithEmptyArray(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 
 	// Edge should be present but empty
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
+	require.False(t, edge.IsZero())
 	assert.True(t, edge.IsEmpty())
 }
 
@@ -453,15 +471,15 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 
 	// Edge should be present but empty
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
+	require.False(t, edge.IsZero())
 	assert.True(t, edge.IsEmpty())
 }
 
@@ -480,17 +498,17 @@ func TestValidateEdges_CompositeFK(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid.IsZero())
 
 	edge, ok := valid.Edge("ENROLLMENT")
 	require.True(t, ok)
-	require.NotNil(t, edge)
-	assert.Len(t, edge.Targets(), 1)
+	require.False(t, edge.IsZero())
+	assert.Len(t, slices.Collect(edge.Targets()), 1)
 	// Key should have both components
-	assert.Equal(t, 2, edge.Targets()[0].TargetKey().Len())
+	assert.Equal(t, 2, slices.Collect(edge.Targets())[0].TargetKey().Len())
 }
 
 func TestValidateEdges_PartialCompositeFK(t *testing.T) {
@@ -508,37 +526,22 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "incomplete composite FK")
 }
 
 // TestValidateEdges_FKFieldCase verifies that FK field matching follows the
-// one fold rule every input key follows: a case variant matches under the
-// default mode and does not under WithStrictPropertyNames.
+// rule every input key follows: the declared spelling alone matches.
 func TestValidateEdges_FKFieldCase(t *testing.T) {
 	s := fkSchema(t, true, false)
 
-	t.Run("case_variant_matches_without_strict_mode", func(t *testing.T) {
+	t.Run("wrong_case_fails", func(t *testing.T) {
 		validator := instance.NewValidator(s)
-
-		raw := instance.RawInstance{
-			Properties: map[string]any{
-				"id":       "1",
-				"employer": map[string]any{"_target_ID": "42"},
-			},
-		}
-
-		valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-		require.True(t, result.OK(), result.String())
-		require.NotNil(t, valid, "_target_ID folds to _target_id under the default mode")
-	})
-
-	t.Run("wrong_case_fails_with_strict_mode", func(t *testing.T) {
-		validator := instance.NewValidator(s, instance.WithStrictPropertyNames(true))
 
 		raw := instance.RawInstance{
 			Properties: map[string]any{
@@ -548,10 +551,12 @@ func TestValidateEdges_FKFieldCase(t *testing.T) {
 			},
 		}
 
-		valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+		valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return validator.ValidateOne(t.Context(), "Person", raw)
+		})
 
-		assert.Nil(t, valid, "Should fail: _Target_id != _target_id (case-sensitive)")
-		require.False(t, result.OK())
+		assert.True(t, valid.IsZero(), "Should fail: _Target_id != _target_id (case-sensitive)")
+		require.Error(t, diagtest.Err(result))
 		assert.Contains(t, result.String(), "missing FK field")
 	})
 
@@ -565,77 +570,11 @@ func TestValidateEdges_FKFieldCase(t *testing.T) {
 			},
 		}
 
-		valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+		valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-		require.True(t, result.OK())
-		require.NotNil(t, valid, "Should succeed: exact case match")
+		require.NoError(t, err)
+		require.False(t, valid.IsZero(), "Should succeed: exact case match")
 	})
-}
-
-func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
-	// Per architecture spec: null is always a shape error, even for optional associations.
-	s := fkSchema(t, true, false)
-
-	validator := instance.NewValidator(s)
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":       "1",
-			"employer": nil, // Explicit null - always a shape error
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
-	assert.Contains(t, result.String(), "null is not a valid edge value")
-
-	yammmtest.GoldenJSON(t, "edge_diag_null_optional", issueProjection(result))
-}
-
-func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
-	// Per architecture spec: null is always a shape error.
-	s := fkSchema(t, false, false)
-
-	validator := instance.NewValidator(s)
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":       "1",
-			"employer": nil, // Explicit null - always a shape error
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
-	assert.Contains(t, result.String(), "null is not a valid edge value")
-
-	yammmtest.GoldenJSON(t, "edge_diag_null_required", issueProjection(result))
-}
-
-func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
-	// Per architecture spec: null is always a shape error (expects array).
-	s := fkSchema(t, true, true)
-
-	validator := instance.NewValidator(s)
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":       "1",
-			"employer": nil, // Explicit null - expects array
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
-	assert.Contains(t, result.String(), "null is not a valid edge value")
-
-	yammmtest.GoldenJSON(t, "edge_diag_null_many", issueProjection(result))
 }
 
 func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
@@ -651,10 +590,12 @@ func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	yammmtest.GoldenJSON(t, "edge_diag_fk_missing_all", issueProjection(result))
 }
@@ -674,10 +615,12 @@ func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	yammmtest.GoldenJSON(t, "edge_diag_fk_partial", issueProjection(result))
 }
@@ -698,10 +641,12 @@ func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	assert.Contains(t, result.String(), "null")
 	yammmtest.GoldenJSON(t, "edge_diag_single_fk_null", issueProjection(result))
@@ -724,10 +669,12 @@ func TestValidateEdges_CompositeFK_OneNullOneValid(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	assert.Contains(t, result.String(), "_target_region")
 	yammmtest.GoldenJSON(t, "edge_diag_composite_one_null_one_valid", issueProjection(result))
@@ -750,10 +697,12 @@ func TestValidateEdges_CompositeFK_OneNullOneMissing(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	assert.Contains(t, result.String(), "_target_region")
 	yammmtest.GoldenJSON(t, "edge_diag_composite_one_null_one_missing", issueProjection(result))
@@ -776,10 +725,12 @@ func TestValidateEdges_CompositeFK_OneNullOneInvalidType(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	yammmtest.GoldenJSON(t, "edge_diag_composite_both_invalid", issueProjection(result))
 }
@@ -802,10 +753,12 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	assert.Nil(t, valid)
-	require.False(t, result.OK())
+	assert.True(t, valid.IsZero())
+	require.Error(t, diagtest.Err(result))
 
 	yammmtest.GoldenJSON(t, "edge_diag_composite_one_invalid_one_missing", issueProjection(result))
 }
@@ -996,23 +949,23 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 				Properties: props,
 			}
 
-			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+			valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tc.expectSuccess {
-				require.True(t, result.OK(), "%s: should succeed but got failure", tc.description)
-				require.NotNil(t, valid, "%s: should have valid instance", tc.description)
+				require.NoError(t, err, "%s: should succeed but got failure", tc.description)
+				require.False(t, valid.IsZero(), "%s: should have valid instance", tc.description)
 
 				edge, ok := valid.Edge("EMPLOYER")
 				if tc.expectEdges > 0 {
 					require.True(t, ok, "%s: should have edge", tc.description)
-					assert.Len(t, edge.Targets(), tc.expectEdges, "%s: edge count", tc.description)
+					assert.Len(t, slices.Collect(edge.Targets()), tc.expectEdges, "%s: edge count", tc.description)
 				} else if ok {
 					// Zero edges means either no edge data or empty
-					assert.Empty(t, edge.Targets(), "%s: should have 0 targets", tc.description)
+					assert.Empty(t, slices.Collect(edge.Targets()), "%s: should have 0 targets", tc.description)
 				}
 			} else {
-				assert.Nil(t, valid, "%s: should fail but got valid", tc.description)
-				require.False(t, result.OK(), "%s: should have failure", tc.description)
+				assert.True(t, valid.IsZero(), "%s: should fail but got valid", tc.description)
+				require.Error(t, err, "%s: should have failure", tc.description)
 			}
 		})
 	}
@@ -1023,7 +976,7 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 // valid values pass, constraint-violating values fail with E_CONSTRAINT_FAIL —
 // exactly like a DataType-typed type property.
 func TestValidateEdges_DataTypeEdgeProperty(t *testing.T) {
-	s, result := schema.LoadString(t.Context(), `schema "geo"
+	s, err := schema.LoadString(t.Context(), `schema "geo"
 type StateCode = String [2, 2]
 type State {
     code StateCode primary
@@ -1034,7 +987,7 @@ type County {
         code_tag StateCode
     }
 }`, "test.yammm")
-	require.False(t, result.HasErrors(), "schema: %s", result)
+	require.NoError(t, err, "schema: %s", err)
 
 	validator := instance.NewValidator(s)
 
@@ -1048,15 +1001,15 @@ type County {
 				},
 			},
 		}
-		valid, result := validator.ValidateOne(t.Context(), "County", raw)
-		require.True(t, result.OK(), "valid DataType edge-property value must validate: %s", result)
-		require.NotNil(t, valid)
+		valid, err := validator.ValidateOne(t.Context(), "County", raw)
+		require.NoError(t, err, "valid DataType edge-property value must validate: %s", err)
+		require.False(t, valid.IsZero())
 
 		edge, ok := valid.Edge("IN_STATE")
 		require.True(t, ok)
-		tagVal, ok := edge.Targets()[0].Properties().Get("code_tag")
+		tagVal, ok := slices.Collect(edge.Targets())[0].Properties().Get("code_tag")
 		require.True(t, ok)
-		tag, ok := tagVal.String()
+		tag, ok := tagVal.AsString()
 		require.True(t, ok)
 		assert.Equal(t, "CA", tag)
 	})
@@ -1071,10 +1024,10 @@ type County {
 				},
 			},
 		}
-		valid, result := validator.ValidateOne(t.Context(), "County", raw)
-		assert.Nil(t, valid)
-		require.False(t, result.OK())
-		assert.True(t, result.HasCode(instance.ErrConstraintFail),
-			"want E_CONSTRAINT_FAIL, got: %s", result)
+		valid, err := validator.ValidateOne(t.Context(), "County", raw)
+		assert.True(t, valid.IsZero())
+		require.Error(t, err)
+		require.ErrorIs(t, err, diag.E_CONSTRAINT_FAIL,
+			"want E_CONSTRAINT_FAIL, got: %s", err)
 	})
 }

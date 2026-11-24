@@ -1,18 +1,21 @@
 package instance_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // nullEdgePropSchema declares one required and one optional edge property so a
 // single fixture covers both halves of the null rule.
-func nullEdgePropSchema(t *testing.T) *schema.Schema {
+func nullEdgePropSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, err := schema.LoadString(t.Context(), `schema "test"
 type Company {
     id String primary
 }
@@ -23,23 +26,25 @@ type Person {
         note String
     }
 }`, "test.yammm")
-	if result.HasErrors() {
-		t.Fatalf("schema: %s", result)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
 
 // validateEmployer validates one Person carrying the given edge object.
-func validateEmployer(t *testing.T, s *schema.Schema, employer map[string]any) (*instance.ValidInstance, string) {
+func validateEmployer(t *testing.T, s schema.Schema, employer map[string]any) (instance.ValidInstance, string) {
 	t.Helper()
-	valid, result := instance.NewValidator(s).ValidateOne(t.Context(), "Person", instance.RawInstance{
-		Properties: map[string]any{"id": "1", "employer": employer},
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "Person", instance.RawInstance{
+			Properties: map[string]any{"id": "1", "employer": employer},
+		})
 	})
 	return valid, result.String()
 }
 
 // An explicit null does not satisfy a required edge property. The required
-// check tested key presence while CheckValue and CoerceValue both accept nil,
+// check tested key presence while value.Check and value.Coerce both accept nil,
 // so writing the key with a nil value was enough to pass it — the one slot of
 // the four where null was ACCEPTED rather than rejected or dropped.
 //
@@ -49,11 +54,24 @@ func TestEdgeNullProperty_ExplicitNullDoesNotSatisfyRequired(t *testing.T) {
 	valid, detail := validateEmployer(t, nullEdgePropSchema(t),
 		map[string]any{"_target_id": "42", "role": nil})
 
-	if valid != nil {
+	if !valid.IsZero() {
 		t.Error("an explicit null satisfied a required edge property")
 	}
 	if !strings.Contains(detail, "missing required edge property") {
 		t.Errorf("wrong diagnostic: %s", detail)
+	}
+}
+
+// A required edge property the object leaves out is E_MISSING_REQUIRED, the
+// code a missing required property of the instance itself draws.
+func TestEdgeNullProperty_AMissingRequiredPropertyIsMissingRequired(t *testing.T) {
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(nullEdgePropSchema(t)).ValidateOne(t.Context(), "Person", instance.RawInstance{
+			Properties: map[string]any{"id": "1", "employer": map[string]any{"_target_id": "42"}},
+		})
+	})
+	if got := res.CodeCounts(diag.Error); len(got) != 1 || got[diag.E_MISSING_REQUIRED] != 1 {
+		t.Errorf("error codes = %v, want one E_MISSING_REQUIRED: %s", got, res)
 	}
 }
 
@@ -77,17 +95,17 @@ func TestEdgeNullProperty_OptionalNullIsDropped(t *testing.T) {
 	valid, detail := validateEmployer(t, nullEdgePropSchema(t),
 		map[string]any{"_target_id": "42", "role": "engineer", "note": nil})
 
-	if valid == nil {
+	if valid.IsZero() {
 		t.Fatalf("an optional null should validate: %s", detail)
 	}
 	edge, ok := valid.Edge("EMPLOYER")
 	if !ok {
 		t.Fatal("the EMPLOYER edge is missing")
 	}
-	if len(edge.Targets()) != 1 {
-		t.Fatalf("got %d targets, want 1", len(edge.Targets()))
+	if len(slices.Collect(edge.Targets())) != 1 {
+		t.Fatalf("got %d targets, want 1", len(slices.Collect(edge.Targets())))
 	}
-	if _, present := edge.Targets()[0].Properties().Get("note"); present {
+	if _, present := slices.Collect(edge.Targets())[0].Properties().Get("note"); present {
 		t.Error("an optional edge property set to null was stored rather than dropped")
 	}
 }
@@ -99,7 +117,7 @@ func TestEdgeNullProperty_FKSlotRuleIsUnchanged(t *testing.T) {
 	valid, detail := validateEmployer(t, nullEdgePropSchema(t),
 		map[string]any{"_target_id": nil, "role": "engineer"})
 
-	if valid != nil {
+	if !valid.IsZero() {
 		t.Fatal("a null FK component validated")
 	}
 	if !strings.Contains(detail, "got null") {

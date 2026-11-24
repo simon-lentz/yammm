@@ -1,17 +1,16 @@
 package graph_test
 
 import (
-	"context"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -20,34 +19,33 @@ import (
 // These helpers create schemas for specific test scenarios.
 
 // testSchemaWithAssociation creates a schema with Person -> Company association.
-func testSchemaWithAssociation(t *testing.T) *schema.Schema {
+func testSchemaWithAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("association").
-		WithSourceID(location.MustNewSourceID("test://association.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), false, false). // required one
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "association"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build association schema: %s", result.String())
+type Company {
+	id String primary
+	name String required
+}
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (one) Company
+}
+`, "association.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build association schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithEdgeProperties is testSchemaWithAssociation with EMPLOYER
 // declaring the edge properties role and since.
-func testSchemaWithEdgeProperties(t *testing.T) *schema.Schema {
+func testSchemaWithEdgeProperties(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "association"
+	s, err := schema.LoadString(t.Context(), `schema "association"
 
 type Company {
 	id String primary
@@ -63,317 +61,300 @@ type Person {
 	}
 }
 `, "association.yammm")
-	if result.HasErrors() {
-		t.Fatalf("Failed to load edge-property schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to load edge-property schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithOptionalAssociation creates a schema with Person -> Company optional association.
-func testSchemaWithOptionalAssociation(t *testing.T) *schema.Schema {
+func testSchemaWithOptionalAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("optional_association").
-		WithSourceID(location.MustNewSourceID("test://optional_association.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), true, false). // optional one
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "optional_association"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build optional association schema: %s", result.String())
+type Company {
+	id String primary
+	name String required
+}
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (_:one) Company
+}
+`, "optional_association.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build optional association schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithManyAssociation creates a schema with Person -> Company many association.
-func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
+func testSchemaWithManyAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("many_association").
-		WithSourceID(location.MustNewSourceID("test://many_association.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("EMPLOYERS", schema.LocalTypeRef("Company", location.Span{}), false, true). // required many
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "many_association"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build many association schema: %s", result.String())
+type Company {
+	id String primary
+	name String required
+}
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYERS (one:many) Company
+}
+`, "many_association.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build many association schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithChainedAssociations creates A -> B -> C chain.
-func testSchemaWithChainedAssociations(t *testing.T) *schema.Schema {
+func testSchemaWithChainedAssociations(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("chained").
-		WithSourceID(location.MustNewSourceID("test://chained.yammm")).
-		AddType("TypeC").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("TypeB").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("REF_C", schema.LocalTypeRef("TypeC", location.Span{}), false, false).
-		Done().
-		AddType("TypeA").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("REF_B", schema.LocalTypeRef("TypeB", location.Span{}), false, false).
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "chained"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build chained schema: %s", result.String())
+type TypeC {
+	id String primary
+	name String required
+}
+
+type TypeB {
+	id String primary
+	name String required
+	--> REF_C (one) TypeC
+}
+
+type TypeA {
+	id String primary
+	name String required
+	--> REF_B (one) TypeB
+}
+`, "chained.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build chained schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithComposition creates a schema with Parent -> Child composition.
-func testSchemaWithComposition(t *testing.T) *schema.Schema {
+func testSchemaWithComposition(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("composition").
-		WithSourceID(location.MustNewSourceID("test://composition.yammm")).
-		AddType("Child").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Parent").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("CHILDREN", schema.LocalTypeRef("Child", location.Span{}), true, true). // optional many
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "composition"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build composition schema: %s", result.String())
+part type Child {
+	id String primary
+	name String required
+}
+
+type Parent {
+	id String primary
+	name String required
+	*-> CHILDREN (many) Child
+}
+`, "composition.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build composition schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithOneComposition creates a schema with Parent -> Child (one) composition.
-func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
+func testSchemaWithOneComposition(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("one_composition").
-		WithSourceID(location.MustNewSourceID("test://one_composition.yammm")).
-		AddType("Child").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Parent").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("CHILD", schema.LocalTypeRef("Child", location.Span{}), true, false). // optional one
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "one_composition"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build one composition schema: %s", result.String())
+part type Child {
+	id String primary
+	name String required
+}
+
+type Parent {
+	id String primary
+	name String required
+	*-> CHILD (_:one) Child
+}
+`, "one_composition.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build one composition schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithPKLessChild creates a schema with PKless child composition.
-func testSchemaWithPKLessChild(t *testing.T) *schema.Schema {
+func testSchemaWithPKLessChild(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("pkless").
-		WithSourceID(location.MustNewSourceID("test://pkless.yammm")).
-		AddType("Item").
-		AsPart().
-		WithProperty("value", schema.StringConstraint{}).
-		Done().
-		AddType("Container").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("ITEMS", schema.LocalTypeRef("Item", location.Span{}), true, true).
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "pkless"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build pkless schema: %s", result.String())
+part type Item {
+	value String required
+}
+
+type Container {
+	id String primary
+	name String required
+	*-> ITEMS (many) Item
+}
+`, "pkless.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build pkless schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithNestedComposition creates a schema with nested compositions.
-func testSchemaWithNestedComposition(t *testing.T) *schema.Schema {
+func testSchemaWithNestedComposition(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("nested").
-		WithSourceID(location.MustNewSourceID("test://nested.yammm")).
-		AddType("GrandChild").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Child").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("GRAND_CHILDREN", schema.LocalTypeRef("GrandChild", location.Span{}), true, true).
-		Done().
-		AddType("Parent").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("CHILDREN", schema.LocalTypeRef("Child", location.Span{}), true, true).
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "nested"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build nested schema: %s", result.String())
+part type GrandChild {
+	id String primary
+	name String required
+}
+
+part type Child {
+	id String primary
+	name String required
+	*-> GRAND_CHILDREN (many) GrandChild
+}
+
+type Parent {
+	id String primary
+	name String required
+	*-> CHILDREN (many) Child
+}
+`, "nested.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build nested schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithMultipleCompositions creates a schema with multiple composition relations.
-func testSchemaWithMultipleCompositions(t *testing.T) *schema.Schema {
+func testSchemaWithMultipleCompositions(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("multi_comp").
-		WithSourceID(location.MustNewSourceID("test://multi_comp.yammm")).
-		AddType("Note").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("text", schema.StringConstraint{}).
-		Done().
-		AddType("Tag").
-		AsPart().
-		WithPrimaryKey("name", schema.StringConstraint{}).
-		Done().
-		AddType("Document").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("title", schema.StringConstraint{}).
-		WithComposition("NOTES", schema.LocalTypeRef("Note", location.Span{}), true, true).
-		WithComposition("TAGS", schema.LocalTypeRef("Tag", location.Span{}), true, true).
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "multi_comp"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build multi composition schema: %s", result.String())
+part type Note {
+	id String primary
+	text String required
+}
+
+part type Tag {
+	name String primary
+}
+
+type Document {
+	id String primary
+	title String required
+	*-> NOTES (many) Note
+	*-> TAGS (many) Tag
+}
+`, "multi_comp.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build multi composition schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithCompositeKey creates a schema with composite primary key.
-func testSchemaWithCompositeKey(t *testing.T) *schema.Schema {
+func testSchemaWithCompositeKey(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("composite").
-		WithSourceID(location.MustNewSourceID("test://composite.yammm")).
-		AddType("Record").
-		WithPrimaryKey("region", schema.StringConstraint{}).
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("value", schema.StringConstraint{}).
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "composite"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build composite key schema: %s", result.String())
+type Record {
+	region String primary
+	id String primary
+	value String required
+}
+`, "composite.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build composite key schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithMutualAssociations creates TypeA <-> TypeB mutual associations (A→B→A cycle).
-func testSchemaWithMutualAssociations(t *testing.T) *schema.Schema {
+func testSchemaWithMutualAssociations(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("mutual").
-		WithSourceID(location.MustNewSourceID("test://mutual.yammm")).
-		AddType("TypeA").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("REF_B", schema.LocalTypeRef("TypeB", location.Span{}), true, false). // optional one
-		Done().
-		AddType("TypeB").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("REF_A", schema.LocalTypeRef("TypeA", location.Span{}), true, false). // optional one
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "mutual"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build mutual associations schema: %s", result.String())
+type TypeA {
+	id String primary
+	name String required
+	--> REF_B (_:one) TypeB
+}
+
+type TypeB {
+	id String primary
+	name String required
+	--> REF_A (_:one) TypeA
+}
+`, "mutual.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build mutual associations schema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithCircularChain creates A → B → C → A circular chain.
-func testSchemaWithCircularChain(t *testing.T) *schema.Schema {
+func testSchemaWithCircularChain(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("circular").
-		WithSourceID(location.MustNewSourceID("test://circular.yammm")).
-		AddType("TypeA").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("REF_B", schema.LocalTypeRef("TypeB", location.Span{}), true, false).
-		Done().
-		AddType("TypeB").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("REF_C", schema.LocalTypeRef("TypeC", location.Span{}), true, false).
-		Done().
-		AddType("TypeC").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("REF_A", schema.LocalTypeRef("TypeA", location.Span{}), true, false).
-		Done().
-		Build()
+	s, err := schema.LoadString(t.Context(), `schema "circular"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build circular chain schema: %s", result.String())
+type TypeA {
+	id String primary
+	name String required
+	--> REF_B (_:one) TypeB
+}
+
+type TypeB {
+	id String primary
+	name String required
+	--> REF_C (_:one) TypeC
+}
+
+type TypeC {
+	id String primary
+	name String required
+	--> REF_A (_:one) TypeA
+}
+`, "circular.yammm")
+	if err != nil {
+		t.Fatalf("Failed to build circular chain schema: %s", err)
 	}
 	return s
 }
 
 // Instance Creation Helpers
 //
-// Thin wrappers over [instancetest.VI] adding the schema type lookup and
-// the edge-target assembly the graph suites repeat. Edge resolution is
-// exact-TypeID, so every instance must carry its real schema TypeID.
+// Thin wrappers over [instancetest.Valid] adding the validator's input for a
+// key, an edge and a child, which the graph suites repeat.
 
-// mustTypeID resolves a schema type's ID, failing the test if absent.
 // tagID resolves a tag form — bare or alias-qualified — to the identity it
 // renders, so a test written in names reads the same now that Snapshot's
 // accessors take identities.
-func tagID(t *testing.T, s *schema.Schema, tag string) schema.TypeID {
+func tagID(t *testing.T, s schema.Schema, tag string) schema.TypeID {
 	t.Helper()
 	alias, name, qualified := strings.Cut(tag, ".")
 	if !qualified {
 		return mustTypeID(t, s, tag)
 	}
 	imp, ok := s.ImportByAlias(alias)
-	if !ok || imp.Schema() == nil {
+	if !ok || imp.Schema().IsZero() {
 		t.Fatalf("import alias %q not found", alias)
 	}
 	typ, ok := imp.Schema().Type(name)
@@ -383,7 +364,8 @@ func tagID(t *testing.T, s *schema.Schema, tag string) schema.TypeID {
 	return typ.ID()
 }
 
-func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
+// mustTypeID resolves a schema type's ID, failing the test if absent.
+func mustTypeID(t *testing.T, s schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -392,34 +374,17 @@ func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 	return typ.ID()
 }
 
-// edgeData assembles single-relation edge data: every target key shares
-// the same edge properties (pass nil for none).
-func edgeData(relationName string, edgeProps map[string]any, targetKeys ...[]any) map[string]*instance.ValidEdgeData {
-	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
-	for i, targetKey := range targetKeys {
-		targets[i] = instance.NewValidEdgeTarget(
-			immutable.WrapKey(targetKey),
-			immutable.WrapProperties(edgeProps),
-		)
-	}
-	return map[string]*instance.ValidEdgeData{relationName: instance.NewValidEdgeData(targets)}
-}
-
-// mustValidInstance creates a ValidInstance for testing.
-func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+// mustValidInstance validates props, holding the key pk states, as one typeName
+// instance over s.
+func mustValidInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
 	t.Helper()
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-	)
+	return instancetest.Valid(t, s, typeName, keyedProps(t, s, typeName, pk, props))
 }
 
 // keyedProps returns props holding each primary-key property the key states,
-// where props does not state it, so a fixture instance holds its key the way a
-// validated one does. A key property the fixture states is kept as written.
-func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
+// where props does not state it. A key property the fixture states is kept as
+// written.
+func keyedProps(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -437,68 +402,108 @@ func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props
 	return out
 }
 
-// mustValidInstanceWithEdge creates a ValidInstance with edge data.
+// targetObject is one association target as the validator reads it: the
+// target's key under its _target_ fields, beside the edge properties.
+func targetObject(t *testing.T, s schema.Schema, rel schema.Relation, key []any, edgeProps map[string]any) map[string]any {
+	t.Helper()
+	target, ok := s.TypeByID(rel.TargetID())
+	if !ok {
+		t.Fatalf("target %s of %s not in the schema", rel.TargetID(), rel.Name())
+	}
+	obj := make(map[string]any, len(key)+len(edgeProps))
+	maps.Copy(obj, edgeProps)
+	i := 0
+	for pk := range target.PrimaryKeys() {
+		if i >= len(key) {
+			t.Fatalf("key %v of %s has too few components", key, rel.Name())
+		}
+		obj["_target_"+pk.Name()] = key[i]
+		i++
+	}
+	return obj
+}
+
+// withTargets returns data holding typeName's association relation with one
+// target per key: an object for a (one) association, an array for a many one.
+func withTargets(t *testing.T, s schema.Schema, typeName string, data map[string]any, relation string, edgeProps map[string]any, keys ...[]any) map[string]any {
+	t.Helper()
+	typ, ok := s.Type(typeName)
+	if !ok {
+		t.Fatalf("Type %q not found in schema", typeName)
+	}
+	rel, ok := typ.Relation(relation)
+	if !ok {
+		t.Fatalf("relation %q not found on %q", relation, typeName)
+	}
+	out := maps.Clone(data)
+	if out == nil {
+		out = map[string]any{}
+	}
+	if !rel.IsMany() {
+		if len(keys) != 1 {
+			t.Fatalf("(one) association %q given %d targets", relation, len(keys))
+		}
+		out[rel.FieldName()] = targetObject(t, s, rel, keys[0], edgeProps)
+		return out
+	}
+	targets := make([]any, len(keys))
+	for i, key := range keys {
+		targets[i] = targetObject(t, s, rel, key, edgeProps)
+	}
+	out[rel.FieldName()] = targets
+	return out
+}
+
+// mustValidInstanceWithEdge validates an instance holding one target per key
+// under relationName.
 func mustValidInstanceWithEdge(
 	t *testing.T,
-	s *schema.Schema,
+	s schema.Schema,
 	typeName string,
 	pk []any,
 	props map[string]any,
 	relationName string,
 	targetKeys [][]any,
-) *instance.ValidInstance {
+) instance.ValidInstance {
 	t.Helper()
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(edgeData(relationName, nil, targetKeys...)),
-	)
+	return instancetest.Valid(t, s, typeName,
+		withTargets(t, s, typeName, keyedProps(t, s, typeName, pk, props), relationName, nil, targetKeys...))
 }
 
-// mustValidInstanceWithEdgeProps creates a ValidInstance with edge data including properties.
+// mustValidInstanceWithEdgeProps validates an instance holding one target with
+// edge properties under relationName.
 func mustValidInstanceWithEdgeProps(
 	t *testing.T,
-	s *schema.Schema,
+	s schema.Schema,
 	typeName string,
 	pk []any,
 	props map[string]any,
 	relationName string,
 	targetKey []any,
 	edgeProps map[string]any,
-) *instance.ValidInstance {
+) instance.ValidInstance {
 	t.Helper()
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(edgeData(relationName, edgeProps, targetKey)),
-	)
+	return instancetest.Valid(t, s, typeName,
+		withTargets(t, s, typeName, keyedProps(t, s, typeName, pk, props), relationName, edgeProps, targetKey))
 }
 
-// mustValidInstanceWithEmptyEdge creates a ValidInstance with an empty edge (for required many tests).
+// mustValidInstanceWithEmptyEdge validates an instance holding an empty array
+// under a many association.
 func mustValidInstanceWithEmptyEdge(
 	t *testing.T,
-	s *schema.Schema,
+	s schema.Schema,
 	typeName string,
 	pk []any,
 	props map[string]any,
 	relationName string,
-) *instance.ValidInstance {
+) instance.ValidInstance {
 	t.Helper()
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{relationName: instance.NewValidEdgeData(nil)}),
-	)
+	return instancetest.Valid(t, s, typeName,
+		withTargets(t, s, typeName, keyedProps(t, s, typeName, pk, props), relationName, nil))
 }
 
-// mustValidPartInstance creates a ValidInstance for a part type.
-func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+// partData is one part instance as the validator reads it inside its parent.
+func partData(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -507,148 +512,138 @@ func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk [
 	if !typ.IsPart() {
 		t.Fatalf("Type %q is not a part type", typeName)
 	}
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(typ.ID()),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-	)
+	return keyedProps(t, s, typeName, pk, props)
 }
 
-// mustValidPKLessInstance creates a ValidInstance for a PK-less part type.
-// The zero Key has no [instancetest.VI] option, so this one builds directly.
-func mustValidPKLessInstance(t *testing.T, s *schema.Schema, typeName string, props map[string]any) *instance.ValidInstance {
+// parentWith validates an instance holding children, each a [partData] or a raw
+// child object, under the composition relation.
+func parentWith(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any, relation string, children ...map[string]any) instance.ValidInstance {
 	t.Helper()
-	return instance.NewValidInstance(
-		typeName,
-		mustTypeID(t, s, typeName),
-		immutable.Key{}, // No PK
-		immutable.WrapProperties(props),
-		nil, nil, nil,
-	)
+	return instancetest.Valid(t, s, typeName, composedData(t, s, typeName, keyedProps(t, s, typeName, pk, props), relation, children...))
+}
+
+// composedData returns data holding children under typeName's composition
+// relation, in the array a composition always arrives as.
+func composedData(t *testing.T, s schema.Schema, typeName string, data map[string]any, relation string, children ...map[string]any) map[string]any {
+	t.Helper()
+	typ, ok := s.Type(typeName)
+	if !ok {
+		t.Fatalf("Type %q not found in schema", typeName)
+	}
+	rel, ok := typ.Relation(relation)
+	if !ok {
+		t.Fatalf("relation %q not found on %q", relation, typeName)
+	}
+	out := maps.Clone(data)
+	elems := make([]any, len(children))
+	for i, child := range children {
+		elems[i] = child
+	}
+	out[rel.FieldName()] = elems
+	return out
+}
+
+// loadSchemaAt loads source under sourceName. Each call is its own load, so two
+// calls give two schemas a graph tells apart, whatever their text.
+func loadSchemaAt(t *testing.T, source, sourceName string) schema.Schema {
+	t.Helper()
+	s, err := schema.LoadString(t.Context(), source, sourceName)
+	if err != nil {
+		t.Fatalf("load %s: %s", sourceName, err)
+	}
+	return s
 }
 
 // Multi-Schema Helpers
 
+// loadClosure loads the entry source under a synthetic root and returns each
+// member of its import closure by declared schema name.
+func loadClosure(t *testing.T, entry string, sources map[string]string) map[string]schema.Schema {
+	t.Helper()
+	files := make(map[string][]byte, len(sources))
+	for key, text := range sources {
+		files[key] = []byte(text)
+	}
+	s, err := schema.LoadSourcesWithEntry(t.Context(), files, entry, schema.WithSyntheticRoot("test://graph"))
+	if err != nil {
+		t.Fatalf("load %s: %s", entry, err)
+	}
+	members := make(map[string]schema.Schema)
+	for member := range s.Closure() {
+		members[member.Name()] = member
+	}
+	return members
+}
+
 // testMultiSchemaSetup creates two schemas with imports for cross-schema testing.
 // Returns (main schema, imported schema).
-func testMultiSchemaSetup(t *testing.T) (*schema.Schema, *schema.Schema) {
+func testMultiSchemaSetup(t *testing.T) (schema.Schema, schema.Schema) {
 	t.Helper()
+	members := loadClosure(t, "main.yammm", map[string]string{
+		"common.yammm": `schema "common"
 
-	reg := schema.NewRegistry()
+type Entity {
+	id String primary
+	name String required
+}
+`,
+		"main.yammm": `schema "main"
 
-	// Create the common schema first (to be imported)
-	commonSchema, result := schema.NewBuilder().
-		WithName("common").
-		WithSourceID(location.MustNewSourceID("test://common.yammm")).
-		AddType("Entity").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		Build()
+import "common" as c
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build common schema: %s", result.String())
-	}
-
-	// Register common schema
-	if err := reg.Register(commonSchema); err != nil {
-		t.Fatalf("Failed to register common schema: %v", err)
-	}
-
-	// Create main schema that imports common
-	mainSchema, result := schema.NewBuilder().
-		WithName("main").
-		WithSourceID(location.MustNewSourceID("test://main.yammm")).
-		WithRegistry(reg).
-		AddImport("common", "c").
-		AddType("User").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("username", schema.StringConstraint{}).
-		WithRelation("ENTITY", schema.NewTypeRef("c", "Entity", location.Span{}), true, false).
-		Done().
-		Build()
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build main schema: %s", result.String())
-	}
-
-	return mainSchema, commonSchema
+type User {
+	id String primary
+	username String required
+	--> ENTITY (_:one) c.Entity
+}
+`,
+	})
+	return members["main"], members["common"]
 }
 
 // testTripleSchemaSetup creates three schemas for transitive import testing.
 // Schema A imports B, B imports C. A cannot directly access C types.
-func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Schema, reg *schema.Registry) {
+func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC schema.Schema) {
 	t.Helper()
+	members := loadClosure(t, "a.yammm", map[string]string{
+		"c.yammm": `schema "schema_c"
 
-	reg = schema.NewRegistry()
+type BaseType {
+	id String primary
+	value String required
+}
+`,
+		"b.yammm": `schema "schema_b"
 
-	// Schema C (base)
-	schemaC, result := schema.NewBuilder().
-		WithName("schema_c").
-		WithSourceID(location.MustNewSourceID("test://c.yammm")).
-		AddType("BaseType").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("value", schema.StringConstraint{}).
-		Done().
-		Build()
+import "c" as c
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build schema C: %s", result.String())
-	}
+type MiddleType {
+	id String primary
+	name String required
+	--> BASE (_:one) c.BaseType
+}
+`,
+		"a.yammm": `schema "schema_a"
 
-	if err := reg.Register(schemaC); err != nil {
-		t.Fatalf("Failed to register schema C: %v", err)
-	}
+import "b" as b
 
-	// Schema B imports C
-	schemaB, result = schema.NewBuilder().
-		WithName("schema_b").
-		WithSourceID(location.MustNewSourceID("test://b.yammm")).
-		WithRegistry(reg).
-		AddImport("schema_c", "c").
-		AddType("MiddleType").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("BASE", schema.NewTypeRef("c", "BaseType", location.Span{}), true, false).
-		Done().
-		Build()
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build schema B: %s", result.String())
-	}
-
-	if err := reg.Register(schemaB); err != nil {
-		t.Fatalf("Failed to register schema B: %v", err)
-	}
-
-	// Schema A imports B (but not C directly)
-	schemaA, result = schema.NewBuilder().
-		WithName("schema_a").
-		WithSourceID(location.MustNewSourceID("test://a.yammm")).
-		WithRegistry(reg).
-		AddImport("schema_b", "b").
-		AddType("TopType").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("label", schema.StringConstraint{}).
-		WithRelation("MIDDLE", schema.NewTypeRef("b", "MiddleType", location.Span{}), true, false).
-		Done().
-		Build()
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build schema A: %s", result.String())
-	}
-
-	return schemaA, schemaB, schemaC, reg
+type TopType {
+	id String primary
+	label String required
+	--> MIDDLE (_:one) b.MiddleType
+}
+`,
+	})
+	return members["schema_a"], members["schema_b"], members["schema_c"]
 }
 
 // Assertion Helpers
 
 // assertInstanceCount verifies the number of instances of a type in the result.
-func assertInstanceCount(t *testing.T, result *graph.Snapshot, typeID schema.TypeID, expected int) bool {
+func assertInstanceCount(t *testing.T, result graph.Snapshot, typeID schema.TypeID, expected int) bool {
 	t.Helper()
 
-	instances := result.InstancesOf(typeID)
+	instances := slices.Collect(result.InstancesOf(typeID))
 	if len(instances) != expected {
 		t.Errorf("Expected %d instances of %s, got %d", expected, typeID, len(instances))
 		return false
@@ -657,27 +652,27 @@ func assertInstanceCount(t *testing.T, result *graph.Snapshot, typeID schema.Typ
 }
 
 // assertEdgeCount verifies the number of edges in the result.
-func assertEdgeCount(t *testing.T, result *graph.Snapshot, expected int) {
+func assertEdgeCount(t *testing.T, result graph.Snapshot, expected int) {
 	t.Helper()
 
-	edges := result.Edges()
+	edges := slices.Collect(result.Edges())
 	if len(edges) != expected {
 		t.Errorf("Expected %d edges, got %d", expected, len(edges))
 	}
 }
 
 // assertUnresolvedCount verifies the number of unresolved edges in the result.
-func assertUnresolvedCount(t *testing.T, result *graph.Snapshot, expected int) {
+func assertUnresolvedCount(t *testing.T, result graph.Snapshot, expected int) {
 	t.Helper()
 
-	unresolved := result.Unresolved()
+	unresolved := slices.Collect(result.Unresolved())
 	if len(unresolved) != expected {
 		t.Errorf("Expected %d unresolved edges, got %d", expected, len(unresolved))
 	}
 }
 
 // assertComposedCount verifies the number of composed children for a relation.
-func assertComposedCount(t *testing.T, inst *graph.Instance, relationName string, expected int) {
+func assertComposedCount(t *testing.T, inst graph.Instance, relationName string, expected int) {
 	t.Helper()
 
 	count := inst.ComposedCount(relationName)
@@ -705,24 +700,40 @@ func countCode(result diag.Result, code diag.Code) int {
 	return count
 }
 
-// mustImport imports snap into a new graph bound to s and fails the test when
-// the import is refused.
-func mustImport(tb testing.TB, s *schema.Schema, snap *graph.Snapshot) *graph.Graph {
-	tb.Helper()
-	g, res := graph.NewFromSnapshot(s, snap)
-	if res.HasErrors() {
-		tb.Fatalf("NewFromSnapshot: %s", res)
-	}
-	return g
+// rebuild constructs a snapshot from parts, as the snapshot package does from a
+// document it read.
+func rebuild(s schema.Schema, parts snapparts.Parts) graph.Snapshot {
+	return snapparts.Rebuild[graph.Snapshot](s, parts)
 }
 
-// mustSeed seeds a new assembler bound to s from snap and fails the test when
-// the seed is refused.
-func mustSeed(tb testing.TB, ctx context.Context, s *schema.Schema, snap *graph.Snapshot) *graph.BatchAssembler {
-	tb.Helper()
-	ba, res := graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)
-	if res.HasErrors() {
-		tb.Fatalf("NewBatchAssemblerFromSnapshot: %s", res)
+func loadAs(t *testing.T, src string) schema.Schema {
+	t.Helper()
+	s, err := schema.LoadString(t.Context(), src, "entry.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
-	return ba
+	return s
+}
+
+func loadEntry(t *testing.T, src string) schema.Schema {
+	t.Helper()
+	s, err := schema.LoadString(t.Context(), src, "entry.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
+	}
+	return s
+}
+
+func typeIDOf(t *testing.T, s schema.Schema, name string) schema.TypeID {
+	t.Helper()
+	typ, ok := s.Type(name)
+	if !ok {
+		t.Fatalf("type %s not found", name)
+	}
+	return typ.ID()
+}
+
+func rootInstance(t *testing.T, s schema.Schema, name, key string) instance.ValidInstance {
+	t.Helper()
+	return instancetest.Valid(t, s, name, map[string]any{"id": key})
 }

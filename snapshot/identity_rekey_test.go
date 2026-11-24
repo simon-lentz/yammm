@@ -3,11 +3,15 @@ package snapshot_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -19,17 +23,6 @@ import (
 // same-named types apart, so every position that must denote a type exactly is
 // keyed by [schema.TypeID]. These tests drive the positions where a name key
 // merged or dropped instances.
-
-// mustImport imports snap into a new graph bound to s and fails the test when
-// the import is refused.
-func mustImport(tb testing.TB, s *schema.Schema, snap *graph.Snapshot) *graph.Graph {
-	tb.Helper()
-	g, res := graph.NewFromSnapshot(s, snap)
-	if res.HasErrors() {
-		tb.Fatalf("NewFromSnapshot: %s", res)
-	}
-	return g
-}
 
 // hasCode reports whether the result carries an issue with the given code.
 func hasCode(result diag.Result, code diag.Code) bool {
@@ -45,33 +38,30 @@ func hasCode(result diag.Result, code diag.Code) bool {
 // graph-side import of a child whose type the entry schema cannot name. Such a
 // type has no alias to qualify with, so a name-resolved import dropped it; a
 // composed child is addressed through its parent and must survive.
-//
-// It is a COMPOSED child and not a root because the entry schema cannot name
-// the type, and every root is keyed by name.
 func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
 	siteID := mustTypeIDIn(t, s, "", "Site")
-	deepPart := mustTransitiveTypeID(t, s, "base", "deep", "Part")
+	deepPart := mustDeepTypeID(t, s, "Part")
 	if _, addressable := schema.AddressableTag(s, deepPart); addressable {
 		t.Fatal("fixture is vacuous: the entry schema can name deep.Part")
 	}
 
 	basePart := mustTypeIDIn(t, s, "base", "Part")
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{siteID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     siteID,
 				PrimaryKey: immutable.WrapKey([]any{"site1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "site1"}),
-				Composed: map[string][]graph.InstanceParts{
+				Composed: map[string][]snapparts.Instance{
 					"IMPORTED": {{
 						TypeID:     basePart,
 						PrimaryKey: immutable.WrapKey([]any{"bp1"}),
 						Properties: immutable.WrapProperties(map[string]any{"name": "bp1", "mass": float64(1)}),
-						Composed: map[string][]graph.InstanceParts{
+						Composed: map[string][]snapparts.Instance{
 							"DEEP": {{
 								TypeID:     deepPart,
 								PrimaryKey: immutable.WrapKey([]any{"dp1"}),
@@ -83,20 +73,17 @@ func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 			},
 		},
 	})
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
 
-	after := mustImport(t, s, built).Snapshot()
-	roots := after.InstancesOf(siteID)
+	after := graph.NewFromSnapshot(built).Snapshot()
+	roots := slices.Collect(after.InstancesOf(siteID))
 	if len(roots) != 1 {
 		t.Fatalf("importing dropped the root: want 1, got %d", len(roots))
 	}
-	parents := roots[0].Composed("IMPORTED")
+	parents := slices.Collect(roots[0].Composed("IMPORTED"))
 	if len(parents) != 1 {
 		t.Fatalf("importing dropped the base.Part child: want 1, got %d", len(parents))
 	}
-	children := parents[0].Composed("DEEP")
+	children := slices.Collect(parents[0].Composed("DEEP"))
 	if len(children) != 1 {
 		t.Fatalf("importing a transitively imported child dropped it: want 1, got %d", len(children))
 	}
@@ -110,13 +97,14 @@ func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 // A local type and a DIRECTLY imported one of the same name render different
 // tags and share one bare name. Every position that must denote a type exactly
 // is keyed by [schema.TypeID], and one keyed by the bare name merges the pair.
-// A type the entry schema cannot name is not part of this: it cannot hold a
-// root at all, so no position keyed by name ever has to separate one.
+// A type the entry schema cannot name holds a root too, and renders the bare
+// name its entry namesake renders; the identity oracle's transitive root cases
+// hold that pair.
 
 // sameNameBeacons builds a snapshot holding the entry schema's Beacon beside
 // the one it imports as base. Both are addressable, their tags differ, and
 // their bare names do not.
-func sameNameBeacons(t *testing.T, s *schema.Schema) (*graph.Snapshot, schema.TypeID, schema.TypeID) {
+func sameNameBeacons(t *testing.T, s schema.Schema) (graph.Snapshot, schema.TypeID, schema.TypeID) {
 	t.Helper()
 	localBeacon := mustTypeIDIn(t, s, "", "Beacon")
 	importedBeacon := mustTypeIDIn(t, s, "base", "Beacon")
@@ -132,38 +120,35 @@ func sameNameBeacons(t *testing.T, s *schema.Schema) (*graph.Snapshot, schema.Ty
 			t.Fatalf("fixture is vacuous: %s is not addressable, so it cannot hold a root", id)
 		}
 	}
-	beacon := func(id schema.TypeID, key string) graph.InstanceParts {
-		return graph.InstanceParts{
+	beacon := func(id schema.TypeID, key string) snapparts.Instance {
+		return snapparts.Instance{
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "power": float64(1)}),
 		}
 	}
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{localBeacon, importedBeacon},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			beacon(localBeacon, "local1"),
 			beacon(importedBeacon, "imported1"),
 		},
 	})
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
 	return built, localBeacon, importedBeacon
 }
 
-// TestRebuildSnapshot_SeparatesOneNameTwoSchemasDeclare pins the assembly path.
-// A name-keyed Instances map cannot even express this input; an identity-keyed
-// one must carry both groups through.
-func TestRebuildSnapshot_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
+// TestLoad_SeparatesOneNameTwoSchemasDeclare pins the reader's path. A name-keyed
+// group map cannot even express this input; an identity-keyed one must carry both
+// groups through.
+func TestLoad_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
 	built, localBeacon, importedBeacon := sameNameBeacons(t, s)
-	if got := len(built.InstancesOf(localBeacon)); got != 1 {
+	if got := len(slices.Collect(built.InstancesOf(localBeacon))); got != 1 {
 		t.Errorf("the local Beacon was merged away: want 1 instance, got %d", got)
 	}
-	if got := len(built.InstancesOf(importedBeacon)); got != 1 {
+	if got := len(slices.Collect(built.InstancesOf(importedBeacon))); got != 1 {
 		t.Errorf("the imported Beacon was merged away: want 1 instance, got %d", got)
 	}
 }
@@ -175,10 +160,10 @@ func TestGraphSnapshot_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	s := loadIdentitySchema(t)
 
 	built, _, _ := sameNameBeacons(t, s)
-	after := mustImport(t, s, built).Snapshot()
+	after := graph.NewFromSnapshot(built).Snapshot()
 
 	var count int
-	for range after.AllInstances() {
+	for range after.Instances() {
 		count++
 	}
 	if count != 2 {
@@ -195,48 +180,47 @@ func TestRoundTrip_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	s := loadIdentitySchema(t)
 
 	built, localBeacon, importedBeacon := sameNameBeacons(t, s)
-	data, result := snapshot.Marshal(ctx, built)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, built)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load rejected a document Marshal produced: %v\n%s", err, data)
 	}
-	if got := len(loaded.InstancesOf(localBeacon)); got != 1 {
+	if got := len(slices.Collect(loaded.InstancesOf(localBeacon))); got != 1 {
 		t.Errorf("the local Beacon did not survive the round trip: got %d\n%s", got, data)
 	}
-	if got := len(loaded.InstancesOf(importedBeacon)); got != 1 {
+	if got := len(slices.Collect(loaded.InstancesOf(importedBeacon))); got != 1 {
 		t.Errorf("the imported Beacon did not survive the round trip: got %d\n%s", got, data)
 	}
 }
 
 // TestImportSnapshot_ResolvesJSONFieldForImportedSource pins the source-side
-// lookup behind an unresolved edge's reported input field. An imported source
-// type's tag is alias-qualified, and a local-name-only lookup misses it, so
-// the field a consumer needs to locate the fault was reported empty.
+// lookup behind an unresolved edge's reported input field: the relation's field
+// name, read through an imported source type whose tag is alias-qualified.
 func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, lres := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
 		"entry.yammm": []byte("schema \"entry\"\n\nimport \"base.yammm\" as base\n\ntype Anchor {\n\tid String primary\n}\n"),
 		"base.yammm":  []byte("schema \"base\"\n\ntype Basin {\n\tid String primary\n\t--> NEAR (one:one) Basin\n}\n"),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if lres.HasErrors() {
-		t.Fatalf("load: %s", lres)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{basinID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     basinID,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
 			},
 		},
-		Unresolved: []graph.UnresolvedParts{{
+		Unresolved: []snapparts.Unresolved{{
 			SourceType: basinID,
 			SourceKey:  immutable.WrapKey([]any{"b1"}),
 			Relation:   "NEAR",
@@ -244,30 +228,27 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 			Reason:     "target_missing",
 		}},
 	})
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
 
-	checked := mustImport(t, s, built).Check(ctx)
+	checked := diagtest.Failures(t, graph.NewFromSnapshot(built).Check(ctx))
 
-	var seen, populated bool
+	var seen bool
+	field := "<none>"
 	for issue := range checked.Issues() {
 		if issue.Code() != diag.E_UNRESOLVED_REQUIRED {
 			continue
 		}
 		seen = true
 		for _, d := range issue.Details() {
-			if d.Key == diag.DetailKeyJSONField && d.Value != "" {
-				populated = true
+			if d.Key == diag.DetailKeyJSONField {
+				field = d.Value
 			}
 		}
 	}
 	if !seen {
 		t.Fatalf("no %s issue was reported: %s", diag.E_UNRESOLVED_REQUIRED, checked)
 	}
-	if !populated {
-		t.Errorf("the %s detail is empty for an imported source type, so a consumer cannot locate the input field",
-			diag.DetailKeyJSONField)
+	if field != "near" {
+		t.Errorf("the %s detail is %q, want the relation's field name %q", diag.DetailKeyJSONField, field, "near")
 	}
 }
 
@@ -280,12 +261,12 @@ func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 	s := loadIdentitySchema(t)
 	built, localBeacon, importedBeacon := sameNameBeacons(t, s)
 
-	data, res := snapshot.Marshal(ctx, built)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, readErr := snapshot.Marshal(ctx, built)
+	if readErr != nil {
+		t.Fatalf("marshal: %v", readErr)
 	}
-	info, infoRes := snapshot.Info(ctx, data)
-	if err := infoRes.Err(); err != nil {
+	info, readErr2 := snapshot.Stat(ctx, data)
+	if err := readErr2; err != nil {
 		t.Fatalf("info: %v", err)
 	}
 
@@ -324,10 +305,10 @@ func sampleTypeRef() snapshot.TypeRef {
 	return snapshot.TypeRef{Schema: "a", Name: "Person"}
 }
 
-// TestTypeRef_RendersPathHashName pins the display form. The
+// TestTypeRef_RendersSchemaHashName pins the display form. The
 // separator is the contract: schema.TypeID renders "path:name" and TypeRef
 // renders "schema#name", the one form this package states a type identity in.
-func TestTypeRef_RendersPathHashName(t *testing.T) {
+func TestTypeRef_RendersSchemaHashName(t *testing.T) {
 	t.Parallel()
 	ref := sampleTypeRef()
 
@@ -345,7 +326,7 @@ func TestTypeRef_RendersPathHashName(t *testing.T) {
 
 // TestTypeRef_SerializesAsAStringKey pins what MarshalText is for. A
 // map[TypeRef]int has no JSON encoding without a TextMarshaler key, so
-// deleting the method takes `yammm snapshot info --format json` with it.
+// deleting the method takes `yammm snapshot info --json` with it.
 func TestTypeRef_SerializesAsAStringKey(t *testing.T) {
 	t.Parallel()
 
@@ -380,18 +361,18 @@ func TestTypeRef_IsWriteOnly(t *testing.T) {
 		t.Error("TypeRef decoded from its rendered form: it gained UnmarshalText, so its godoc and the write-only statement in docs/API.md need updating with it")
 	}
 
-	var info snapshot.HeaderInfo
+	var info snapshot.Header
 	if err := json.Unmarshal([]byte(`{"Types":["`+typeRefRendered+`"]}`), &info); err == nil {
-		t.Error("HeaderInfo decoded from the form yammm snapshot info writes; the surfaces are documented as one-way")
+		t.Error("Header decoded from the form yammm snapshot info writes; the surfaces are documented as one-way")
 	}
 }
 
 // schemaNameOf returns the declared name of the closure member that declares
 // id — the form a .ys types-table row carries since the wire was keyed by
 // schema name rather than source path.
-func schemaNameOf(t *testing.T, s *schema.Schema, id schema.TypeID) string {
+func schemaNameOf(t *testing.T, s schema.Schema, id schema.TypeID) string {
 	t.Helper()
-	for _, cs := range s.Closure() {
+	for cs := range s.Closure() {
 		if cs.SourceID() == id.SchemaPath() {
 			return cs.Name()
 		}

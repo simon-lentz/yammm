@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -44,26 +45,30 @@ func TestScanIODetail_PerFileCarriesTheOSError(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	entries, res := snapshot.ScanDirSlice(t.Context(), dir)
-	if res.HasErrors() {
-		t.Fatalf("the scan itself failed: %s", res)
+	var entries []snapshot.ScanEntry
+	for entry, err := range snapshot.ScanDir(t.Context(), dir) {
+		if err != nil {
+			t.Fatalf("the scan itself failed: %v", err)
+		}
+		entries = append(entries, entry)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("scanned %d entries, want 1", len(entries))
 	}
 
+	res := diagtest.Failures(t, entries[0].Err)
 	// "path" is DetailKeyImportPath, which five schema sites use for an import
 	// path, so a reader keying on it would read this file path as one.
-	if _, collides := detailOf(entries[0].Result, diag.E_SNAPSHOT_IO, diag.DetailKeyImportPath); collides {
+	if _, collides := detailOf(res, diag.E_SNAPSHOT_IO, diag.DetailKeyImportPath); collides {
 		t.Error("the scanned file's path is filed under the import-path key")
 	}
-	if _, ok := detailOf(entries[0].Result, diag.E_SNAPSHOT_IO, diag.DetailKeyFilePath); !ok {
-		t.Errorf("E_SNAPSHOT_IO carries no %q detail: %s", diag.DetailKeyFilePath, entries[0].Result)
+	if _, ok := detailOf(res, diag.E_SNAPSHOT_IO, diag.DetailKeyFilePath); !ok {
+		t.Errorf("E_SNAPSHOT_IO carries no %q detail: %s", diag.DetailKeyFilePath, res)
 	}
 
-	detail, ok := detailOf(entries[0].Result, diag.E_SNAPSHOT_IO, diag.DetailKeyDetail)
+	detail, ok := detailOf(res, diag.E_SNAPSHOT_IO, diag.DetailKeyDetail)
 	if !ok {
-		t.Fatalf("E_SNAPSHOT_IO carries no %q detail: %s", diag.DetailKeyDetail, entries[0].Result)
+		t.Fatalf("E_SNAPSHOT_IO carries no %q detail: %s", diag.DetailKeyDetail, res)
 	}
 	// The os error names the link, not its target, and its text differs by
 	// host, so the want is the errno a stat that follows the same link reports.
@@ -74,28 +79,5 @@ func TestScanIODetail_PerFileCarriesTheOSError(t *testing.T) {
 	}
 	if !strings.Contains(detail, "broken.ys") || !strings.Contains(detail, pathErr.Err.Error()) {
 		t.Errorf("detail = %q, want the underlying os error %q", detail, pathErr.Err)
-	}
-}
-
-// The dir-level failure carries it too. diag/code.go's promise covers "either a
-// dir-level failure … or a per-file failure", so fixing only scanFile would
-// have left half the claim false.
-//
-// Mutation: removing the DetailKeyDetail call in ScanDirSliceWith turns this
-// red.
-func TestScanIODetail_DirLevelCarriesTheOSError(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "no-such-dir")
-
-	_, res := snapshot.ScanDirSlice(t.Context(), missing)
-	if !res.HasErrors() {
-		t.Fatal("scanning a missing directory reported no error")
-	}
-
-	detail, ok := detailOf(res, diag.E_SNAPSHOT_IO, diag.DetailKeyDetail)
-	if !ok {
-		t.Fatalf("the dir-level E_SNAPSHOT_IO carries no %q detail: %s", diag.DetailKeyDetail, res)
-	}
-	if !strings.Contains(detail, "no-such-dir") {
-		t.Errorf("detail = %q, want the underlying os error", detail)
 	}
 }

@@ -1,482 +1,110 @@
 package snapshot
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
-	"sort"
-	"strings"
-	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// UpdateOption configures [UpdateMetadata] and [UpdateMetadataOrReMarshal].
-type UpdateOption func(*updateConfig)
-
-type updateConfig struct {
-	createdAtSet bool
-	createdAt    time.Time
-}
-
-// WithUpdateCreatedAt overrides the created_at header field in the
-// resulting document. If not provided, the existing created_at (if any)
-// is preserved byte-for-byte from the input header.
-func WithUpdateCreatedAt(t time.Time) UpdateOption {
-	return func(c *updateConfig) {
-		c.createdAtSet = true
-		c.createdAt = t
-	}
-}
-
-func applyUpdateOptions(opts []UpdateOption) updateConfig {
-	var cfg updateConfig
-	for _, o := range opts {
-		o(&cfg)
-	}
-	return cfg
-}
-
-// UpdateMetadata rewrites the header of an existing .ys document with a
-// new metadata map, reusing the body bytes verbatim and recomputing only
-// the integrity hash.
-//
-// Invariants:
-//
-//   - The body (types, instances, diagnostics sections) is NOT
-//     re-serialized. The input bytes' body byte-range is reused
-//     unchanged.
-//   - The returned document's integrity hash is computed over the new
-//     canonical form (new header + existing body) and matches what
-//     [Marshal] would produce for the same logical content, byte-for-byte.
-//   - CreatedAt is preserved from the existing header unless explicitly
-//     overridden via [WithUpdateCreatedAt].
-//   - Metadata replaces the existing map entirely; the caller is
-//     responsible for including pass-through fields in newMeta. There
-//     is no merge — intentionally. A merge would require a diff
-//     vocabulary, and the caller already has the old metadata via
-//     [HeaderOnly].
-//   - Indentation is preserved from the input. UpdateMetadata does not
-//     re-indent, because re-indenting would require re-serializing the
-//     body and defeat the performance premise. Byte-identical round-trip
-//     is guaranteed ONLY for inputs produced by Marshal (with any
-//     supported Option combination). A hand-edited input keeps its body's
-//     bytes; its header is written again in the indent that follows a
-//     newline directly after the opening brace, before the "yammm_snapshot"
-//     key, or compact otherwise. Whitespace before the opening brace draws
-//     Error E_SNAPSHOT_MALFORMED, and whitespace between the header's closing
-//     brace and the comma after it Fatal E_UPDATE_METADATA_BODY_OFFSET;
-//     [UpdateMetadataOrReMarshal] falls back to [Load] and [Marshal] for
-//     either input.
-//
-// Wire-format precondition. UpdateMetadata depends on the field-order
-// and body-suffix stability contracts documented in the comment block
-// that follows wire.go's imports. Future changes to those contracts must update or remove this
-// primitive in lockstep.
-//
-// Intended caller pattern:
-//
-//	data, err := os.ReadFile(ysPath)
-//	if err != nil { return err }
-//	header, res := snapshot.HeaderOnly(ctx, data)
-//	if res.HasErrors() { return res.Err() }
-//	newMeta := maps.Clone(header.Metadata)
-//	newMeta["pipeline_completed"] = "true"
-//	out, res := snapshot.UpdateMetadata(ctx, data, newMeta)
-//
-// Pass no option for created_at. Preservation is the default, and it is
-// byte-for-byte: parsing the field and handing it back re-formats it, which
-// rewrites a foreign header's fractional seconds and offset for no gain. A
-// caller that needs the timestamp as a value reads it with
-// [HeaderInfo.CreatedAtTime] and leaves the option alone.
-//
-// UpdateMetadata copies the body bytes verbatim and does not validate what
-// they contain: it re-verifies no integrity hash, resolves no schema, and
-// reads no instance. It does check everything it can see without decoding the
-// body — the four-key top-level shape, and a types table that states one
-// identity twice — because the output carries a freshly computed integrity
-// hash, so accepting a document no read path accepts would hand back a
-// malformed document that passes verification. Callers needing more than that
-// pair UpdateMetadata with a prior [Verify] on the same bytes; [HeaderOnly] is
-// not that check, because it now validates the same outermost shape and adds
-// only the header and types table.
-//
-// Diagnostics are capped at the same default [Load] uses (100); this surface
-// takes no option that raises it.
-//
-// Failure modes and error codes:
-//
-//   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse or states
-//     a null features field, its top-level keys are not the four the format
-//     fixes in their fixed order and none null, or its types table states one
-//     identity on two rows.
-//   - [diag.E_SNAPSHOT_UNSUPPORTED_FEATURE] — the header names a feature this
-//     version does not implement. Refused rather than carried through, because
-//     the output would claim support it does not have.
-//   - [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] — the header states a version
-//     no read path accepts. The document is refused rather than
-//     relabelled; UpdateMetadata is a header rewrite, never a migration.
-//   - [diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM] — the header states a
-//     schema hash algorithm this version does not implement. Refused for the
-//     same reason as an unsupported version: the output would carry a schema
-//     identity this library cannot check.
-//   - [diag.E_UPDATE_METADATA_BODY_OFFSET] — the header parsed cleanly
-//     but the body-boundary tracking could not resolve a valid byte
-//     range for the body. This indicates the input does not match the
-//     shape Marshal produces. Byte-identical recovery is not possible;
-//     consumers using [UpdateMetadataOrReMarshal] get automatic
-//     Load + Marshal fallback with a paired W_UPDATE_METADATA_FALLBACK
-//     warning.
-//   - [diag.E_CONTEXT_CANCELLED] — ctx was cancelled at entry.
-//
-// Thread safety: UpdateMetadata is a pure function over its inputs.
-// It is safe for concurrent use; it does not mutate data or newMeta.
-//
-// Metadata-key convention (non-enforced): yammm treats keys as opaque
-// strings. Consumers using structured metadata should namespace their
-// keys (e.g., myapp.pipeline_completed) to avoid collisions with
-// other metadata consumers who share a .ys file.
+// UpdateMetadata returns data with its header's metadata replaced by newMeta and
+// its integrity hash recomputed, and every byte outside the header kept as it
+// was. It updates every document [Unmarshal] accepts under its default options
+// but decodes no instance. It checks the document's shape and, unless
+// [WithIntegrityCheck](false) is given, its integrity hash, so with the check
+// on the new hash seals no body the verified one did not. It takes
+// [WithIntegrityCheck] alone, and returns nil and a *[diag.ResultError] for a
+// document it refuses. The package doc's
+// Updating Metadata section states the header it writes, its refusals and its
+// cost.
 func UpdateMetadata(
 	ctx context.Context,
 	data []byte,
 	newMeta map[string]string,
-	opts ...UpdateOption,
-) ([]byte, diag.Result) {
+	opts ...Option,
+) ([]byte, error) {
+	if ctx == nil {
+		panic("snapshot.UpdateMetadata: nil context")
+	}
+	cfg := newConfig(opts)
+	if err := cfg.refuse("UpdateMetadata", optIntegrityCheck); err != nil {
+		return nil, err
+	}
 	if err := ctx.Err(); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-		return nil, c.Result()
+		return nil, cancelled(err)
 	}
 
-	if len(data) < 2 || data[0] != '{' {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			"snapshot.UpdateMetadata: input is not a yammm snapshot (missing opening '{')").Build())
-		return nil, c.Result()
-	}
-
-	// The output carries a freshly computed integrity hash, so a shape no
-	// read path accepts must not be blessed here. The four-key check reads
-	// tokens and skips values, so the body stays undecoded and the
-	// trust-the-body contract holds.
-	if err := checkTopLevelKeys(data); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+	if err := checkDocument(data); err != nil {
+		return nil, failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("snapshot.UpdateMetadata: %v", err)).Build())
-		return nil, c.Result()
 	}
 
-	// Decode the existing header via the streaming decoder. We skip the
-	// integrity check: UpdateMetadata's contract is "trust caller-provided
-	// body bytes"; a fresh hash is computed at write time.
-	loadCfg := defaultLoadConfig()
-	loadCfg.skipIntegrityCheck = true
-	sd := newStreamDecoder(data, nil, loadCfg)
+	sd := newStreamDecoder(data, schema.Schema{}, cfg)
 	if err := sd.decodeHeader(); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+		return nil, failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("snapshot.UpdateMetadata: header parse failed: %v", err)).Build())
-		return nil, c.Result()
 	}
-	// decodeHeader reports a rejected version or features field on the collector
-	// and returns nil, so the error alone would accept unreadable documents.
+	// decodeHeader reports a rejected version, feature or hash algorithm on the
+	// collector and returns nil, so the error alone would accept unreadable
+	// documents.
 	if sd.collector.HasErrors() {
-		return nil, sd.collector.Result()
+		return nil, sd.collector.Err()
+	}
+	if !cfg.skipIntegrityCheck && sd.verifyIntegrity() != IntegrityOK {
+		return nil, sd.collector.Err()
 	}
 
-	// Resolve the body offset. decodeHeader captures dec.InputOffset()
-	// immediately after the header object's closing '}'; in Marshal-
-	// produced output the byte at that offset is the ',' preceding the
-	// types key.
-	bodyOffset := sd.bodyOffset
-	if bodyOffset <= 0 || bodyOffset >= int64(len(data)) {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Fatal, diag.E_UPDATE_METADATA_BODY_OFFSET,
-			"snapshot.UpdateMetadata: body-boundary offset could not be resolved").Build())
-		return nil, c.Result()
-	}
-	if data[bodyOffset] != ',' {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Fatal, diag.E_UPDATE_METADATA_BODY_OFFSET,
-			fmt.Sprintf("snapshot.UpdateMetadata: expected ',' at body offset %d, got %q — input does not match Marshal-produced shape",
-				bodyOffset, data[bodyOffset])).Build())
-		return nil, c.Result()
+	// Judged once the document is: a fault of the document is reported first.
+	if err := invalidMetadata(newMeta); err != nil {
+		return nil, failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("snapshot.UpdateMetadata: %v", err)).Build())
 	}
 
-	// Detect input indentation.
-	indent := detectIndent(data)
-
-	// Build the header prefix pattern exactly as assembleCompact /
-	// assembleIndented does (see marshal.go). The prefix is the opening
-	// '{' plus the "yammm_snapshot" key (and its ": " separator for
-	// indented mode); the header value (the inner object) is inserted
-	// next, and the body suffix completes the document.
-	var prefix string
-	if indent != "" {
-		prefix = "{\n" + indent + `"yammm_snapshot": `
-	} else {
-		prefix = `{"yammm_snapshot":`
-	}
-
-	// Apply option overrides and preserve/override CreatedAt.
-	cfg := applyUpdateOptions(opts)
-	createdAt := sd.header.CreatedAt // byte-for-byte preserve by default
-	// A zero time preserves rather than stamping 0001-01-01T00:00:00Z over a
-	// good value. Marshal's config path drops a zero WithCreatedAt for the same
-	// reason; without this the two disagree on one option's zero value, and the
-	// caller that lost its timestamp has no way to tell which path ran.
-	if cfg.createdAtSet && !cfg.createdAt.IsZero() {
-		createdAt = cfg.createdAt.UTC().Format(time.RFC3339)
-	}
-
-	// Non-nil: decodeHeader reports a nil features field and the gate above
-	// returns on it, so no document reaching here carries one.
-	features := sd.header.Features
-
-	// Normalize newMeta: empty maps round-trip as omitempty (no key emitted),
-	// matching WithMetadata's shallow-copy-or-nil normalization at
-	// option.go:57-59.
 	var meta map[string]string
 	if len(newMeta) > 0 {
 		meta = maps.Clone(newMeta)
 	}
-
 	hdr := marshalHeaderWire{
-		SchemaName:    sd.header.SchemaName,
-		SchemaSource:  sd.header.SchemaSource,
-		SchemaHash:    sd.header.SchemaHash,
-		IntegrityHash: "", // canonical-form placeholder; filled in pass 2
-		Features:      features,
-		CreatedAt:     createdAt,
-		Metadata:      meta,
-		// Verbatim, nil included: fabricating a claim on a pre-v0.15.0
-		// document would attest to a body nothing here read.
+		SchemaName: sd.header.SchemaName,
+		SchemaHash: sd.header.SchemaHash,
+		// Non-nil: decodeHeader refuses a nil features field.
+		Features: sd.header.Features,
+		Metadata: meta,
+		// Verbatim, nil included: fabricating a claim on a document that
+		// states none would attest to a body nothing here read.
 		Attestation: sd.header.Attestation,
 	}
+	if string(sd.header.CreatedAt) != "null" {
+		hdr.CreatedAt = sd.header.CreatedAt
+	}
 
-	bodySuffix := data[bodyOffset:]
+	prefix, suffix := data[:sd.headerOffset], data[sd.bodyOffset:]
+	indent := headerIndent(data)
+	version, hashAlgo := sd.header.Version, sd.header.SchemaHashAlgorithm
+	hdr.IntegrityHash = sha256Sum(prefix, buildHeaderBytes(hdr, indent, version, hashAlgo), suffix)
+	header := buildHeaderBytes(hdr, indent, version, hashAlgo)
 
-	// Pass 1: build canonical form with empty integrity hash, compute SHA-256.
-	headerBytes := buildHeaderBytes(hdr, indent, sd.header.Version, sd.header.SchemaHashAlgorithm)
-	hdr.IntegrityHash = sha256Sum([]byte(prefix), headerBytes, bodySuffix)
-
-	// Pass 2: rebuild header with the computed hash and concatenate.
-	headerBytes = buildHeaderBytes(hdr, indent, sd.header.Version, sd.header.SchemaHashAlgorithm)
-	out := make([]byte, 0, len(prefix)+len(headerBytes)+len(bodySuffix))
+	out := make([]byte, 0, len(prefix)+len(header)+len(suffix))
 	out = append(out, prefix...)
-	out = append(out, headerBytes...)
-	out = append(out, bodySuffix...)
-
-	return out, sd.collector.Result()
+	out = append(out, header...)
+	out = append(out, suffix...)
+	return out, nil
 }
 
-// UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; on any Error or
-// Fatal issue other than E_CONTEXT_CANCELLED (E_SNAPSHOT_MALFORMED at Error,
-// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another), transparently falls
-// back to [Load] + [Marshal] using s for the Load. The fallback
-// carries the input's indentation and its created_at across — the created_at
-// byte-for-byte, as the fast path keeps it — so the result differs from a
-// direct Marshal only where the input document did.
-//
-// Panics if s is nil (programming error), on every call rather than only the
-// ones that reach the fallback: the function cannot complete without it, and
-// deferring the panic to the first input the fast path refuses hides the bug
-// until a document is malformed.
-//
-// When the fallback path fires, the returned [diag.Result] carries a
-// Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], every warning the Load
-// and Marshal legs produced, and one further Warning if the input stated a
-// created_at this path could not parse.
-// Its details include the distinct Error and Fatal codes that triggered it via
-// a comma-joined "triggering_codes" entry so consumers can log or surface
-// the transition without inspecting the error chain. Callers who want
-// to treat the warning as an error check HasWarnings() or iterate
-// BySeverity(Warning); callers who just want the output bytes use the
-// returned slice directly.
-//
-// Prefer this helper for most consumers. The primitive [UpdateMetadata]
-// remains available for consumers who genuinely need the strict fast
-// path — e.g., benchmarks isolating the fast-path cost, or workflows
-// where any Load + Marshal round-trip is operationally unacceptable and
-// the caller would rather surface the failure than silently recover.
-//
-// Cost on the happy path matches [UpdateMetadata]. On the fallback path it
-// matches Load + Marshal, which [TestUpdateMetadataRatioFloor] holds at least
-// three times slower on a 20 MB .ys; the W_UPDATE_METADATA_FALLBACK warning
-// makes the transition visible in consumer logs and dashboards.
-//
-// E_CONTEXT_CANCELLED is not a fallback trigger — it propagates as
-// cancellation without re-attempting via the slow path.
-//
-// Thread safety: UpdateMetadataOrReMarshal is a pure function over
-// its inputs. It is safe for concurrent use; it does not mutate
-// data, newMeta, or s.
-func UpdateMetadataOrReMarshal(
-	ctx context.Context,
-	data []byte,
-	newMeta map[string]string,
-	s *schema.Schema,
-	opts ...UpdateOption,
-) ([]byte, diag.Result) {
-	// Checked before the fast path, not inside the fallback that dereferences
-	// it: a nil schema is a caller's bug on every input, and only some inputs
-	// reach Load. Deferring the panic let a caller run for months and crash on
-	// the first document the fast path refused.
-	if s == nil {
-		panic("snapshot.UpdateMetadataOrReMarshal: nil Schema")
+// headerIndent returns the indent [Marshal] wrote data with: the whitespace
+// between the line feed that directly follows the document's opening brace
+// and the header's name, or "" when no line feed follows the brace. An indent
+// may hold a line feed itself, so the first one after the brace ends the
+// prefix, never the last. data has passed [checkDocument], so only whitespace
+// stands before the brace and between it and the name.
+func headerIndent(data []byte) string {
+	brace := bytes.IndexByte(data, '{')
+	name := brace + 1 + bytes.IndexByte(data[brace+1:], '"')
+	if name > brace+1 && data[brace+1] == '\n' {
+		return string(data[brace+2 : name])
 	}
-	out, res := UpdateMetadata(ctx, data, newMeta, opts...)
-	if !res.HasErrors() {
-		return out, res
-	}
-	if hasCancellation(res) {
-		return nil, res
-	}
-
-	triggeringCodes := distinctTriggeringCodes(res)
-
-	// Fall back to Load + Marshal.
-	loaded, loadRes := Load(ctx, data, s)
-	if loadRes.HasErrors() {
-		merged := mergeResults(res, loadRes)
-		return nil, merged
-	}
-
-	var fallbackWarnings []diag.Issue
-	marshalOpts := updateOptsToMarshalOpts(opts)
-	marshalOpts = append(marshalOpts, WithMetadata(newMeta))
-	// The fallback must not lose what the input document stated. The primitive
-	// rebuilds the header in place and keeps both; Load + Marshal reconstructs
-	// it, so the indent and the created_at have to be carried across or a
-	// pretty-printed document comes back compact and a stamped one comes back
-	// unstamped.
-	if indent := detectIndent(data); indent != "" {
-		marshalOpts = append(marshalOpts, WithIndent(indent))
-	}
-	// The caller's stamp wins only when it is a real one. WithUpdateCreatedAt
-	// sets createdAtSet even for a zero time, and Marshal omits a zero stamp —
-	// so gating on the flag alone made the fallback DROP the input's created_at
-	// where the fast path keeps it, which is the fast/slow divergence this
-	// helper exists to close.
-	ucfg := applyUpdateOptions(opts)
-	if !ucfg.createdAtSet || ucfg.createdAt.IsZero() {
-		if hdr, hdrRes := HeaderOnly(ctx, data); !hdrRes.HasErrors() && hdr != nil && hdr.CreatedAt != "" {
-			// Parsed to know it is RFC 3339, then carried as bytes: a
-			// re-format through time.Time drops fractional seconds and the
-			// offset, which the fast path keeps.
-			if _, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt); err == nil {
-				marshalOpts = append(marshalOpts, withCreatedAtText(hdr.CreatedAt))
-			} else {
-				// Dropping it silently loses a value the input stated. The
-				// primitive preserves the header's bytes whatever they say;
-				// this path cannot, so it reports what it could not carry.
-				fallbackWarnings = append(fallbackWarnings, diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
-					fmt.Sprintf("input header states created_at %q, which is not RFC 3339; the re-marshalled document carries none", hdr.CreatedAt)).
-					Build())
-			}
-		}
-	}
-	reMarshaled, marshalRes := Marshal(ctx, loaded, marshalOpts...)
-	if marshalRes.HasErrors() {
-		merged := mergeResults(res, marshalRes)
-		return nil, merged
-	}
-
-	warn := diag.NewIssue(diag.Warning, diag.W_UPDATE_METADATA_FALLBACK,
-		"snapshot.UpdateMetadataOrReMarshal: fell back to Load + Marshal after UpdateMetadata refused input").
-		WithDetail(diag.DetailKeyTriggeringCodes, strings.Join(triggeringCodes, ",")).
-		Build()
-	// The legs' own warnings travel with it. A fresh collector holding only
-	// this warning discarded everything Load and Marshal reported — a
-	// provenance-path fallback on the way in vanished from the caller's view.
-	c := diag.NewCollector(0)
-	c.Collect(warn)
-	for _, iss := range fallbackWarnings {
-		c.Collect(iss)
-	}
-	c.Merge(loadRes)
-	c.Merge(marshalRes)
-	return reMarshaled, c.Result()
-}
-
-// detectIndent sniffs the input's indentation unit. Matches Marshal's
-// emission shape: assembleCompact writes `{"yammm_snapshot":...` (q == 1);
-// assembleIndented writes `{\n<indent>"yammm_snapshot": ...` (data[1]
-// == '\n' and indent == data[2:q]).
-func detectIndent(data []byte) string {
-	if len(data) < 2 || data[0] != '{' {
-		return ""
-	}
-	// Find the first '"' at position >= 1.
-	q := -1
-	for i := 1; i < len(data); i++ {
-		if data[i] == '"' {
-			q = i
-			break
-		}
-	}
-	if q < 0 {
-		return ""
-	}
-	if q == 1 {
-		return ""
-	}
-	if q >= 2 && data[1] == '\n' {
-		return string(data[2:q])
-	}
-	// Pathological shape: best-effort compact.
 	return ""
-}
-
-// hasCancellation reports whether the result carries an
-// E_CONTEXT_CANCELLED issue at any severity.
-func hasCancellation(r diag.Result) bool {
-	for iss := range r.Issues() {
-		if iss.Code() == diag.E_CONTEXT_CANCELLED {
-			return true
-		}
-	}
-	return false
-}
-
-// distinctTriggeringCodes returns the distinct Fatal- and Error-severity codes
-// in r, sorted for deterministic detail output: the fallback triggers on
-// either, and E_SNAPSHOT_MALFORMED arrives at Error.
-func distinctTriggeringCodes(r diag.Result) []string {
-	seen := make(map[string]struct{})
-	for iss := range r.BySeverity(diag.Fatal) {
-		seen[iss.Code().String()] = struct{}{}
-	}
-	for iss := range r.BySeverity(diag.Error) {
-		seen[iss.Code().String()] = struct{}{}
-	}
-	codes := make([]string, 0, len(seen))
-	for c := range seen {
-		codes = append(codes, c)
-	}
-	sort.Strings(codes)
-	return codes
-}
-
-// mergeResults returns a Result holding a's and b's issues. It merges both, so
-// a truncated input's dropped issues stay counted and its truncation carries.
-func mergeResults(a, b diag.Result) diag.Result {
-	c := diag.NewCollector(0)
-	c.Merge(a)
-	c.Merge(b)
-	return c.Result()
-}
-
-// updateOptsToMarshalOpts converts the UpdateOption slice into the
-// equivalent Marshal Option slice for the fallback path. Today only
-// WithUpdateCreatedAt requires conversion; future UpdateOption
-// additions must extend this translator.
-func updateOptsToMarshalOpts(opts []UpdateOption) []Option {
-	cfg := applyUpdateOptions(opts)
-	var out []Option
-	if cfg.createdAtSet {
-		out = append(out, WithCreatedAt(cfg.createdAt))
-	}
-	return out
 }

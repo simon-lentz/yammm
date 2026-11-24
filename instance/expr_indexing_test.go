@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"errors"
 	"maps"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -18,18 +20,20 @@ func invariantHolds(t *testing.T, decls, inv string, props map[string]any) (bool
 	t.Helper()
 	src := "schema \"x\"\n\ntype T {\n\tid String primary\n" + decls +
 		"\t! \"probe\" " + inv + "\n}\n"
-	s, result := schema.LoadString(t.Context(), src, "x.yammm")
-	if result.HasErrors() {
-		t.Fatalf("schema carrying %q did not load: %s", inv, result)
+	s, err := schema.LoadString(t.Context(), src, "x.yammm")
+	if err != nil {
+		t.Fatalf("schema carrying %q did not load: %s", inv, err)
 	}
 	all := map[string]any{"id": "a"}
 	maps.Copy(all, props)
-	_, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: all})
-	return res.OK(), res.String()
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: all})
+	})
+	return diagtest.Err(res) == nil, res.String()
 }
 
 // A List-typed property is indexable. Its value arrives as immutable.Slice —
-// what Value.Unwrap returns for a collection — which the bracket operator did
+// what Value.Any returns for a collection — which the bracket operator did
 // not handle, so every List index was an evaluation error against the SPEC.
 func TestIndexing_ListPropertyIsIndexable(t *testing.T) {
 	const decls = "\ttags List<String>\n"
@@ -65,22 +69,24 @@ func TestIndexing_StringPropertyStillIndexes(t *testing.T) {
 	}
 }
 
-// The empty index list and the two-index list parse — the bracket grammar is
-// more permissive than the language — and the evaluator refuses both on every
-// input, so the static checker refuses them at load. The evaluator's own
-// refusal is pinned by the contract table's refuse rows.
-func TestIndexing_IndexArityIsRefusedAtLoad(t *testing.T) {
-	for _, inv := range []string{`tags[] -> IsNil`, `tags[0, 1] -> IsNil`} {
+// A bracket holds one index: none, two, and one with a trailing comma are
+// each a syntax error.
+func TestIndexing_BracketHoldsOneIndex(t *testing.T) {
+	for inv, want := range map[string]string{
+		`tags[] -> IsNil`:     "expected an index before ']'",
+		`tags[0, 1] -> IsNil`: "expected ']' after one index",
+		`tags[0,] -> IsNil`:   "expected ']' after one index",
+	} {
 		src := "schema \"x\"\n\ntype T {\n\tid String primary\n\ttags List<String>\n\t! \"probe\" " + inv + "\n}\n"
-		_, res := schema.LoadString(t.Context(), src, "x.yammm")
-		if !res.HasCode(diag.E_INVALID_INVARIANT) || !strings.Contains(res.Err().Error(), "exactly one index") {
-			t.Errorf("%s: want E_INVALID_INVARIANT naming the index count; got %v", inv, res.Err())
+		_, err := schema.LoadString(t.Context(), src, "x.yammm")
+		if !errors.Is(err, diag.E_SYNTAX) || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want E_SYNTAX %q; got %v", inv, want, err)
 		}
 	}
 }
 
 // Len counts a map's entries. The DSL declares no map datatype, so the only
-// map an expression sees is $self — carried as immutable.Map[string], a
+// map an expression sees is $self — carried as immutable.Properties, a
 // struct the reflect.Map arm never matches, which is why the SPEC's "or map"
 // was false. TypeOf already named it "map", so the two disagreed.
 func TestLen_CountsSelfMapEntries(t *testing.T) {

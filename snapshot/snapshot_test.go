@@ -12,7 +12,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -25,42 +24,41 @@ import (
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
-func testSchema(t *testing.T) *schema.Schema {
+func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), false, false).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("title", schema.NewStringConstraint()).
-		Done().
-		Build()
-	if result.HasErrors() {
-		t.Fatalf("testSchema: %s", result)
+	s, err := schema.LoadString(t.Context(), `schema "test"
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (one) Company
+}
+
+type Company {
+	id String primary
+	title String required
+}
+`, "test.yammm")
+	if err != nil {
+		t.Fatalf("testSchema: %s", err)
 	}
 	return s
 }
 
 // testSchemaWithEdgeProps is testSchema with EMPLOYER declaring every edge
 // property the edge-property round-trip tests and their fixture store.
-func testSchemaWithEdgeProps(t *testing.T) *schema.Schema {
+func testSchemaWithEdgeProps(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, err := schema.LoadString(t.Context(), `schema "test"
 
 type Person {
 	id String primary
@@ -81,36 +79,35 @@ type Company {
 	title String
 }
 `, "test.yammm")
-	if result.HasErrors() {
-		t.Fatalf("testSchemaWithEdgeProps: %s", result)
+	if err != nil {
+		t.Fatalf("testSchemaWithEdgeProps: %s", err)
 	}
 	return s
 }
 
-func testSchemaWithComposition(t *testing.T) *schema.Schema {
+func testSchemaWithComposition(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("test_comp").
-		WithSourceID(location.MustNewSourceID("test://test_comp.yammm")).
-		AddType("Parent").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithComposition("CHILDREN", schema.NewTypeRef("", "Child", location.Span{}), true, true).
-		Done().
-		AddType("Child").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("value", schema.NewStringConstraint()).
-		Done().
-		Build()
-	if result.HasErrors() {
-		t.Fatalf("testSchemaWithComposition: %s", result)
+	s, err := schema.LoadString(t.Context(), `schema "test_comp"
+
+type Parent {
+	id String primary
+	name String required
+	*-> CHILDREN (many) Child
+}
+
+part type Child {
+	id String primary
+	value String required
+}
+`, "test_comp.yammm")
+	if err != nil {
+		t.Fatalf("testSchemaWithComposition: %s", err)
 	}
 	return s
 }
 
 // mustTypeID resolves a schema type's ID, failing the test if absent.
-func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
+func mustTypeID(t *testing.T, s schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -119,61 +116,59 @@ func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 	return typ.ID()
 }
 
-func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+func mustValidInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
 	t.Helper()
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-	)
+	return instancetest.Valid(t, s, typeName, keyedProps(t, s, typeName, pk, props))
 }
 
-func mustValidInstanceWithEdge(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKeys [][]any) *instance.ValidInstance { //nolint:unparam // test helper kept general
+// edgeInput returns relName's input field on typeName and the target object
+// naming key, with edgeProps beside the foreign key.
+func edgeInput(t *testing.T, s schema.Schema, typeName, relName string, key []any, edgeProps map[string]any) (string, map[string]any) {
 	t.Helper()
-	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
-	for i, tk := range targetKeys {
-		targets[i] = instance.NewValidEdgeTarget(immutable.WrapKey(tk), immutable.WrapProperties(nil))
+	typ, ok := s.Type(typeName)
+	if !ok {
+		t.Fatalf("Type %q not found in schema", typeName)
 	}
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
-	)
+	rel, ok := typ.Relation(relName)
+	if !ok {
+		t.Fatalf("Type %q declares no relation %q", typeName, relName)
+	}
+	target, ok := s.TypeByID(rel.TargetID())
+	if !ok {
+		t.Fatalf("relation %q targets no type", relName)
+	}
+	obj := make(map[string]any, len(key)+len(edgeProps))
+	maps.Copy(obj, edgeProps)
+	i := 0
+	for pk := range target.PrimaryKeys() {
+		obj["_target_"+pk.Name()] = key[i]
+		i++
+	}
+	return rel.FieldName(), obj
 }
 
-func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+func mustValidInstanceWithEdge(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKeys [][]any) instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-	)
+	data := keyedProps(t, s, typeName, pk, props)
+	field, obj := edgeInput(t, s, typeName, relName, targetKeys[0], nil)
+	data[field] = obj
+	return instancetest.Valid(t, s, typeName, data)
 }
 
 // mustValidInstanceWithEdgeProps builds a ValidInstance with a single edge
 // that carries schema-declared edge properties.
-func mustValidInstanceWithEdgeProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKey []any, edgeProps map[string]any) *instance.ValidInstance { //nolint:unparam // test helper kept general
+func mustValidInstanceWithEdgeProps(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKey []any, edgeProps map[string]any) instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
-	targets := []instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(immutable.WrapKey(targetKey), immutable.WrapProperties(edgeProps)),
-	}
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
-	)
+	data := keyedProps(t, s, typeName, pk, props)
+	field, obj := edgeInput(t, s, typeName, relName, targetKey, edgeProps)
+	data[field] = obj
+	return instancetest.Valid(t, s, typeName, data)
 }
 
 // keyedProps returns props holding each primary-key property the key states,
 // where props does not state it, so a fixture instance holds its key the way a
 // validated one does. A key property the fixture states is kept as written.
-func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
+func keyedProps(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -191,7 +186,7 @@ func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props
 	return out
 }
 
-func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
+func buildSnapshot(t *testing.T, s schema.Schema, instances ...instance.ValidInstance) graph.Snapshot {
 	t.Helper()
 	return snapshottest.BuildSnapshot(t, s, instances...)
 }
@@ -203,27 +198,27 @@ func TestMarshal_NilPanics(t *testing.T) {
 			t.Error("expected panic for nil snapshot")
 		}
 	}()
-	snapshot.Marshal(context.Background(), nil)
+	_, _ = snapshot.Marshal(context.Background(), graph.Snapshot{})
 }
 
-func TestVerify_NilSchemaPanics(t *testing.T) {
+func TestVerify_ZeroSchemaPanics(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
 			t.Error("expected panic for nil schema")
 		}
 	}()
-	snapshot.Verify(context.Background(), []byte(`{}`), nil)
+	_ = snapshot.Verify(context.Background(), []byte(`{}`), schema.Schema{})
 }
 
-func TestLoad_NilSchemaPanics(t *testing.T) {
+func TestLoad_ZeroSchemaPanics(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
 			t.Error("expected panic for nil schema")
 		}
 	}()
-	snapshot.Load(context.Background(), []byte(`{}`), nil)
+	_, _ = snapshot.Unmarshal(context.Background(), []byte(`{}`), schema.Schema{})
 }
 
 func TestMarshal_EmptySnapshot(t *testing.T) {
@@ -231,8 +226,8 @@ func TestMarshal_EmptySnapshot(t *testing.T) {
 	snap := buildSnapshot(t, s)
 	ctx := context.Background()
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	if len(data) == 0 {
@@ -273,29 +268,29 @@ func TestMarshalLoad_RoundTrip_Basic(t *testing.T) {
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	snap := buildSnapshot(t, s, company, person)
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 }
 
 func TestMarshalLoad_RoundTrip_Empty(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s)
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 }
 
 func TestMarshalLoad_RoundTrip_WithComposition(t *testing.T) {
 	s := testSchemaWithComposition(t)
-	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"id": "p1", "name": "Dad"})
+	parent := instancetest.Valid(t, s, "Parent", map[string]any{
+		"id": "p1", "name": "Dad",
+		"children": []any{map[string]any{"id": "ch1", "value": "hello"}},
+	})
 
 	g := graph.New(s)
-	ctx := context.Background()
-	g.Add(ctx, parent)
-
-	// Add composed child via AddComposed.
-	child := mustValidPartInstance(t, s, "Child", []any{"ch1"}, map[string]any{"id": "ch1", "value": "hello"})
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
+	if err := g.Add(context.Background(), parent); err != nil {
+		t.Fatalf("Add: %s", err)
+	}
 
 	snap := g.Snapshot()
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 }
 
 func TestMarshalLoad_EdgeReconstruction(t *testing.T) {
@@ -305,23 +300,23 @@ func TestMarshalLoad_EdgeReconstruction(t *testing.T) {
 	snap := buildSnapshot(t, s, company, person)
 
 	ctx := context.Background()
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
 	// Verify EdgesFrom on loaded snapshot.
-	persons := loaded.InstancesOf(tidOf(t, s, "Person"))
+	persons := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Person")))
 	if len(persons) != 1 {
 		t.Fatalf("expected 1 Person, got %d", len(persons))
 	}
 
-	edges := loaded.EdgesFrom(persons[0])
+	edges := slices.Collect(loaded.EdgesFrom(persons[0]))
 	if len(edges) != 1 {
 		t.Fatalf("expected 1 edge from Person, got %d", len(edges))
 	}
@@ -338,24 +333,6 @@ func TestMarshalLoad_EdgeReconstruction(t *testing.T) {
 	}
 }
 
-func TestMarshalLoad_LoadedDiagnostics(t *testing.T) {
-	s := testSchema(t)
-	snap := buildSnapshot(t, s,
-		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
-
-	ctx := context.Background()
-	data, _ := snapshot.Marshal(ctx, snap)
-	loaded, _ := snapshot.Load(ctx, data, s)
-
-	// Loaded snapshots return diag.OK() for Diagnostics.
-	if !loaded.Diagnostics().OK() {
-		t.Error("loaded Diagnostics() should be OK")
-	}
-	if loaded.Diagnostics().HasErrors() {
-		t.Error("loaded HasErrors() should be false")
-	}
-}
-
 func TestVerify_SchemaMismatch(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
@@ -365,19 +342,20 @@ func TestVerify_SchemaMismatch(t *testing.T) {
 	data, _ := snapshot.Marshal(ctx, snap)
 
 	// Build a different schema.
-	otherSchema, result := schema.NewBuilder().
-		WithName("other").
-		WithSourceID(location.MustNewSourceID("test://other.yammm")).
-		AddType("Widget").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		Build()
-	if result.HasErrors() {
-		t.Fatalf("build other schema: %s", result)
+	otherSchema, err := schema.LoadString(t.Context(), `schema "other"
+
+type Widget {
+	id String primary
+}
+`, "other.yammm")
+	if err != nil {
+		t.Fatalf("build other schema: %s", err)
 	}
 
-	verifyResult := snapshot.Verify(ctx, data, otherSchema)
-	if verifyResult.OK() {
+	verifyResult := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, data, otherSchema, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(verifyResult) == nil {
 		t.Error("expected schema mismatch error")
 	}
 
@@ -397,8 +375,10 @@ func TestVerify_UnsupportedVersion(t *testing.T) {
 	doc := `{"yammm_snapshot":{"version":99,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":"sha256:abc","schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":[],"instances":{},"diagnostics":{"duplicates":[],"unresolved":[]}}`
 
 	s := testSchema(t)
-	result := snapshot.Verify(context.Background(), []byte(doc), s)
-	if result.OK() {
+	result := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(context.Background(), []byte(doc), s, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(result) == nil {
 		t.Error("expected version error")
 	}
 
@@ -430,8 +410,10 @@ func TestVerify_IntegrityMismatch(t *testing.T) {
 		corrupted[idx] = 'X'
 	}
 
-	result := snapshot.Verify(ctx, corrupted, s)
-	if result.OK() {
+	result := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, corrupted, s, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(result) == nil {
 		t.Error("expected integrity mismatch")
 	}
 
@@ -463,7 +445,9 @@ func TestVerify_SkipIntegrityCheck(t *testing.T) {
 	}
 
 	// With the integrity check off, should not fail on integrity.
-	result := snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(false))
+	result := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	// May have other issues but not integrity mismatch.
 	for issue := range result.Errors() {
 		if issue.Code() == diag.E_SNAPSHOT_INTEGRITY_MISMATCH {
@@ -488,24 +472,26 @@ func TestVerify_WithIntegrityCheckTrue_ReportsTheMismatch(t *testing.T) {
 		t.Fatal("the corruption did not apply")
 	}
 
-	result := snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(true))
-	if !result.HasCode(diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
-		t.Errorf("expected E_SNAPSHOT_INTEGRITY_MISMATCH with the check on, got: %s", result)
+	err := snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(true))
+	if !errors.Is(err, diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
+		t.Errorf("expected E_SNAPSHOT_INTEGRITY_MISMATCH with the check on, got: %s", err)
 	}
 }
 
 func TestVerify_MalformedJSON(t *testing.T) {
 	s := testSchema(t)
-	result := snapshot.Verify(context.Background(), []byte(`not json`), s)
-	if result.OK() {
+	err := snapshot.Verify(context.Background(), []byte(`not json`), s)
+	if err == nil {
 		t.Error("expected error for malformed JSON")
 	}
 }
 
 func TestVerify_MissingHeader(t *testing.T) {
 	s := testSchema(t)
-	result := snapshot.Verify(context.Background(), []byte(`{"types":[]}`), s)
-	if result.OK() {
+	result := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(context.Background(), []byte(`{"types":[]}`), s, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(result) == nil {
 		t.Error("expected error for missing header")
 	}
 
@@ -529,8 +515,8 @@ func TestInfo_Basic(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
 
-	info, result := snapshot.Info(ctx, data)
-	if err := result.Err(); err != nil {
+	info, readErr := snapshot.Stat(ctx, data)
+	if err := readErr; err != nil {
 		t.Fatalf("Info: %v", err)
 	}
 	if info == nil {
@@ -549,34 +535,12 @@ func TestInfo_Basic(t *testing.T) {
 	if info.TotalEdges != 1 {
 		t.Errorf("TotalEdges: got %d, want 1", info.TotalEdges)
 	}
-	if info.IntegrityStatus != "ok" {
-		t.Errorf("IntegrityStatus: got %q, want %q", info.IntegrityStatus, "ok")
+	if info.IntegrityStatus != snapshot.IntegrityOK {
+		t.Errorf("IntegrityStatus: got %s, want %s", info.IntegrityStatus, snapshot.IntegrityOK)
 	}
 }
 
-// sharedFields projects two structs' exported fields onto name-keyed maps
-// restricted to the field names they share, so cross-type parity tests
-// compare every common field without a hand-maintained list.
-func sharedFields(t *testing.T, a, b any) (av, bv map[string]any) {
-	t.Helper()
-	ra, rb := reflect.ValueOf(a), reflect.ValueOf(b)
-	names := make(map[string]bool)
-	for i := range ra.NumField() {
-		names[ra.Type().Field(i).Name] = true
-	}
-	av, bv = make(map[string]any), make(map[string]any)
-	for i := range rb.NumField() {
-		name := rb.Type().Field(i).Name
-		if names[name] {
-			av[name] = ra.FieldByName(name).Interface()
-			bv[name] = rb.Field(i).Interface()
-		}
-	}
-	require.NotEmpty(t, av, "structs share no fields — parity test is vacuous")
-	return av, bv
-}
-
-func TestHeaderOnly_Basic(t *testing.T) {
+func TestReadHeader_Basic(t *testing.T) {
 	s := testSchema(t)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
@@ -585,21 +549,20 @@ func TestHeaderOnly_Basic(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
 
-	header, result := snapshot.HeaderOnly(ctx, data)
-	require.NoError(t, result.Err(), "HeaderOnly should succeed")
-	require.NotNil(t, header, "HeaderOnly should return a non-nil HeaderInfo")
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err, "ReadHeader should succeed")
+	require.NotNil(t, header, "ReadHeader should return a non-nil Header")
 
 	assert.Equal(t, 4, header.Version, "Version")
 	assert.Equal(t, "test", header.SchemaName, "SchemaName")
 	assert.NotEmpty(t, header.SchemaHash, "SchemaHash should be populated")
 	assert.NotEmpty(t, header.IntegrityHash, "IntegrityHash should be populated (value, not verified)")
-	assert.Equal(t, int64(len(data)), header.FileSize, "FileSize")
 	assert.ElementsMatch(t,
 		[]snapshot.TypeRef{{Schema: "test", Name: "Company"}, {Schema: "test", Name: "Person"}},
 		header.Types, "Types should include both types")
 }
 
-func TestHeaderOnly_WithMetadata(t *testing.T) {
+func TestReadHeader_WithMetadata(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
@@ -610,14 +573,14 @@ func TestHeaderOnly_WithMetadata(t *testing.T) {
 		"extraction_complete": "true",
 	}))
 
-	header, result := snapshot.HeaderOnly(ctx, data)
-	require.NoError(t, result.Err())
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err)
 	require.NotNil(t, header.Metadata, "Metadata should be present")
 	assert.Equal(t, "catalog.book_ingest", header.Metadata["pipeline"])
 	assert.Equal(t, "true", header.Metadata["extraction_complete"])
 }
 
-func TestHeaderOnly_WithCreatedAt(t *testing.T) {
+func TestReadHeader_WithCreatedAt(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
@@ -628,57 +591,12 @@ func TestHeaderOnly_WithCreatedAt(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithCreatedAt(created))
 
-	header, result := snapshot.HeaderOnly(ctx, data)
-	require.NoError(t, result.Err())
-	assert.Equal(t, "2026-04-16T14:30:00Z", header.CreatedAt, "CreatedAt should round-trip as RFC 3339")
+	header, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, readErr)
+	assert.Equal(t, created, header.CreatedAt, "CreatedAt should round-trip as RFC 3339")
 }
 
-// TestWithCreatedAtFrom_CarriesBytesVerbatim pins why the option takes a
-// header rather than a time: a foreign created_at carrying a sub-second part
-// and an offset does not survive a parse-and-reformat, and rewriting it is not
-// this package's to do.
-func TestWithCreatedAtFrom_CarriesBytesVerbatim(t *testing.T) {
-	s := testSchema(t)
-	snap := buildSnapshot(t, s,
-		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
-
-	const foreign = "2026-01-01T12:00:00.123456+02:00"
-	ctx := context.Background()
-	data, _ := snapshot.Marshal(ctx, snap,
-		snapshot.WithCreatedAtFrom(&snapshot.HeaderInfo{CreatedAt: foreign}))
-
-	header, result := snapshot.HeaderOnly(ctx, data)
-	require.NoError(t, result.Err())
-	assert.Equal(t, foreign, header.CreatedAt, "the header's bytes are carried, not reformatted")
-
-	// The comparison that makes the point: the parsed route loses both.
-	parsed, err := time.Parse(time.RFC3339, foreign)
-	require.NoError(t, err)
-	viaParse, _ := snapshot.Marshal(ctx, snap, snapshot.WithCreatedAt(parsed))
-	lossy, result := snapshot.HeaderOnly(ctx, viaParse)
-	require.NoError(t, result.Err())
-	assert.NotEqual(t, foreign, lossy.CreatedAt, "WithCreatedAt is the lossy route this option exists to avoid")
-}
-
-// TestWithCreatedAtFrom_NilHeaderSetsNothing pins the documented nil contract:
-// it sets nothing, rather than clearing what an earlier option set.
-func TestWithCreatedAtFrom_NilHeaderSetsNothing(t *testing.T) {
-	s := testSchema(t)
-	snap := buildSnapshot(t, s,
-		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
-
-	const kept = "2026-01-01T12:00:00.123456+02:00"
-	ctx := context.Background()
-	data, _ := snapshot.Marshal(ctx, snap,
-		snapshot.WithCreatedAtFrom(&snapshot.HeaderInfo{CreatedAt: kept}),
-		snapshot.WithCreatedAtFrom(nil))
-
-	header, result := snapshot.HeaderOnly(ctx, data)
-	require.NoError(t, result.Err())
-	assert.Equal(t, kept, header.CreatedAt, "a nil header sets nothing; it does not clear")
-}
-
-func TestHeaderOnly_CreatedAtOmitted(t *testing.T) {
+func TestReadHeader_CreatedAtOmitted(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
@@ -686,12 +604,12 @@ func TestHeaderOnly_CreatedAtOmitted(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap) // No WithCreatedAt — default is empty.
 
-	header, result := snapshot.HeaderOnly(ctx, data)
-	require.NoError(t, result.Err())
-	assert.Empty(t, header.CreatedAt, "CreatedAt should be empty when not set during marshal")
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err)
+	assert.True(t, header.CreatedAt.IsZero(), "CreatedAt should be zero when not set during marshal")
 }
 
-func TestHeaderOnly_ConsistentWithInfo(t *testing.T) {
+func TestReadHeader_ConsistentWithInfo(t *testing.T) {
 	s := testSchema(t)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
@@ -700,19 +618,15 @@ func TestHeaderOnly_ConsistentWithInfo(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"key": "val"}))
 
-	info, infoRes := snapshot.Info(ctx, data)
-	require.NoError(t, infoRes.Err())
-	header, headerRes := snapshot.HeaderOnly(ctx, data)
-	require.NoError(t, headerRes.Err())
+	info, err := snapshot.Stat(ctx, data)
+	require.NoError(t, err)
+	header, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, readErr)
 
-	// Every field common to both APIs must match byte-for-byte. The
-	// reflected projection keys on shared field names, so fields added to
-	// both structs later are parity-checked automatically.
-	infoFields, headerFields := sharedFields(t, *info, *header)
-	assert.Equal(t, infoFields, headerFields)
+	assert.Equal(t, info.Header, *header)
 }
 
-func TestHeaderOnly_IntegrityNotVerified(t *testing.T) {
+func TestReadHeader_IntegrityNotVerified(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
@@ -721,8 +635,8 @@ func TestHeaderOnly_IntegrityNotVerified(t *testing.T) {
 	data, _ := snapshot.Marshal(ctx, snap)
 
 	// Sanity-check: Info on clean data succeeds with IntegrityStatus == "ok".
-	info, _ := snapshot.Info(ctx, data)
-	require.Equal(t, "ok", info.IntegrityStatus, "clean data should verify integrity")
+	info, _ := snapshot.Stat(ctx, data)
+	require.Equal(t, snapshot.IntegrityOK, info.IntegrityStatus, "clean data should verify integrity")
 
 	// Corrupt a byte inside the instance body (Acme → Acmf). The header is
 	// unchanged; the integrity hash in the header covers the whole document
@@ -734,71 +648,31 @@ func TestHeaderOnly_IntegrityNotVerified(t *testing.T) {
 	corrupted[corruptIdx+3] = 'f'
 
 	// Info reports a mismatch — it checks the full document.
-	infoCorrupt, _ := snapshot.Info(ctx, corrupted)
-	assert.Equal(t, "mismatch", infoCorrupt.IntegrityStatus, "Info should detect body corruption")
+	infoCorrupt, _ := snapshot.Stat(ctx, corrupted)
+	assert.Equal(t, snapshot.IntegrityMismatch, infoCorrupt.IntegrityStatus, "Stat should detect body corruption")
 
-	// HeaderOnly succeeds — it does not verify integrity. The stored hash is
+	// ReadHeader succeeds — it does not verify integrity. The stored hash is
 	// returned as-is, callers who want verification use Verify.
-	header, headerRes := snapshot.HeaderOnly(ctx, corrupted)
-	require.NoError(t, headerRes.Err(), "HeaderOnly should not error on body corruption")
-	assert.NotEmpty(t, header.IntegrityHash, "HeaderOnly returns the stored hash value")
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(corrupted))
+	require.NoError(t, err, "ReadHeader should not error on body corruption")
+	assert.NotEmpty(t, header.IntegrityHash, "ReadHeader returns the stored hash value")
 	assert.Equal(t, info.IntegrityHash, header.IntegrityHash,
 		"the stored integrity hash is unchanged by body corruption")
 }
 
-func TestHeaderOnly_MalformedJSON(t *testing.T) {
-	_, result := snapshot.HeaderOnly(context.Background(), []byte(`not json`))
-	assert.False(t, result.OK(), "HeaderOnly should error on malformed JSON")
+func TestReadHeader_EmptyInput(t *testing.T) {
+	_, err := snapshot.ReadHeader(context.Background(), bytes.NewReader(nil))
+	require.Error(t, err, "ReadHeader should error on nil input")
 }
 
-func TestHeaderOnly_EmptyInput(t *testing.T) {
-	_, result := snapshot.HeaderOnly(context.Background(), nil)
-	assert.False(t, result.OK(), "HeaderOnly should error on nil input")
-}
-
-func TestHeaderOnly_MissingHeader(t *testing.T) {
-	_, result := snapshot.HeaderOnly(context.Background(), []byte(`{"types":[]}`))
-	assert.False(t, result.OK(), "HeaderOnly should error when yammm_snapshot header is absent")
-
-	var found bool
-	for issue := range result.Errors() {
-		if issue.Code() == diag.E_SNAPSHOT_MALFORMED {
-			found = true
-		}
-	}
-	assert.True(t, found, "missing header should produce E_SNAPSHOT_MALFORMED")
-}
-
-func TestHeaderOnly_ContextCancellation(t *testing.T) {
-	s := testSchema(t)
-	snap := buildSnapshot(t, s,
-		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
-
-	data, _ := snapshot.Marshal(context.Background(), snap)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately.
-
-	_, result := snapshot.HeaderOnly(ctx, data)
-	assert.False(t, result.OK(), "cancelled context should produce a diagnostic")
-
-	var found bool
-	for issue := range result.BySeverity(diag.Fatal) {
-		if issue.Code() == diag.E_CONTEXT_CANCELLED {
-			found = true
-		}
-	}
-	assert.True(t, found, "cancelled context should produce E_CONTEXT_CANCELLED at Fatal severity")
-}
-
-// HeaderOnlyRead streams header metadata from an io.Reader without
+// ReadHeader streams header metadata from an io.Reader without
 // materializing the full document. The tests pin each Godoc-advertised
 // contract: reader-vs-bytes parity, the MaxHeaderSize cap and its
 // distinguished error message, slow-reader tolerance via io.Pipe,
 // cancellation at entry, reader-error uniform surfacing, and the
 // baseline malformed-input paths.
 
-func TestHeaderOnlyRead_HappyPath(t *testing.T) {
+func TestReadHeader_HappyPath(t *testing.T) {
 	s := testSchema(t)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
@@ -807,9 +681,9 @@ func TestHeaderOnlyRead_HappyPath(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
 
-	header, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
-	require.NoError(t, result.Err(), "HeaderOnlyRead should succeed on well-formed input")
-	require.NotNil(t, header, "HeaderOnlyRead should return a non-nil HeaderInfo")
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err, "ReadHeader should succeed on well-formed input")
+	require.NotNil(t, header, "ReadHeader should return a non-nil Header")
 
 	assert.Equal(t, 4, header.Version)
 	assert.Equal(t, "test", header.SchemaName)
@@ -818,36 +692,9 @@ func TestHeaderOnlyRead_HappyPath(t *testing.T) {
 	assert.ElementsMatch(t,
 		[]snapshot.TypeRef{{Schema: "test", Name: "Company"}, {Schema: "test", Name: "Person"}},
 		header.Types)
-	assert.Equal(t, int64(0), header.FileSize, "FileSize is not populated in the reader variant")
 }
 
-func TestHeaderOnlyRead_ParityWithHeaderOnly(t *testing.T) {
-	s := testSchema(t)
-	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
-	snap := buildSnapshot(t, s, company, person)
-
-	ctx := context.Background()
-	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"key": "val"}))
-
-	fromBytes, bytesRes := snapshot.HeaderOnly(ctx, data)
-	require.NoError(t, bytesRes.Err())
-	fromReader, readerRes := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
-	require.NoError(t, readerRes.Err())
-
-	// Every HeaderInfo field equal EXCEPT FileSize — the single
-	// documented structural delta between the two entry points. Pin the
-	// delta explicitly, then zero it and compare whole structs so fields
-	// added to HeaderInfo later are parity-checked automatically.
-	assert.Equal(t, int64(len(data)), fromBytes.FileSize)
-	assert.Equal(t, int64(0), fromReader.FileSize)
-
-	fb, fr := *fromBytes, *fromReader
-	fb.FileSize, fr.FileSize = 0, 0
-	assert.Equal(t, fb, fr)
-}
-
-func TestHeaderOnlyRead_ExceedsMaxHeaderSize(t *testing.T) {
+func TestReadHeader_ExceedsMaxHeaderSize(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
@@ -858,19 +705,21 @@ func TestHeaderOnlyRead_ExceedsMaxHeaderSize(t *testing.T) {
 	huge := strings.Repeat("x", snapshot.MaxHeaderSize+10*1024)
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"huge": huge}))
 
-	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
-	require.True(t, result.HasErrors(), "header exceeding MaxHeaderSize should error")
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	})
+	require.Error(t, diagtest.Err(result), "header exceeding MaxHeaderSize should error")
 
 	var found bool
 	for issue := range result.Errors() {
-		if issue.Code() == diag.E_SNAPSHOT_MALFORMED && strings.Contains(issue.Message(), "exceeded MaxHeaderSize") {
+		if issue.Code() == diag.E_SNAPSHOT_MALFORMED && issue.Message() == fmt.Sprintf("header exceeded MaxHeaderSize (%d bytes)", snapshot.MaxHeaderSize) {
 			found = true
 		}
 	}
 	assert.True(t, found, "over-limit header should surface E_SNAPSHOT_MALFORMED with an 'exceeded MaxHeaderSize' message")
 }
 
-func TestHeaderOnlyRead_MaxHeaderSizeBoundaryMidToken(t *testing.T) {
+func TestReadHeader_MaxHeaderSizeBoundaryMidToken(t *testing.T) {
 	// Pins the distinguished error-message path when MaxHeaderSize
 	// falls inside an unclosed string literal — the failure mode
 	// operators most need help disambiguating from a generic
@@ -886,15 +735,17 @@ func TestHeaderOnlyRead_MaxHeaderSizeBoundaryMidToken(t *testing.T) {
 	midTok := strings.Repeat("y", snapshot.MaxHeaderSize+10*1024)
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"mid": midTok}))
 
-	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
-	require.True(t, result.HasErrors(), "mid-token over-limit header should error")
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	})
+	require.Error(t, diagtest.Err(result), "mid-token over-limit header should error")
 
 	// The assertion targets the distinguished "exceeded MaxHeaderSize"
 	// message, not the underlying json.Decoder error text, which is
 	// version-sensitive.
 	var found bool
 	for issue := range result.Errors() {
-		if issue.Code() == diag.E_SNAPSHOT_MALFORMED && strings.Contains(issue.Message(), "exceeded MaxHeaderSize") {
+		if issue.Code() == diag.E_SNAPSHOT_MALFORMED && issue.Message() == fmt.Sprintf("header exceeded MaxHeaderSize (%d bytes)", snapshot.MaxHeaderSize) {
 			found = true
 			break
 		}
@@ -921,10 +772,12 @@ func assertLoadTruncationClean(t *testing.T, offset int) {
 	require.Greater(t, len(data), offset, "fixture must exceed truncation offset")
 
 	truncated := data[:offset]
-	loaded, result := snapshot.Load(ctx, truncated, s)
+	loaded, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, truncated, s, snapshot.WithWarnings(warn))
+	})
 
-	assert.Nil(t, loaded, "truncated Load must not return a partial struct")
-	require.True(t, result.HasErrors(), "truncated Load must surface errors")
+	assert.True(t, loaded.IsZero(), "truncated Load must not return a partial struct")
+	require.Error(t, diagtest.Err(result), "truncated Load must surface errors")
 
 	var found bool
 	for issue := range result.Errors() {
@@ -959,7 +812,7 @@ func TestLoad_TruncatedHeader_15MiB(t *testing.T) {
 	assertLoadTruncationClean(t, 15*1024*1024)
 }
 
-func TestHeaderOnlyRead_SlowReader(t *testing.T) {
+func TestReadHeader_SlowReader(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
@@ -984,14 +837,14 @@ func TestHeaderOnlyRead_SlowReader(t *testing.T) {
 		}
 	}()
 
-	header, result := snapshot.HeaderOnlyRead(ctx, pr)
-	require.NoError(t, result.Err(), "slow reader should not surface an error on well-formed input")
+	header, readErr := snapshot.ReadHeader(ctx, pr)
+	require.NoError(t, readErr, "slow reader should not surface an error on well-formed input")
 	require.NotNil(t, header)
 	assert.Equal(t, "test", header.SchemaName)
 	assert.ElementsMatch(t, []snapshot.TypeRef{{Schema: "test", Name: "Company"}}, header.Types)
 }
 
-func TestHeaderOnlyRead_ContextCancellation(t *testing.T) {
+func TestReadHeader_ContextCancellation(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
@@ -1000,8 +853,10 @@ func TestHeaderOnlyRead_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, result := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
-	require.True(t, result.HasErrors(), "cancelled context should produce a diagnostic")
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	})
+	require.Error(t, diagtest.Err(result), "cancelled context should produce a diagnostic")
 
 	var found bool
 	for issue := range result.BySeverity(diag.Fatal) {
@@ -1013,12 +868,12 @@ func TestHeaderOnlyRead_ContextCancellation(t *testing.T) {
 }
 
 // errReader always returns the configured error on Read; used to exercise
-// HeaderOnlyRead's reader-error handling paths.
+// ReadHeader's reader-error handling paths.
 type errReader struct{ err error }
 
 func (er *errReader) Read(_ []byte) (int, error) { return 0, er.err }
 
-func TestHeaderOnlyRead_ReaderErrors(t *testing.T) {
+func TestReadHeader_ReaderErrors(t *testing.T) {
 	// A reader error surfaces on the returned diag.Result, never as a bare
 	// error return. A truncation is a malformed document whether it happened
 	// on disk or in transit; any other reader error is an I/O failure, which
@@ -1035,8 +890,10 @@ func TestHeaderOnlyRead_ReaderErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, result := snapshot.HeaderOnlyRead(context.Background(), &errReader{err: tc.err})
-			require.True(t, result.HasErrors(), "reader error should error")
+			_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+				return snapshot.ReadHeader(context.Background(), &errReader{err: tc.err})
+			})
+			require.Error(t, diagtest.Err(result), "reader error should error")
 			var issues []diag.Issue
 			for issue := range result.Errors() {
 				issues = append(issues, issue)
@@ -1070,13 +927,15 @@ func (r *bytesThenErrors) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// TestHeaderOnlyRead_ReportsTheFirstReaderError pins that the failure reported
+// TestReadHeader_ReportsTheFirstReaderError pins that the failure reported
 // is the first one the reader returned, a failure returned beside data
 // included, which the JSON decoder itself drops.
-func TestHeaderOnlyRead_ReportsTheFirstReaderError(t *testing.T) {
+func TestReadHeader_ReportsTheFirstReaderError(t *testing.T) {
 	first, second := errors.New("first failure"), errors.New("second failure")
 	r := &bytesThenErrors{data: []byte(`{"yammm_snapshot":`), errs: []error{first, second}}
-	_, result := snapshot.HeaderOnlyRead(context.Background(), r)
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(context.Background(), r)
+	})
 	var got []string
 	for issue := range result.Errors() {
 		if issue.Code() == diag.E_SNAPSHOT_IO {
@@ -1086,14 +945,16 @@ func TestHeaderOnlyRead_ReportsTheFirstReaderError(t *testing.T) {
 	assert.Equal(t, []string{"read header: first failure"}, got)
 }
 
-func TestHeaderOnlyRead_MalformedJSON(t *testing.T) {
-	_, result := snapshot.HeaderOnlyRead(context.Background(), strings.NewReader("not a json snapshot"))
-	assert.True(t, result.HasErrors(), "HeaderOnlyRead should error on malformed JSON")
+func TestReadHeader_MalformedJSON(t *testing.T) {
+	_, err := snapshot.ReadHeader(context.Background(), strings.NewReader("not a json snapshot"))
+	require.Error(t, err, "ReadHeader should error on malformed JSON")
 }
 
-func TestHeaderOnlyRead_MissingYammmSnapshotKey(t *testing.T) {
-	_, result := snapshot.HeaderOnlyRead(context.Background(), strings.NewReader(`{"types":[]}`))
-	require.True(t, result.HasErrors(), "valid JSON with wrong first key should error")
+func TestReadHeader_MissingYammmSnapshotKey(t *testing.T) {
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(context.Background(), strings.NewReader(`{"types":[]}`))
+	})
+	require.Error(t, diagtest.Err(result), "valid JSON with wrong first key should error")
 
 	var found bool
 	for issue := range result.Errors() {
@@ -1104,53 +965,52 @@ func TestHeaderOnlyRead_MissingYammmSnapshotKey(t *testing.T) {
 	assert.True(t, found, "missing yammm_snapshot first key should produce E_SNAPSHOT_MALFORMED")
 }
 
-func TestHeaderInfo_SchemaHashMatches(t *testing.T) {
+func TestHeader_SchemaHashMatches(t *testing.T) {
 	s := testSchema(t)
 	realHash := schema.StructuralHash(s)
 	require.NotEmpty(t, realHash, "precondition: schema.StructuralHash should return non-empty")
 
 	// A second schema with a different type set hashes differently.
-	s2, res := schema.NewBuilder().
-		WithName("other").
-		WithSourceID(location.MustNewSourceID("test://other.yammm")).
-		AddType("OnlyType").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		Build()
-	require.NoError(t, res.Err())
+	s2, err := schema.LoadString(t.Context(), `schema "other"
+
+type OnlyType {
+	id String primary
+}
+`, "other.yammm")
+	require.NoError(t, err)
 	otherHash := schema.StructuralHash(s2)
 	require.NotEqual(t, realHash, otherHash, "precondition: different schemas should hash differently")
 
 	t.Run("matching_hash_returns_true", func(t *testing.T) {
-		h := &snapshot.HeaderInfo{
+		h := &snapshot.Header{
 			SchemaHash:          realHash,
 			SchemaHashAlgorithm: schema.StructuralHashVersion,
 		}
 		assert.True(t, h.SchemaHashMatches(s))
 	})
 	t.Run("mismatched_hash_returns_false", func(t *testing.T) {
-		h := &snapshot.HeaderInfo{
+		h := &snapshot.Header{
 			SchemaHash:          otherHash,
 			SchemaHashAlgorithm: schema.StructuralHashVersion,
 		}
 		assert.False(t, h.SchemaHashMatches(s))
 	})
 	t.Run("nil_receiver_returns_false_without_panic", func(t *testing.T) {
-		var h *snapshot.HeaderInfo
+		var h *snapshot.Header
 		assert.False(t, h.SchemaHashMatches(s))
 	})
 	t.Run("nil_schema_returns_false_without_panic", func(t *testing.T) {
-		h := &snapshot.HeaderInfo{SchemaHash: realHash, SchemaHashAlgorithm: schema.StructuralHashVersion}
-		assert.False(t, h.SchemaHashMatches(nil))
+		h := &snapshot.Header{SchemaHash: realHash, SchemaHashAlgorithm: schema.StructuralHashVersion}
+		assert.False(t, h.SchemaHashMatches(schema.Schema{}))
 	})
 	t.Run("empty_schema_hash_returns_false", func(t *testing.T) {
-		h := &snapshot.HeaderInfo{SchemaHash: "", SchemaHashAlgorithm: schema.StructuralHashVersion}
+		h := &snapshot.Header{SchemaHash: "", SchemaHashAlgorithm: schema.StructuralHashVersion}
 		assert.False(t, h.SchemaHashMatches(s))
 	})
 	t.Run("algorithm_version_mismatch_returns_false", func(t *testing.T) {
 		// Even if the hash string happens to match, a different
 		// algorithm version means the values are not comparable.
-		h := &snapshot.HeaderInfo{
+		h := &snapshot.Header{
 			SchemaHash:          realHash,
 			SchemaHashAlgorithm: 99, // fictional future algorithm version
 		}
@@ -1164,8 +1024,8 @@ func TestMarshal_WithIndent(t *testing.T) {
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
 
 	ctx := context.Background()
-	data, result := snapshot.Marshal(ctx, snap, snapshot.WithIndent("\t"))
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap, snapshot.WithIndent("\t"))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal with indent: %v", err)
 	}
 
@@ -1175,11 +1035,11 @@ func TestMarshal_WithIndent(t *testing.T) {
 	}
 
 	// Should still be loadable.
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load indented: %v", err)
 	}
-	if loaded == nil {
+	if loaded.IsZero() {
 		t.Fatal("Load returned nil")
 	}
 }
@@ -1195,7 +1055,7 @@ func TestMarshal_WithMetadata(t *testing.T) {
 		"env":      "staging",
 	}))
 
-	info, _ := snapshot.Info(ctx, data)
+	info, _ := snapshot.Stat(ctx, data)
 	if info.Metadata == nil {
 		t.Fatal("metadata should be present")
 	}
@@ -1212,8 +1072,8 @@ func TestMarshalLoad_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
 
-	_, result := snapshot.Marshal(ctx, snap)
-	if result.OK() {
+	_, err := snapshot.Marshal(ctx, snap)
+	if err == nil {
 		t.Error("expected cancellation error from Marshal")
 	}
 }
@@ -1225,13 +1085,13 @@ func TestConstructionPathEquivalence(t *testing.T) {
 	constructed := buildSnapshot(t, s, company, person)
 
 	ctx := context.Background()
-	data, result := snapshot.Marshal(ctx, constructed)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, constructed)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
@@ -1245,9 +1105,9 @@ func TestLoad_TypeIDReconstruction(t *testing.T) {
 
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
-	loaded, _ := snapshot.Load(ctx, data, s)
+	loaded, _ := snapshot.Unmarshal(ctx, data, s)
 
-	companies := loaded.InstancesOf(tidOf(t, s, "Company"))
+	companies := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Company")))
 	if len(companies) != 1 {
 		t.Fatalf("expected 1 Company, got %d", len(companies))
 	}
@@ -1267,18 +1127,18 @@ func TestLoad_NullProvenanceRoundTrip(t *testing.T) {
 
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
-	companies := loaded.InstancesOf(tidOf(t, s, "Company"))
+	companies := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Company")))
 	if len(companies) != 1 {
 		t.Fatalf("expected 1 Company, got %d", len(companies))
 	}
 
 	// Provenance should be nil (no provenance was set).
-	if companies[0].Provenance() != nil {
+	if !companies[0].Provenance().IsZero() {
 		t.Error("expected nil provenance for instance without provenance")
 	}
 }
@@ -1290,27 +1150,24 @@ func TestMarshalLoad_DuplicateRoundTrip(t *testing.T) {
 	snap := buildSnapshot(t, s, c1, c1dup)
 
 	// The constructed snapshot should have a duplicate.
-	if len(snap.Duplicates()) != 1 {
-		t.Fatalf("expected 1 duplicate, got %d", len(snap.Duplicates()))
+	if len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("expected 1 duplicate, got %d", len(slices.Collect(snap.Duplicates())))
 	}
 
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if len(loaded.Duplicates()) != 1 {
-		t.Fatalf("loaded duplicates: expected 1, got %d", len(loaded.Duplicates()))
+	if len(slices.Collect(loaded.Duplicates())) != 1 {
+		t.Fatalf("loaded duplicates: expected 1, got %d", len(slices.Collect(loaded.Duplicates())))
 	}
 
-	dup := loaded.Duplicates()[0]
+	dup := slices.Collect(loaded.Duplicates())[0]
 	if dup.Instance().TypeName() != "Company" {
 		t.Errorf("duplicate type: got %q, want %q", dup.Instance().TypeName(), "Company")
-	}
-	if !dup.Diagnostic().IsZero() {
-		t.Error("loaded duplicate should not have diagnostic")
 	}
 }
 
@@ -1320,19 +1177,19 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c99"}})
 	snap := buildSnapshot(t, s, person)
 
-	if len(snap.Unresolved()) == 0 {
+	if len(slices.Collect(snap.Unresolved())) == 0 {
 		t.Fatal("expected unresolved edges")
 	}
 
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
-	loaded, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if len(loaded.Unresolved()) != len(snap.Unresolved()) {
-		t.Errorf("unresolved count: got %d, want %d", len(loaded.Unresolved()), len(snap.Unresolved()))
+	if len(slices.Collect(loaded.Unresolved())) != len(slices.Collect(snap.Unresolved())) {
+		t.Errorf("unresolved count: got %d, want %d", len(slices.Collect(loaded.Unresolved())), len(slices.Collect(snap.Unresolved())))
 	}
 }
 
@@ -1351,33 +1208,33 @@ func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 		map[string]any{"role": "Engineer", "since": int64(2020)})
 
 	snap := buildSnapshot(t, s, person)
-	if len(snap.Unresolved()) != 1 {
-		t.Fatalf("expected 1 unresolved edge, got %d", len(snap.Unresolved()))
+	if len(slices.Collect(snap.Unresolved())) != 1 {
+		t.Fatalf("expected 1 unresolved edge, got %d", len(slices.Collect(snap.Unresolved())))
 	}
 
 	ctx := context.Background()
-	data, result := snapshot.Marshal(ctx, snap)
-	require.NoError(t, result.Err(), "Marshal")
-	loaded, result := snapshot.Load(ctx, data, s)
-	require.NoError(t, result.Err(), "Load")
+	data, err := snapshot.Marshal(ctx, snap)
+	require.NoError(t, err, "Marshal")
+	loaded, err := snapshot.Unmarshal(ctx, data, s)
+	require.NoError(t, err, "Load")
 
-	require.Len(t, loaded.Unresolved(), 1)
-	u := loaded.Unresolved()[0]
-	require.Equal(t, "target_missing", u.Reason())
+	require.Len(t, slices.Collect(loaded.Unresolved()), 1)
+	u := slices.Collect(loaded.Unresolved())[0]
+	require.Equal(t, graph.ReasonTargetMissing, u.Reason())
 
 	role, ok := u.Property("role")
 	require.True(t, ok, "Property(role) should round-trip")
-	roleStr, _ := role.String()
+	roleStr, _ := role.AsString()
 	require.Equal(t, "Engineer", roleStr)
 
 	since, ok := u.Property("since")
 	require.True(t, ok, "Property(since) should round-trip")
-	sinceInt, _ := since.Int()
+	sinceInt, _ := since.AsInt()
 	require.Equal(t, int64(2020), sinceInt)
 
 	// snapshottest.CompareSnapshots asserts the full per-field diff,
 	// including the Properties field PR-6 added. Independent gate.
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 }
 
 // TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties pins wire-format
@@ -1403,19 +1260,19 @@ func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 		"EMPLOYER", []any{"missing"}, edgeProps)
 
 	snap := buildSnapshot(t, s, resolvedCompany, personA, personB)
-	require.Len(t, snap.Edges(), 1, "expected one resolved edge")
-	require.Len(t, snap.Unresolved(), 1, "expected one unresolved edge")
+	require.Len(t, slices.Collect(snap.Edges()), 1, "expected one resolved edge")
+	require.Len(t, slices.Collect(snap.Unresolved()), 1, "expected one unresolved edge")
 
 	ctx := context.Background()
-	data, mres := snapshot.Marshal(ctx, snap)
-	require.NoError(t, mres.Err())
-	loaded, lres := snapshot.Load(ctx, data, s)
-	require.NoError(t, lres.Err())
+	data, err := snapshot.Marshal(ctx, snap)
+	require.NoError(t, err)
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	require.NoError(t, readErr)
 
 	// Both the resolved and unresolved entries survive with identical
 	// property content (per-key comparison using the .Clone() map form).
-	resolvedProps := loaded.Edges()[0].Properties().Clone()
-	unresolvedProps := loaded.Unresolved()[0].Properties().Clone()
+	resolvedProps := slices.Collect(loaded.Edges())[0].Properties().Clone()
+	unresolvedProps := slices.Collect(loaded.Unresolved())[0].Properties().Clone()
 	require.Equal(t, edgeProps, resolvedProps,
 		"resolved edge properties must survive round-trip")
 	require.Equal(t, edgeProps, unresolvedProps,
@@ -1424,7 +1281,7 @@ func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 
 // TestLoad_V1Rejected pins the retirement of the pre-v3 wire. A v1 document
 // loaded cleanly through every reader up to v0.11.0; from v0.12.0
-// MinReadableVersion is 3 and the same document is refused with the supported
+// the lowest readable version is 3 and the same document is refused with the supported
 // version named, rather than being read under rules it was never written to.
 //
 // Integrity is not the point of this test (we are constructing a v1 doc by
@@ -1442,11 +1299,13 @@ func TestLoad_V1Rejected(t *testing.T) {
 	doc := fmt.Sprintf(`{"yammm_snapshot":{"version":1,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":["Person"],"instances":{"Person":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]},"diagnostics":{"duplicates":[],"unresolved":[{"source_type":"Person","source_key":["p1"],"relation":"EMPLOYER","target_type":"Company","target_key":["c99"],"required":true,"reason":"target_missing"}]}}`, schemaHash)
 
 	ctx := context.Background()
-	loaded, result := snapshot.Load(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
-	require.Nil(t, loaded, "a refused document yields no snapshot")
+	loaded, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
+	require.True(t, loaded.IsZero(), "a refused document yields no snapshot")
 	require.True(t, hasCode(result, diag.E_SNAPSHOT_UNSUPPORTED_VERSION),
 		"v1 must be refused with the supported version named: %v", result)
-	require.Contains(t, result.Err().Error(), "supported: 4")
+	require.Contains(t, diagtest.Err(result).Error(), "supported: 4")
 }
 
 // TestLoad_UnsupportedVersion pins the rejection path for versions outside
@@ -1460,9 +1319,11 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			doc := fmt.Sprintf(`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":[],"instances":{},"diagnostics":{"duplicates":[],"unresolved":[]}}`, v, schemaHash)
 
-			_, result := snapshot.Load(context.Background(), []byte(doc), s,
-				snapshot.WithIntegrityCheck(false))
-			require.True(t, result.HasErrors(), "version %d must be rejected", v)
+			_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(context.Background(), []byte(doc), s,
+					snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
+			require.Error(t, diagtest.Err(result), "version %d must be rejected", v)
 
 			found := false
 			for issue := range result.Errors() {
@@ -1483,38 +1344,40 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 
 // fidelitySchema loads an inline schema with a single property of the given
 // type declaration and returns both the schema and a validator.
-func fidelitySchema(t *testing.T, propDecl string) (*schema.Schema, *instance.Validator) {
+func fidelitySchema(t *testing.T, propDecl string) (schema.Schema, *instance.Validator) {
 	t.Helper()
 	src := `schema "PropTest"
 type Item {
     id String primary
     val ` + propDecl + `
 }`
-	s, result := schema.LoadString(t.Context(), src, "proptest")
-	require.False(t, result.HasErrors(), "fidelitySchema: %s", result)
+	s, err := schema.LoadString(t.Context(), src, "proptest")
+	require.NoError(t, err, "fidelitySchema: %s", err)
 	return s, instance.NewValidator(s)
 }
 
 // fidelityRoundTrip validates an instance, builds a graph+snapshot,
 // marshals, loads, and returns the loaded property map.
-func fidelityRoundTrip(t *testing.T, s *schema.Schema, v *instance.Validator, val any) map[string]any {
+func fidelityRoundTrip(t *testing.T, s schema.Schema, v *instance.Validator, val any) map[string]any {
 	t.Helper()
 	raw := instance.RawInstance{Properties: map[string]any{"id": "x", "val": val}}
-	valid, result := v.ValidateOne(t.Context(), "Item", raw)
-	require.True(t, result.OK(), "validate: %s", result)
-	require.NotNil(t, valid)
+	valid, validateErr := v.ValidateOne(t.Context(), "Item", raw)
+	require.NoError(t, validateErr, "validate: %s", validateErr)
+	require.False(t, valid.IsZero())
 
 	g := graph.New(s)
-	g.Add(t.Context(), valid)
+	if err := g.Add(t.Context(), valid); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 	snap := g.Snapshot()
 
-	data, mr := snapshot.Marshal(t.Context(), snap)
-	require.True(t, mr.OK(), "marshal: %s", mr)
+	data, err := snapshot.Marshal(t.Context(), snap)
+	require.NoError(t, err, "marshal: %s", err)
 
-	loaded, lr := snapshot.Load(t.Context(), data, s)
-	require.True(t, lr.OK(), "load: %s", lr)
+	loaded, readErr := snapshot.Unmarshal(t.Context(), data, s)
+	require.NoError(t, readErr, "load: %s", readErr)
 
-	items := loaded.InstancesOf(tidOf(t, s, "Item"))
+	items := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Item")))
 	require.Len(t, items, 1)
 	return items[0].Properties().Clone()
 }
@@ -1549,28 +1412,30 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		// preserves the dynamic type exactly — no narrowing, no coercion.
 		s, v := fidelitySchema(t, "Float")
 		raw := instance.RawInstance{Properties: map[string]any{"id": "x", "val": float64(1.0)}}
-		valid, result := v.ValidateOne(t.Context(), "Item", raw)
-		require.True(t, result.OK())
+		valid, validateErr := v.ValidateOne(t.Context(), "Item", raw)
+		require.NoError(t, validateErr)
 
 		g := graph.New(s)
-		g.Add(t.Context(), valid)
+		if err := g.Add(t.Context(), valid); err != nil {
+			t.Errorf("Add: %v", err)
+		}
 		snap := g.Snapshot()
 
-		data, mr := snapshot.Marshal(t.Context(), snap)
-		require.True(t, mr.OK())
+		data, err := snapshot.Marshal(t.Context(), snap)
+		require.NoError(t, err)
 		if !strings.Contains(string(data), `"val":1.0`) {
 			t.Fatalf("marshal output lacks %q, so the whole float did not emit in decimal form", `"val":1.0`)
 		}
-		loaded, lr := snapshot.Load(t.Context(), data, s)
-		require.True(t, lr.OK())
+		loaded, readErr := snapshot.Unmarshal(t.Context(), data, s)
+		require.NoError(t, readErr)
 
-		items := loaded.InstancesOf(tidOf(t, s, "Item"))
+		items := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Item")))
 		require.Len(t, items, 1)
 		val, ok := items[0].Properties().Get("val")
 		require.True(t, ok)
-		got, isFloat := val.Unwrap().(float64)
+		got, isFloat := val.Any().(float64)
 		if !isFloat {
-			t.Fatalf("round trip produced %T, want float64 — the whole float narrowed", val.Unwrap())
+			t.Fatalf("round trip produced %T, want float64 — the whole float narrowed", val.Any())
 		}
 		if got != 1.0 {
 			t.Errorf("round trip produced %v, want 1.0", got)
@@ -1650,20 +1515,6 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		props := fidelityRoundTrip(t, s, v, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 		assert.Equal(t, "2026-01-01T00:00:00Z", props["val"],
 			"a time.Time-valued Timestamp stores its canonical text")
-	})
-
-	// A declared layout applies to both representations, so the persisted text
-	// satisfies the format the schema declared.
-	t.Run("timestamp_custom_format_applies_to_both_representations", func(t *testing.T) {
-		t.Parallel()
-		s, v := fidelitySchema(t, `Timestamp["2006-01-02 15:04:05"]`)
-		props := fidelityRoundTrip(t, s, v, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
-		assert.Equal(t, "2026-01-01 00:00:00", props["val"],
-			"the declared layout is applied to a time.Time")
-
-		props = fidelityRoundTrip(t, s, v, "2026-01-01 00:00:00")
-		assert.Equal(t, "2026-01-01 00:00:00", props["val"],
-			"a string under the same constraint round-trips through its layout")
 	})
 
 	t.Run("date_from_time_returns_a_string", func(t *testing.T) {
@@ -1910,7 +1761,7 @@ func TestMarshal_GoldenBytes(t *testing.T) {
 			"EMPLOYER", [][]any{{"c-missing"}}),
 	)
 
-	data, res := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
-	require.NoError(t, res.Err())
+	data, err := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
+	require.NoError(t, err)
 	yammmtest.Golden(t, "marshal_representative.ys", data)
 }

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -22,22 +24,22 @@ func TestLoad_ResolvesDataTypesInAnyDeclarationOrder(t *testing.T) {
 	}
 	hashes := make(map[string]string, len(orders))
 	for name, datatypes := range orders {
-		s, res := schema.LoadString(t.Context(), "schema \"p\"\n\n"+datatypes+body, "p.yammm")
-		if res.HasErrors() {
-			t.Fatalf("%s: load: %v", name, res.Err())
+		s, err := schema.LoadString(t.Context(), "schema \"p\"\n\n"+datatypes+body, "p.yammm")
+		if err != nil {
+			t.Fatalf("%s: load: %v", name, err)
 		}
-		for _, dt := range s.DataTypesSlice() {
-			if !dt.Constraint().IsResolved() {
+		for dt := range s.DataTypes() {
+			if !schema.TestConstraintIsResolved(dt.Constraint()) {
 				t.Errorf("%s: datatype %s is not resolved: %v", name, dt.Name(), dt.Constraint())
 			}
 		}
 		tt, _ := s.Type("T")
 		for _, field := range []string{"v", "w"} {
 			p, _ := tt.Property(field)
-			if !p.Constraint().IsResolved() {
+			if !schema.TestConstraintIsResolved(p.Constraint()) {
 				t.Errorf("%s: property %s is not resolved: %v", name, field, p.Constraint())
 			}
-			if got := innermost(p.Constraint()); !got.Equal(schema.IntegerBetween(0, 9)) {
+			if got := innermost(p.Constraint()); !schema.TestConstraintEqual(got, schema.TestIntegerBetween(0, 9)) {
 				t.Errorf("%s: property %s's innermost element is %v; want Integer[0, 9]", name, field, got)
 			}
 		}
@@ -106,6 +108,31 @@ func TestLoad_RefusesADataTypeCycleAtEachMember(t *testing.T) {
 	}
 }
 
+// A cycle that nests more List levels than the bound is a cycle at each member:
+// none is counted through the others and refused for the List bound.
+func TestLoad_ADataTypeCyclePastTheListBoundIsACycle(t *testing.T) {
+	t.Parallel()
+	const members, levels = 60, 20 // 1,200 levels round the cycle, under the load's issue limit
+	if members*levels <= parse.MaxNesting {
+		t.Fatalf("the cycle nests %d levels, which is within the bound", members*levels)
+	}
+	var b strings.Builder
+	b.WriteString("schema \"p\"\n\n")
+	for i := 1; i <= members; i++ {
+		fmt.Fprintf(&b, "type L%d = %sL%d%s\n", i, strings.Repeat("List<", levels), i%members+1, strings.Repeat(">", levels))
+	}
+	b.WriteString("type T {\n\tid String primary\n}\n")
+	res := loadStringErr(t, b.String())
+	if res.Len() != members {
+		t.Errorf("got %d issues, want one at each of the %d members", res.Len(), members)
+	}
+	for issue := range res.Issues() {
+		if issue.Code() != diag.E_INVALID_CONSTRAINT || !strings.Contains(issue.Message(), "forms a cycle") {
+			t.Fatalf("got %v: %s, want a cycle member", issue.Code(), issue.Message())
+		}
+	}
+}
+
 // declarationLine returns the 1-based line of "type <name> =" in src.
 func declarationLine(src, name string) int {
 	for i, line := range strings.Split(src, "\n") {
@@ -126,8 +153,8 @@ func TestLoad_AFailedDataTypeKeepsItsShapeForLaterPhases(t *testing.T) {
 		datatypes string
 		want      map[diag.Code]int
 	}{
-		"an unknown element": {"type X = List<Mystery>\n", map[diag.Code]int{diag.E_UNKNOWN_TYPE: 1, diag.E_LIST_ON_EDGE: 1}},
-		"a cycle":            {"type X = List<Y>\ntype Y = List<X>\n", map[diag.Code]int{diag.E_INVALID_CONSTRAINT: 2, diag.E_LIST_ON_EDGE: 1}},
+		"an unknown element": {"type X = List<Mystery>\n", map[diag.Code]int{diag.E_UNKNOWN_TYPE: 1, diag.E_INVALID_EDGE_PROPERTY_TYPE: 1}},
+		"a cycle":            {"type X = List<Y>\ntype Y = List<X>\n", map[diag.Code]int{diag.E_INVALID_CONSTRAINT: 2, diag.E_INVALID_EDGE_PROPERTY_TYPE: 1}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := "schema \"p\"\n\n" + tc.datatypes + edge
@@ -146,13 +173,15 @@ func TestLoad_AFailedDataTypeKeepsItsShapeForLaterPhases(t *testing.T) {
 // import's own report and stays a List, so an edge property typed by it is still
 // refused for its shape.
 func TestLoad_ADataTypeOverAFailedImportStaysAList(t *testing.T) {
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
-		"main.yammm": []byte("schema \"main\"\nimport \"./missing\" as bad\n\ntype X = List<bad.Y>\n\ntype T {\n\tid String primary\n\t--> R (one) T {\n\t\tp X\n\t}\n}\n"),
-	}, "main.yammm", t.TempDir())
-	if s != nil {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+			"main.yammm": []byte("schema \"main\"\nimport \"./missing\" as bad\n\ntype X = List<bad.Y>\n\ntype T {\n\tid String primary\n\t--> R (one) T {\n\t\tp X\n\t}\n}\n"),
+		}, "main.yammm", schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+	})
+	if !s.IsZero() {
 		t.Fatal("a schema importing a missing file loaded")
 	}
-	wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_RESOLVE: 1, diag.E_LIST_ON_EDGE: 1, diag.E_UNKNOWN_TYPE: 0})
+	wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_RESOLVE: 1, diag.E_INVALID_EDGE_PROPERTY_TYPE: 1, diag.E_UNKNOWN_TYPE: 0})
 }
 
 // The primary-key type check names the kind a datatype resolves to, not the
@@ -179,5 +208,30 @@ func TestLoad_APrimaryKeyTypedByAListDataTypeNamesTheList(t *testing.T) {
 				t.Error("no E_INVALID_PRIMARY_KEY_TYPE")
 			}
 		})
+	}
+}
+
+// A local datatype over an imported one of its own name names another schema's
+// datatype, so it is no cycle.
+func TestLoad_ADataTypeOverAnImportedOneOfItsNameIsNoCycle(t *testing.T) {
+	t.Parallel()
+
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+			"main.yammm": []byte(`schema "main"
+import "./lib" as lib
+type Codes = List<lib.Codes>
+type T {
+    id String primary
+    codes Codes
+}
+`),
+			"lib.yammm": []byte(`schema "lib"
+type Codes = List<String>
+`),
+		}, "main.yammm", schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+	})
+	if s.IsZero() || res.Len() != 0 {
+		t.Fatalf("got %v, want the schema to load", res)
 	}
 }

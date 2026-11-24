@@ -1,4 +1,5 @@
-# fmt: canonical formatting to stdout by default, in place with --write.
+# fmt: canonical formatting to stdout by default, in place with --write, and
+# a list of the files that differ with -l.
 
 # Formatting to stdout matches the canonical form exactly.
 exec yammm fmt unformatted.yammm
@@ -16,38 +17,38 @@ cmp work.yammm formatted_golden.yammm
 # Missing input is an error.
 ! exec yammm fmt nonexistent.yammm
 
-# --check is silent and succeeds on a canonical file.
-exec yammm fmt --check formatted_golden.yammm
+# -l is silent and succeeds on a canonical file.
+exec yammm fmt -l formatted_golden.yammm
 ! stdout .
 
-# --check names the unformatted file and fails, gofmt -l style: the path on
+# -l names the unformatted file and succeeds, as gofmt -l does: the path on
 # stdout and nothing on stderr.
-! exec yammm fmt --check unformatted.yammm
+exec yammm fmt -l unformatted.yammm
 stdout '^unformatted\.yammm$'
 ! stderr .
 
-# One run over a list reports every offender and no formatted file.
+# One run over a list names every offender and no formatted file.
 cp unformatted.yammm other.yammm
-! exec yammm fmt --check unformatted.yammm formatted_golden.yammm other.yammm
+exec yammm fmt -l unformatted.yammm formatted_golden.yammm other.yammm
 stdout '^unformatted\.yammm$'
 stdout '^other\.yammm$'
 ! stdout 'formatted_golden'
 ! stderr .
 
-# --check with --write is a usage error, and it says why. cobra's own
-# MarkFlagsMutuallyExclusive would exit 2 printing nothing under this root,
-# which is what this assertion rules out.
-! exec yammm fmt --check --write unformatted.yammm
-stderr 'mutually exclusive'
+# -l with -w names each file it rewrites.
+cp unformatted.yammm both.yammm
+exec yammm fmt -l -w both.yammm
+stdout '^both\.yammm$'
+cmp both.yammm formatted_golden.yammm
 
 # A parse failure is reported per file, on stderr, which the in-process cobra
-# buffers cannot see.
-! exec yammm fmt --check broken.yammm
+# buffers cannot see, and exits 1.
+! exec yammm fmt -l broken.yammm
 stderr '^broken\.yammm:4:1: error\[E_SYNTAX\]'
 
 # A canonical file that starts with a UTF-8 byte order mark is unformatted:
-# --check names it, and --write removes the mark and nothing else.
-! exec yammm fmt --check marked.yammm
+# -l names it, and -w removes the mark and nothing else.
+exec yammm fmt -l marked.yammm
 stdout '^marked\.yammm$'
 ! stderr .
 exec yammm fmt --write marked.yammm

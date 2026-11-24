@@ -1,7 +1,7 @@
 # YAMMM
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/simon-lentz/yammm.svg)](https://pkg.go.dev/github.com/simon-lentz/yammm)
-[![Go Version](https://img.shields.io/badge/go-1.26+-blue.svg)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/go-1.26.10+-blue.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and validating Go data against them at runtime. It provides post-validation services including graph traversal and integrity checking.
@@ -11,19 +11,18 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 ## Features
 
 - **Schema DSL**: Define types, properties, relationships, and constraints in `.yammm` files
-- **Runtime validation**: Validate Go maps, structs, and JSON against compiled schemas
+- **Runtime validation**: Validate Go maps against compiled schemas, and JSON data files with `yammm check`
 - **Relationship modeling**: Associations (references) and compositions (ownership) with multiplicity
 - **Invariants**: Boolean constraint expressions evaluated at validation time
-- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` / `@writeOnce` metadata that adapters turn into store DDL
+- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` metadata that generators turn into store DDL, and `@writeOnce` properties that the Neo4j write path sets once
 - **Graph construction**: Build in-memory graphs from validated instances with integrity checking
 - **Graph persistence**: Save, load, verify, inspect, and edit-metadata-in-place graph snapshots (`.ys` format)
-- **Batch assembly**: Concurrent-safe validate → add → check → snapshot pipeline surface, resumable from a prior snapshot
+- **Batch assembly**: Validate and add from many workers through one validator and one graph, merging a record listed under several parents, and resume a batch from a prior snapshot
 - **Structured diagnostics**: Stable error codes with source location tracking
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
 - **Go code generation**: Generate Go structs from schemas with `yammm gen --to go`
-- **JSON Schema generation**: Emit editor-ready JSON Schema (draft 2020-12) for instance-data authoring with `yammm gen --to jsonschema`
 - **Markdown documentation generation**: Render a schema as a Markdown reference document with a Mermaid class diagram via `yammm gen --to md`
-- **CLI tool**: `yammm` binary for snapshot management, data export, and validation
+- **CLI tool**: `yammm` binary for validation, formatting, data checking, snapshot management, generation, Neo4j DDL, and a diff against a live Neo4j database
 
 ## Installation
 
@@ -31,7 +30,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 go get github.com/simon-lentz/yammm
 ```
 
-Requires Go 1.26 or later.
+Requires Go 1.26.10 or later.
 
 ## Quick Start
 
@@ -68,6 +67,7 @@ import (
     "log"
     "os"
 
+    "github.com/simon-lentz/yammm/diag"
     "github.com/simon-lentz/yammm/graph"
     "github.com/simon-lentz/yammm/instance"
     "github.com/simon-lentz/yammm/schema"
@@ -77,13 +77,12 @@ import (
 func main() {
     ctx := context.Background()
 
-    // Load schema from file
-    s, result := schema.Load(ctx, "vehicles.yammm")
-    if result.HasFatal() {
-        log.Fatal("load error:", result)
-    }
-    if result.HasErrors() {
-        log.Fatal("schema errors:", result)
+    // Load schema from file; warnings go to the callback, never into err
+    s, err := schema.Load(ctx, "vehicles.yammm", schema.WithWarnings(func(w diag.Issue) {
+        log.Println("schema warning:", w.Message())
+    }))
+    if err != nil {
+        log.Fatal("load schema: ", err)
     }
 
     // Create validator and graph
@@ -99,26 +98,24 @@ func main() {
         },
     }
 
-    person, result := validator.ValidateOne(ctx, "Person", personRaw)
-    if !result.OK() {
-        log.Fatal("validation failed:", result)
+    person, err := validator.ValidateOne(ctx, "Person", personRaw)
+    if err != nil {
+        log.Fatal("validate: ", err)
     }
 
     // Add to graph
-    result = g.Add(ctx, person)
-    if !result.OK() {
-        log.Fatal("graph error:", result)
+    if err := g.Add(ctx, person); err != nil {
+        log.Fatal("add: ", err)
     }
 
     // Check graph integrity
-    result = g.Check(ctx)
-    fmt.Println("Graph OK:", result.OK())
+    fmt.Println("Graph complete:", g.Check(ctx) == nil)
 
     // Save graph snapshot to .ys file
     snap := g.Snapshot()
-    data, result := snapshot.Marshal(ctx, snap)
-    if !result.OK() {
-        log.Fatal("marshal error:", result)
+    data, err := snapshot.Marshal(ctx, snap)
+    if err != nil {
+        log.Fatal("marshal: ", err)
     }
     if err := os.WriteFile("vehicles.ys", data, 0o644); err != nil {
         log.Fatal("write error:", err)
@@ -129,29 +126,35 @@ func main() {
 
 ### Assemble Batches
 
-For pipeline workloads, `graph.BatchAssembler` composes the validator and graph into a single concurrent-safe surface that encodes the validate → add → check → snapshot ordering:
+A pipeline validates each record and adds what the validator returns. `instance.Validator` and `graph.Graph` are both safe for concurrent use, so one validator and one graph serve every worker. Each call returns its own error, and a `Snapshot` holds no diagnostics, so a worker keeps the errors it needs. At the end of the batch, wait for the workers, then check the graph and take its snapshot:
 
 ```go
-ba := graph.NewBatchAssembler(ctx, s)
+v := instance.NewValidator(s)
+g := graph.New(s)
 
 for i, rec := range records { // rec is an instance.RawInstance
-    if err := ba.Add("Person", rec); err != nil {
-        log.Fatalf("record %d: %v", i, err)
+    valid, err := v.ValidateOne(ctx, "Person", rec)
+    if err != nil {
+        log.Fatalf("record %d: validate: %v", i, err)
+    }
+    if err := g.Add(ctx, valid); err != nil {
+        log.Fatalf("record %d: add: %v", i, err)
     }
 }
 
-res, err := ba.Finalize(ctx) // res.Snapshot is non-nil even on error
-if err != nil {
-    log.Fatal("batch failed:", err)
+if err := g.Check(ctx); err != nil {
+    log.Fatal("batch failed: ", err)
 }
-data, result := snapshot.Marshal(ctx, res.Snapshot)
+data, err := snapshot.Marshal(ctx, g.Snapshot())
 ```
 
-To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which refuses a snapshot that breaks the schema's structural facts — new adds resolve against the seeded instances and `Finalize` checks the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
+For a source that lists one record under several parents, `g.AddOrMerge(ctx, valid)` takes `Add`'s place: at a primary key the graph already holds, a record with no composed children merges: its association targets are installed on the held root and `merged` is true. A record with composed children is refused there as `Add` refuses a duplicate (`E_DUPLICATE_PK`), and a merge that would give a `(one)` association a second target is refused whole (`E_GRAPH_CARDINALITY`); `merged` is false whenever the error is not nil. `Check` judges each root a merge grew against its type's invariants: listings that each pass one can break it together.
+
+To resume a persisted batch on a later run, seed the graph from a loaded snapshot with `graph.NewFromSnapshot(snap)`, which binds the graph to the snapshot's own schema and installs its records as they stand — new adds resolve against the seeded instances and `Check`'s completeness check covers the union. `Check` judges invariants only on roots a merge in this graph grew; `snapshot.WithRevalidation` judges a loaded document's roots. `snapshot.UpdateMetadata` replaces a snapshot's metadata without a load/re-marshal round-trip: it verifies the integrity hash unless `WithIntegrityCheck(false)` is given, writes a new header and keeps every other byte, for every document `snapshot.Unmarshal` accepts under its default options.
 
 ### Build Instances Programmatically
 
-`instance.BuilderFor` returns a builder bound to a schema type that constructs `RawInstance` values while enforcing schema shape — unknown properties, unknown relations, and cardinality mismatches surface from `Build()` with the offending call site's file:line:
+`instance.BuilderFor` returns a builder bound to a schema type that constructs `RawInstance` values while enforcing schema shape — unknown properties, unknown relations, edge shapes it cannot build (a composition, an association with edge properties, a target key of the wrong arity), and cardinality mismatches surface from `Build()` with the offending call site's file:line:
 
 ```go
 b, err := instance.BuilderFor(s, "Car")
@@ -166,73 +169,44 @@ raw, err := b.
     Build()
 ```
 
-### Build Schemas Programmatically
-
-```go
-import (
-    "github.com/simon-lentz/yammm/location"
-    "github.com/simon-lentz/yammm/schema"
-)
-
-s, result := schema.NewBuilder().
-    WithName("example").
-    WithSourceID(location.MustNewSourceID("test://example.yammm")).
-    AddType("Person").
-        WithPrimaryKey("id", schema.NewStringConstraint()).
-        WithProperty("name", schema.NewStringConstraint()).
-        WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
-        Done().
-    Build()
-
-if result.HasErrors() {
-    // Handle schema build errors
-}
-```
-
 ## Architecture
 
 The module is organized into layers with strict dependency ordering:
 
 ```text
-Primary API (stable)     : schema, instance, graph, snapshot
-Foundation (stable)      : location, diag, immutable, format
-Adapter                  : adapter/json, adapter/csv, adapter/neo4j,
-                           adapter/gogen, adapter/jschema, adapter/markdown
-LSP                      : lsp (Language Server Protocol server)
+Primary API              : schema, instance, graph, snapshot
+Foundation               : location, diag, immutable
+Neo4j write path         : neo4j
+Generator                : schema/cypher, schema/gogen, schema/markdown
 CLI                      : cmd/yammm, cmd/yammm-lsp
-Internal                 : internal/* (no compatibility guarantees)
+Internal                 : internal/* (no compatibility guarantees), the formatter and the language server among them
 ```
 
 ### Key Packages
 
 | Package | Purpose |
 | ------- | ------- |
-| `schema` | Type system, constraints, schema loading, and programmatic building |
-| `schema/expr` | Expression AST types for invariants |
+| `schema` | Type system, constraints, and schema loading |
 | `instance` | Instance validation and constraint checking |
 | `graph` | Instance graph construction and integrity checking |
-| `snapshot` | Graph persistence: marshal, load, verify, and inspect `.ys` files |
+| `snapshot` | Graph persistence as `.ys` files; its package doc lists what it does |
 | `diag` | Structured diagnostics with stable error codes |
-| `location` | Source positions, spans, and canonical paths |
+| `location` | Source identities, positions and spans |
 | `immutable` | Immutable data structures for validated output |
-| `format` | Canonical `.yammm` file formatting |
-| `adapter/json` | JSON/JSONC parsing with location tracking |
-| `adapter/csv` | CSV data parsing and writing |
-| `adapter/neo4j` | Neo4j constraint + index generation and Cypher query building |
-| `adapter/gogen` | Go source generation from a schema (structs, enums, `EDGE_` structs, `Graph`) |
-| `adapter/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
-| `adapter/markdown` | Markdown + Mermaid documentation generation from a schema |
-| `lsp` | Language Server Protocol server for `.yammm` files |
+| `schema/cypher` | The Neo4j mapping of a schema: labels, constraint and index DDL |
+| `neo4j` | Neo4j write queries, parameter coercion, introspection and the drift diff |
+| `schema/gogen` | Go source generation from a schema; its package doc lists what it emits |
+| `schema/markdown` | Markdown + Mermaid documentation generation from a schema |
 
 ### Entry Point Pattern
 
-Diagnostic-producing operations return `(T, diag.Result)`:
+Every call that can fail returns `(T, error)`, or an `error` alone when it has no value. `schema.FindModuleRoot` and `location.ResolveSourcePath` return two values before their error, and a call where the caller needs no reason, such as `Validator.PrimaryKeyOf`, returns `false` as its last value. `snapshot.ScanDir` yields an error only when the scan stops, and holds a file's own failure in `ScanEntry.Err`:
 
-- `result.HasFatal()`: Unrecoverable condition (I/O failure, context cancellation)
-- `result.HasErrors()`: Semantic failure (structured issues)
-- `result.OK()`: Success (may have warnings)
+- A call that judges its input returns its Fatal and Error issues as one `*diag.ResultError`; others, such as `markdown.Marshal` and `neo4j.CoerceParams`, return a plain error, and each call's doc names what it returns. Read a `*diag.ResultError` with `errors.AsType[*diag.ResultError](err)`, and test it by code with `errors.Is(err, diag.E_IMPORT_CYCLE)`.
+- A Warning, Info or Hint is never in the error. A call that can draw one takes a `WithWarnings(func(diag.Issue))` option, as `go/types` takes each error through `Config.Error`.
+- A call refuses an option it does not take with an error, with no diagnostic code, that names the option and the call.
 
-Pure adapter transformations (JSON/CSV serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return `(T, error)`; the Neo4j adapter's DDL and shape builders report through a `diag.Result`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+A call that cannot fail returns its value alone, such as `neo4j.BuildBatchRelationshipMergeQuery` and the drop-statement builders. [docs/API.md](docs/API.md#error-handling-conventions) states the conventions in full.
 
 ## Schema Language
 
@@ -300,7 +274,7 @@ type Person {
 
 ### Annotations
 
-Annotations attach validated, store-agnostic metadata that adapters turn into store DDL. They do not change which instance data is valid, and they are excluded from the structural hash, so adding one never invalidates a persisted snapshot.
+Annotations attach validated, store-agnostic metadata for the generators and the write path to read: `schema/cypher` turns the index annotations into DDL, and `neo4j` splits a write on `@writeOnce`. They do not change which instance data is valid, and they are excluded from the structural hash, so adding one never invalidates a persisted snapshot.
 
 ```yammm
 type Document {
@@ -325,7 +299,7 @@ type Document {
 | `@@fulltext(a, b, …)` | type | Fulltext index scored across the referenced text properties |
 | `@writeOnce` | property | Set on node creation, never rewritten |
 
-`yammm neo4j indexes <schema>` emits the index DDL; `yammm neo4j diff` compares it against a live database. See [SPEC.md](docs/SPEC.md#annotations) for eligibility rules and diagnostics.
+`yammm gen --to cypher <schema>` emits the constraint and index DDL; `yammm neo4j diff` compares it against a live database. See [SPEC.md](docs/SPEC.md#annotations) for eligibility rules and diagnostics.
 
 ### Data Types
 
@@ -337,7 +311,7 @@ type Document {
 | `String[minLen, maxLen]` | UTF-8 string with optional length bounds |
 | `Enum["a", "b", ...]` | Fixed set of string values |
 | `Pattern["regex"]` | String matching a regular expression |
-| `Timestamp["format"]` | Date-time (default: RFC3339) |
+| `Timestamp` | Date-time in RFC 3339 |
 | `Date` | Date without time component |
 | `UUID` | Universally unique identifier |
 | `Vector[dimensions]` | Fixed-dimension numeric vector |
@@ -363,8 +337,8 @@ type Product {
 The `diag` package provides structured diagnostics with stable error codes:
 
 ```go
-if !result.OK() {
-    for issue := range result.Issues() {
+if re, ok := errors.AsType[*diag.ResultError](err); ok {
+    for issue := range re.Result.Issues() {
         fmt.Printf("[%s] %s: %s\n", issue.Severity(), issue.Code(), issue.Message())
     }
 }
@@ -378,34 +352,33 @@ The `yammm` binary ([`cmd/yammm/`](cmd/yammm/)) provides commands for working wi
 
 ```bash
 yammm validate <schema>                                  # validate a schema, report diagnostics
-yammm fmt <schema>... [-w|--check]                       # canonical formatting (stdout; -w rewrites, --check lists unformatted)
-yammm check <schema> <data>                              # validate JSON/CSV data against a schema
-yammm load <schema> <data>                               # build an in-memory graph, report diagnostics
+yammm fmt [-l] [-w] <schema>...                          # canonical formatting (stdout; -l lists files that differ, -w rewrites)
+yammm check <schema> <data...>                           # validate JSON data files, read as one document
 yammm gen --to go <schema>                               # generate Go source from a schema
-yammm gen --to jsonschema <schema>                       # generate a JSON Schema for instance-data authoring
 yammm gen --to md <schema>                               # generate Markdown docs with a Mermaid class diagram
-yammm export <schema> <data> --to <json|csv|cypher>      # export a validated graph
+yammm gen --to cypher <schema>                           # generate one Neo4j script: constraints, then indexes
 yammm snapshot save <schema> <data...> -o <file.ys>      # build graph, persist
 yammm snapshot save <schema> <data...> --into <file.ys>  # merge into an existing snapshot
 yammm snapshot info <file.ys>                            # metadata + stats
 yammm snapshot verify <schema> <file.ys>                 # schema-compatibility check
 yammm snapshot update-metadata --set k=v <file.ys>       # rewrite metadata keys in place (--set/--unset)
-yammm neo4j constraints <schema>                         # generate Neo4j constraint statements
-yammm neo4j indexes <schema>                             # generate Neo4j index statements from annotations
 yammm neo4j diff <schema>                                # compare schema constraints and indexes against a live database
-yammm neo4j introspect                                   # inspect a live database's schema
 ```
 
-Every command writes its diagnostics to **stderr**, at every severity, and its
-results to stdout. A warning is not a failure — a run that prints warnings and
-nothing else still exits `0` — so do not read a zero exit code as "no
-diagnostics." (Before v0.9.0 a warnings-only result printed nothing at all, so
-an unchanged schema may emit new stderr output; the `Result` a library caller
-receives is unchanged.)
+A command writes the diagnostics it prints to **stderr**, at every severity,
+and stdout holds a command's own output. One report differs:
+`yammm snapshot info --dir` states each file's result in its stdout report —
+in text the file's first error or first warning, under `--json` its
+diagnostics — and prints on stderr the diagnostics of the directory read
+alone. A command that succeeds prints nothing but its own output and its
+diagnostics, so `yammm snapshot save` and `yammm snapshot update-metadata` print
+nothing else.
+`yammm validate` exits `0` for a schema that draws warnings and no error, so
+do not read a zero exit code as "no diagnostics."
 
 ## IDE Support
 
-The [`lsp/`](lsp/) package provides a Language Server Protocol server for YAMMM schema files, with the binary entry point at [`cmd/yammm-lsp/`](cmd/yammm-lsp/):
+The `yammm-lsp` binary ([`cmd/yammm-lsp/`](cmd/yammm-lsp/)) is a Language Server Protocol server for YAMMM schema files, built from the internal package [`internal/lsp/`](internal/lsp/):
 
 - Real-time diagnostics (parse errors, semantic errors, import issues)
 - Go-to-definition for types, properties, and imports
@@ -420,7 +393,7 @@ Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemN
 
 - **[Go Reference](https://pkg.go.dev/github.com/simon-lentz/yammm)**: API documentation on pkg.go.dev
 - **[Language Specification](docs/SPEC.md)**: DSL reference — grammar, types, expressions, constraints, and diagnostic codes
-- **[Library API Reference](docs/API.md)**: Go library reference — loading, validation, graph construction, adapters, and formatting
+- **[Library API Reference](docs/API.md)**: Go library reference and versioning policy
 
 ## License
 

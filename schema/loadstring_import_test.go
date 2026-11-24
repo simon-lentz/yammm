@@ -43,13 +43,13 @@ type Main {
 	id String primary
 }
 `)}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", "")
-	if res.Err() == nil {
+	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm")
+	if res == nil {
 		t.Fatal("the import resolved with no module root in play: the working directory was read")
 	}
 	// The message names the CONDITION; the caller's wrapper names the import,
 	// once.
-	if got := res.Err().Error(); !strings.Contains(got, "not among the pre-registered sources, and no module root is in play") {
+	if got := res.Error(); !strings.Contains(got, "not among the pre-registered sources, and no module root is in play") {
 		t.Errorf("want readImportFile's no-module-root refusal; got %v", got)
 	}
 }

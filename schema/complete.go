@@ -2,46 +2,41 @@ package schema
 
 import (
 	"fmt"
-	"iter"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
-// completionRegistry provides lookup for cross-schema type resolution.
-// This interface is implemented by schema.Registry.
-type completionRegistry interface {
-	// LookupBySourceID returns the schema at the given source ID, if loaded.
-	LookupBySourceID(id location.SourceID) (*Schema, bool)
-}
-
 // importResolution is one import alias's resolution outcome, handed from the
-// loader (or the Builder) to completion. A deferred entry — the import was
+// loader to completion. A deferred entry — the import was
 // declared but its load failed or was structurally rejected — carries no
 // SourceID; references through the alias defer to the root-cause diagnostic. A
 // resolved entry carries the imported schema's SourceID. The explicit deferred
 // flag replaces an earlier in-band convention (a zero SourceID meaning
 // "deferred"), so the state is read, not inferred.
 //
-// "Deferred" has one source that flows one way, not parallel representations
-// that must be kept in agreement by hand: the loader folds each importBinding
-// into this map (a failed binding becomes a deferred entry; see loadSource),
-// [completer.indexImports] then builds each schema Import from the map (a
+// "Deferred" has one source, not parallel representations that must be kept
+// in agreement by hand: the loader folds each importBinding into this map (a
+// failed binding becomes a deferred entry; see loadSource),
+// [completer.indexImports] marks deferred in it the alias of each declaration
+// it rejects as invalid or colliding (a repeated alias keeps its first
+// declaration's state) and then builds each schema Import from the map (a
 // deferred entry yields a zero-ResolvedSourceID Import that the loader's wiring
-// loop leaves schema-less), and completion reads only the map — via
-// [completer.classifyQualifier], the single interpreter named on
-// [resolvedImportMap], through which every qualifier-resolving site routes.
+// loop leaves schema-less), and completion reads an alias's state from the map
+// alone, never from an Import — via [completer.classifyQualifier], through
+// which every qualifier-resolving site routes.
 type importResolution struct {
 	deferred bool
 	sourceID location.SourceID
 }
 
 // resolvedImportMap maps an import alias to its resolution. An alias is present
-// iff its declaration was seen; an absent alias was never resolved (a loader
-// bug on the Load path, or a no-imports / no-registry context elsewhere).
-// [completer.classifyQualifier] interprets it for every qualifier-resolving
+// iff its declaration was seen; an absent alias was never resolved, which is a
+// loader bug. [completer.classifyQualifier] interprets it for every qualifier-resolving
 // site; [completer.indexImports] reads it to build each Import.
 type resolvedImportMap map[string]importResolution
 
@@ -57,40 +52,40 @@ type resolvedImportMap map[string]importResolution
 // every independent error in a single pass.
 //
 // Errors are collected in the provided collector. completeModel returns the
-// completed *Schema, or nil if this completion contributed any Fatal or Error
+// completed Schema, or the zero Schema if this completion contributed any Fatal or Error
 // issue — a per-completion error gate, so when the collector is shared across a
-// multi-schema load each schema is judged by its own error delta. The registry
-// is optional, but a qualified reference resolves or is reported either way —
-// only a declared-but-failed import defers. The resolvedImports map carries
-// each import alias's resolution (or deferral) from the loader.
+// multi-schema load each schema is judged by its own error delta. A qualified
+// reference resolves or is reported — only a declared-but-failed import defers.
+// The resolvedImports map carries each import alias's resolution (or deferral)
+// from the loader, and loaded holds the schema of each resolved one.
 func completeModel(
 	m *model,
 	sourceID location.SourceID,
 	collector *diag.Collector,
-	registry completionRegistry,
+	loaded map[location.SourceID]Schema,
 	resolvedImports resolvedImportMap,
-) *Schema {
+) Schema {
 	if m == nil {
-		collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "no model to complete").Build())
-		return nil
+		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, "no model to complete").Build())
+		return Schema{}
 	}
 
 	c := &completer{
 		model:           m,
 		sourceID:        sourceID,
 		collector:       collector,
-		registry:        registry,
+		loaded:          loaded,
 		resolvedImports: resolvedImports,
-		typeIndex:       make(map[string]*Type),
-		dataIndex:       make(map[string]*DataType),
+		typeIndex:       make(map[string]Type),
+		dataIndex:       make(map[string]DataType),
 		// The collector may be shared across a whole multi-schema load, so
 		// this completion is judged on the errors IT contributes, not on
 		// errors collected before it began (a sibling import's failure must
-		// not nil an unrelated clean schema).
+		// not zero an unrelated clean schema).
 		gate:                    newErrorGate(collector),
-		unresolvedSupertypeMemo: make(map[*Type]bool),
-		diagnosedAnnotations:    make(map[*Annotation]bool),
-		conflictedProperties:    make(map[*Property]bool),
+		unresolvedSupertypeMemo: make(map[Type]bool),
+		diagnosedAnnotations:    make(map[Annotation]bool),
+		conflictedProperties:    make(map[Property]bool),
 	}
 
 	return c.complete()
@@ -134,23 +129,35 @@ type completer struct {
 	model           *model
 	sourceID        location.SourceID
 	collector       *diag.Collector
-	registry        completionRegistry
+	loaded          map[location.SourceID]Schema
 	resolvedImports resolvedImportMap
-	schema          *Schema
-	typeIndex       map[string]*Type
-	dataIndex       map[string]*DataType
+	schema          Schema
+	typeIndex       map[string]Type
+	dataIndex       map[string]DataType
 	gate            errorGate // judges this completion by the errors it contributes
+
+	// declared holds the first declaration of each name. A schema's types and
+	// datatypes share one namespace.
+	declared map[string]declaration
+	// displaced holds each name with a declaration refused because the name's
+	// first declaration is of the other kind. A reference that reads the
+	// refused kind is silent: the duplicate is its root cause.
+	displaced map[string]bool
 
 	// unresolvedSupertypeMemo caches [completer.hasUnresolvedSupertype] per type:
 	// the inheritance graph and resolution state are fixed across the phases that
 	// query it (validatePrimaryKeys, validateInvariantExpressions,
 	// validateAnnotations), so a type's answer cannot change between calls.
-	unresolvedSupertypeMemo map[*Type]bool
+	unresolvedSupertypeMemo map[Type]bool
 
 	// staticMembers caches [completer.membersOf] per type: the merged members
 	// keyed as an invariant expression writes them.
-	staticMembers map[*Type]staticMembers
+	staticMembers map[Type]staticMembers
 	invariantSeen map[string]bool // diagnostics already reported for the invariant being typed
+	// noValue maps each literal that stands in for one with no value, in any
+	// invariant this completion converts, to the kind of literal the source
+	// wrote. Only a load that is refused holds one.
+	noValue map[*expr.Literal]parse.LiteralKind
 
 	// pendingShadowed holds the annotations own re-declarations dropped, queued
 	// during linearization and emitted by [completer.flushShadowedAnnotations]
@@ -160,20 +167,19 @@ type completer struct {
 	// diagnosedAnnotations marks the annotations that drew a diagnostic of their
 	// own during validation, so the shadow warning does not advise re-stating an
 	// annotation this same load rejects.
-	diagnosedAnnotations map[*Annotation]bool
+	diagnosedAnnotations map[Annotation]bool
 
-	// conflictedProperties marks own declarations that drew E_PROPERTY_CONFLICT,
-	// so the shadow warning does not advise editing a declaration the load has
-	// already rejected outright.
-	conflictedProperties map[*Property]bool
+	// conflictedProperties marks own declarations the merge refused, whether
+	// E_PROPERTY_CONFLICT reports the refusal or an unknown type withholds the
+	// report. The shadow warning does not advise editing such a declaration.
+	conflictedProperties map[Property]bool
 
-	// dtStates and dtStack drive [completer.resolveDataType]: each datatype's
-	// resolution state, and the datatypes whose resolution is in progress.
-	dtStates map[*DataType]dtState
-	dtStack  []*DataType
+	// dtStates holds each datatype's resolution state, for
+	// [completer.resolveDataType].
+	dtStates map[DataType]dtState
 }
 
-func (c *completer) complete() *Schema {
+func (c *completer) complete() Schema {
 	// Create the schema shell
 	c.schema = newSchema(
 		c.model.Name,
@@ -191,6 +197,7 @@ func (c *completer) complete() *Schema {
 	// genuine data dependency.
 
 	// Phase 1: Index types and datatypes
+	c.indexDeclarations()
 	c.indexTypes()
 	c.indexDataTypes()
 
@@ -204,7 +211,7 @@ func (c *completer) complete() *Schema {
 	c.validateRelationProperties()
 
 	// Phase 3c: Bind every own relation to its target's identity. This runs
-	// before inheritance merges so Relation.Equal compares identities, and a
+	// before inheritance merges so Relation.equal compares identities, and a
 	// relation that shadows an inherited one under the same name collides
 	// when the targets differ.
 	c.resolveRelationTargets()
@@ -215,7 +222,7 @@ func (c *completer) complete() *Schema {
 	// produced would be garbage, and every downstream phase that reads
 	// merged members would generate noise from them.
 	if !c.detectCycles() {
-		return nil
+		return Schema{}
 	}
 
 	// Phase 5: Complete each type (linearize, merge, validate)
@@ -255,7 +262,7 @@ func (c *completer) complete() *Schema {
 	// delta, not the shared collector's total: errors collected before this
 	// completion began belong to other schemas in the same load.
 	if c.gate.tripped() {
-		return nil
+		return Schema{}
 	}
 
 	// Phase 8: Seal this schema's own declarations.
@@ -266,8 +273,7 @@ func (c *completer) complete() *Schema {
 
 // sealOwnDeclarations closes this schema's own declarations to mutation.
 // Relations come from the own sets: a merged set carries an ancestor's
-// [Relation] pointers, already sealed by their owning schema, and re-sealing
-// them races two loads sharing a [Registry] ([TestSeal_SharedRegistryConcurrentLoads]).
+// [Relation] records, already sealed by their owning schema.
 func (c *completer) sealOwnDeclarations() {
 	for _, t := range c.schema.types {
 		t.seal()
@@ -284,22 +290,71 @@ func (c *completer) sealOwnDeclarations() {
 	}
 }
 
-// indexTypes creates Type objects and indexes them by name. A duplicate
-// declaration is reported and skipped — the first declaration is the one
-// kept and indexed — so every duplicate is diagnosed in one pass and
-// downstream phases see one coherent Type per name.
-func (c *completer) indexTypes() {
-	types := make([]*Type, 0, len(c.model.Types))
+// declaration is a name's first declaration in a schema.
+type declaration struct {
+	kind  string // "type" or "datatype", as a message writes it
+	index int    // its place in the model's Types or DataTypes
+	span  location.Span
+}
 
-	for _, td := range c.model.Types {
+// indexDeclarations records the first declaration of each type and datatype
+// name: the earliest in the source, whatever its kind. Of two declarations at
+// one span, which only a model built by hand holds, the first is the one
+// visited first: a type before a datatype, then the model's order.
+func (c *completer) indexDeclarations() {
+	c.declared = make(map[string]declaration, len(c.model.Types)+len(c.model.DataTypes))
+	c.displaced = make(map[string]bool)
+	declare := func(kind, name string, index int, span location.Span) {
+		if first, ok := c.declared[name]; ok && first.span.Compare(span) <= 0 {
+			return
+		}
+		c.declared[name] = declaration{kind: kind, index: index, span: span}
+	}
+	for i, td := range c.model.Types {
+		if td != nil {
+			declare("type", td.Name, i, td.Span)
+		}
+	}
+	for i, dd := range c.model.DataTypes {
+		if dd != nil {
+			declare("datatype", dd.Name, i, dd.Span)
+		}
+	}
+}
+
+// redeclared reports whether the declaration of name at index of its kind's
+// list is not the name's first one. It reports a later one as a duplicate, and
+// records the name as displaced when the first is of the other kind.
+func (c *completer) redeclared(kind, name string, index int, span location.Span) bool {
+	first := c.declared[name]
+	if first.kind == kind && first.index == index {
+		return false
+	}
+	related := []diag.RelatedInfo{{Span: first.span, Message: "first defined here"}}
+	if first.kind == kind {
+		c.errorfRelated(span, diag.E_DUPLICATE_TYPE, related,
+			"%s %q is defined multiple times", kind, name)
+		return true
+	}
+	c.errorfRelated(span, diag.E_DUPLICATE_TYPE, related,
+		"%s %q is defined multiple times; the name is first defined as a %s", kind, name, first.kind)
+	c.displaced[name] = true
+	return true
+}
+
+// indexTypes creates Type objects and indexes them by name. A declaration
+// that is not its name's first is reported and skipped, so every duplicate
+// is diagnosed in one pass and downstream phases see one declaration per
+// name.
+func (c *completer) indexTypes() {
+	types := make([]Type, 0, len(c.model.Types))
+
+	for i, td := range c.model.Types {
 		if td == nil {
 			continue
 		}
 
-		if existing, dup := c.typeIndex[td.Name]; dup {
-			c.errorf(td.Span, diag.E_DUPLICATE_TYPE,
-				"type %q is defined multiple times; first defined at %s",
-				td.Name, existing.Span().Start)
+		if c.redeclared("type", td.Name, i, td.Span) {
 			continue
 		}
 
@@ -316,15 +371,15 @@ func (c *completer) indexTypes() {
 		if !td.NameSpan.IsZero() {
 			t.setNameSpan(td.NameSpan)
 		}
+		t.lostMember = td.LostMember
 
-		// Convert declared inherits
-		inherits := make([]TypeRef, 0, len(td.Inherits))
+		clause := make([]TypeRef, 0, len(td.Inherits))
 		for _, ref := range td.Inherits {
 			if ref != nil {
-				inherits = append(inherits, NewTypeRef(ref.Qualifier, ref.Name, ref.Span))
+				clause = append(clause, newTypeRef(ref.Qualifier, ref.Name, ref.Span))
 			}
 		}
-		t.setInherits(inherits)
+		t.setInherits(clause)
 
 		// Convert and set declared properties
 		props := c.convertProperties(td.Properties, td.Name)
@@ -349,21 +404,17 @@ func (c *completer) indexTypes() {
 	c.schema.setTypes(types)
 }
 
-// indexDataTypes creates DataType objects and indexes them by name. A
-// duplicate declaration is reported and skipped, keep-first, like
-// indexTypes.
+// indexDataTypes creates DataType objects and indexes them by name. It skips
+// a later declaration as indexTypes does.
 func (c *completer) indexDataTypes() {
-	dataTypes := make([]*DataType, 0, len(c.model.DataTypes))
+	dataTypes := make([]DataType, 0, len(c.model.DataTypes))
 
-	for _, dd := range c.model.DataTypes {
+	for i, dd := range c.model.DataTypes {
 		if dd == nil {
 			continue
 		}
 
-		if existing, dup := c.dataIndex[dd.Name]; dup {
-			c.errorf(dd.Span, diag.E_DUPLICATE_TYPE,
-				"datatype %q is defined multiple times; first defined at %s",
-				dd.Name, existing.Span().Start)
+		if c.redeclared("datatype", dd.Name, i, dd.Span) {
 			continue
 		}
 
@@ -381,134 +432,65 @@ func (c *completer) indexDataTypes() {
 	c.schema.setDataTypes(dataTypes)
 }
 
-// indexImports validates and indexes import declarations. Declaration-level
-// import validation is owned here: this phase is shared by both front doors
-// (parsed sources and the Builder), so checks live in one place. Every
-// declaration is validated and one bad declaration does not hide another. A
-// later declaration of a duplicated alias is dropped keep-first (no Import),
-// so references resolve against the kept first binding. A declaration rejected
-// for an invalid or reserved alias, or for colliding with a local
-// type/datatype name, is marked deferred instead (see deferRejectedAlias), so
-// references through its alias defer to the rejection's single root-cause
-// diagnostic rather than silently resolving against the import the loader did
-// resolve, or re-blaming E_UNKNOWN_TYPE at each reference site.
+// indexImports validates and indexes import declarations. Every declaration is
+// validated and one bad declaration does not hide another. A later declaration
+// of a duplicated alias is dropped keep-first (no Import), so references resolve
+// against the kept first binding. A declaration rejected for colliding with a
+// local type/datatype name is marked deferred instead, so references through its
+// alias defer to the rejection's single root-cause diagnostic rather than
+// silently resolving against the import the loader did resolve, or re-blaming
+// E_UNKNOWN_TYPE at each reference site.
 func (c *completer) indexImports() {
-	imports := make([]*Import, 0, len(c.model.Imports))
+	imports := make([]Import, 0, len(c.model.Imports))
 	aliasIndex := make(map[string]*importDecl)
 
-	// deferRejectedAlias records a rejected declaration's alias as deferred in
-	// the resolution map — the single deferral signal both reference kinds read:
-	// datatype references via resolveReference, and extends/relation references
-	// via referenceDeferred (through classifyQualifier). A reference through the
-	// alias then defers to the rejection's root-cause diagnostic instead of
-	// re-blaming E_UNKNOWN_TYPE; and on the Load path — where the loader may
-	// already have resolved this alias before this phase rejected it — the
-	// deferred entry overwrites that resolution, so a datatype reference cannot
-	// silently resolve against the rejected import. The nil check covers a
-	// Builder with no imports, whose resolution map is nil and which declares no
-	// import to defer.
-	deferRejectedAlias := func(id *importDecl) {
-		if c.resolvedImports != nil {
-			c.resolvedImports[id.Alias] = importResolution{deferred: true}
-		}
-	}
-
 	for _, id := range c.model.Imports {
-		if id == nil {
+		if id.unnamed() {
 			continue
 		}
 
 		// Duplicate alias (keep-first): the first declaration of an alias owns
-		// the slot — even one later rejected as invalid, reserved, or colliding
-		// — so a repeat is reported once here as E_DUPLICATE_IMPORT and stays
-		// inert. The slot is claimed before the per-declaration validation
-		// below; otherwise a repeated *rejected* alias would re-fire its own
-		// rejection at every occurrence instead (two imports whose alias
-		// collides with a local name would each draw E_IMPORT_ALIAS_COLLISION
-		// and never the duplicate report).
+		// the slot — even one later rejected as colliding — so a repeat is
+		// reported once here as E_DUPLICATE_IMPORT and stays inert. The slot is
+		// claimed before the collision check below; otherwise two imports whose
+		// alias collides with a local name would each draw
+		// E_IMPORT_ALIAS_COLLISION and never the duplicate report.
 		if existing, dup := aliasIndex[id.Alias]; dup {
 			c.errorf(id.Span, diag.E_DUPLICATE_IMPORT,
-				"alias %q already used for import %q; use explicit 'as' to disambiguate\n    existing: import %q\n    new:      import %q",
-				id.Alias, existing.Path, existing.Path, id.Path)
+				"alias %q already used for import %s; use explicit 'as' to disambiguate\n    existing: import %s\n    new:      import %s",
+				id.Alias, existing.shownPath(), existing.shownPath(), id.shownPath())
 			continue
 		}
 		aliasIndex[id.Alias] = id
 
-		// Validate alias is a valid identifier. Parse-path aliases always
-		// pass — derived aliases are normalized by deriveAliasFromPath and
-		// explicit aliases are letter-start by grammar — so this rejects
-		// Builder-supplied strings.
-		if !isValidAlias(id.Alias) {
-			c.errorf(id.Span, diag.E_INVALID_ALIAS,
-				"derived alias %q is not a valid identifier (aliases must start with a letter); use 'as <alias>' to provide a valid alias",
-				id.Alias)
-			deferRejectedAlias(id)
-			continue
-		}
-
-		// Validate alias is not a reserved keyword. The parser drops such
-		// declarations before they reach a model, so this too is live for
-		// the Builder.
-		if isReservedKeyword(id.Alias) {
-			c.errorf(id.Span, diag.E_INVALID_ALIAS,
-				"import alias %q is a reserved keyword; use 'as <alias>' to provide a different alias",
-				id.Alias)
-			deferRejectedAlias(id)
-			continue
-		}
-
-		// Check for alias collision with local type or datatype names.
-		// Both indexes are consulted: a qualified reference's qualifier is
-		// ambiguous against either kind of local declaration.
-		if _, collides := c.typeIndex[id.Alias]; collides {
+		// An alias may not be a local type's or datatype's name: a qualified
+		// reference's qualifier would be ambiguous against it. The deferred entry
+		// overwrites any resolution the loader made, so a reference through the
+		// alias cannot silently resolve against the rejected import.
+		if local, collides := c.declared[id.Alias]; collides {
 			c.errorf(id.Span, diag.E_IMPORT_ALIAS_COLLISION,
-				"import alias %q collides with local type name", id.Alias)
-			deferRejectedAlias(id)
-			continue
-		}
-		if _, collides := c.dataIndex[id.Alias]; collides {
-			c.errorf(id.Span, diag.E_IMPORT_ALIAS_COLLISION,
-				"import alias %q collides with local datatype name", id.Alias)
-			deferRejectedAlias(id)
+				"import alias %q collides with local %s name", id.Alias, local.kind)
+			c.resolvedImports[id.Alias] = importResolution{deferred: true}
 			continue
 		}
 
-		// Resolve SourceID from pre-resolved imports or defer resolution.
-		// Duplicate resolved SourceIDs are the resolver's concern (the
-		// loader's validateResolvedImports, the Builder's resolveImports
-		// dedup) — by the time a resolution map reaches completion it is
-		// already deduplicated.
-		var resolvedSourceID location.SourceID
-		if c.resolvedImports != nil {
-			resolved, present := c.resolvedImports[id.Alias]
-			switch {
-			case !present:
-				// Key-absent: the resolution map reached completion without an
-				// entry for this alias — a bug in whichever front door built
-				// it, not a user error, which is why it is E_INTERNAL rather
-				// than a member of the import-resolution family. Neither door
-				// can reach it: the loader binds or fails every alias before
-				// completion, and the Builder discards its resolution map
-				// whenever a path fails. Reported and skipped.
-				c.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
-					fmt.Sprintf("import alias %q has no resolved SourceID; ensure loader provides all import resolutions", id.Alias)).
-					WithSpan(id.Span).
-					WithDetail(diag.DetailKeyAlias, id.Alias).
-					WithDetail(diag.DetailKeyImportPath, id.Path).Build())
-				continue
-			case resolved.deferred:
-				// The loader saw this alias and already reported why it has no
-				// resolution (failed load or structural rejection). Construct
-				// the Import deferred — zero SourceID, no additional diagnostic
-				// — so references through the alias are recognizably deferred
-				// downstream.
-			default:
-				resolvedSourceID = resolved.sourceID
-			}
+		// Key-absent: the resolution map reached completion without an entry for
+		// this alias — a loader bug, not a user error, which is why it is
+		// E_INTERNAL rather than a member of the import-resolution family. The
+		// loader binds or fails every alias before completion. Reported and skipped.
+		resolved, present := c.resolvedImports[id.Alias]
+		if !present {
+			c.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+				fmt.Sprintf("import alias %q has no resolved SourceID; ensure loader provides all import resolutions", id.Alias)).
+				WithSpan(id.Span).
+				WithDetail(diag.DetailKeyAlias, id.Alias).
+				WithDetail(diag.DetailKeyImportPath, id.Path).Build())
+			continue
 		}
-		// If resolvedImports is nil, leave resolvedSourceID as zero for deferred resolution
-		imp := newImport(id.Path, id.Alias, resolvedSourceID, id.Span)
-		imports = append(imports, imp)
+		// A deferred entry holds no SourceID and yields a zero-ResolvedSourceID
+		// Import, with no further diagnostic: the loader already reported why the
+		// alias has no resolution.
+		imports = append(imports, newImport(id.Path, id.Alias, resolved.sourceID, id.Span))
 	}
 
 	c.schema.setImports(imports)
@@ -516,8 +498,8 @@ func (c *completer) indexImports() {
 
 // convertProperties converts propertyDecl to Property.
 // Detects duplicate property declarations within the same type.
-func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) []*Property {
-	props := make([]*Property, 0, len(decls))
+func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) []Property {
+	props := make([]Property, 0, len(decls))
 	seen := make(map[string]*propertyDecl) // Track first occurrence for related info
 
 	for _, pd := range decls {
@@ -530,7 +512,7 @@ func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) [
 			c.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_PROPERTY,
 				fmt.Sprintf("property %q is defined multiple times in type %q", pd.Name, ownerType)).
 				WithSpan(pd.Span).
-				WithRelated(location.RelatedInfo{
+				WithRelated(diag.RelatedInfo{
 					Span:    existing.Span,
 					Message: "first defined here",
 				}).Build())
@@ -538,7 +520,7 @@ func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) [
 		}
 		seen[pd.Name] = pd
 
-		scope := TypeScope(NewTypeRef("", ownerType, pd.Span))
+		scope := typeScope(newTypeRef("", ownerType, pd.Span))
 		p := newProperty(
 			pd.Name,
 			pd.Span,
@@ -558,7 +540,7 @@ func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) [
 
 // convertRelations converts relationDecl to Relation, splitting by kind.
 // Detects duplicate relation declarations within the same type.
-func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (assocs, comps []*Relation) {
+func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (assocs, comps []Relation) {
 	seen := make(map[string]*relationDecl) // Track first occurrence by raw name
 
 	for _, rd := range decls {
@@ -571,7 +553,7 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 			c.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_RELATION,
 				fmt.Sprintf("relation %q is defined multiple times in type %q", rd.Name, ownerType)).
 				WithSpan(rd.Span).
-				WithRelated(location.RelatedInfo{
+				WithRelated(diag.RelatedInfo{
 					Span:    existing.Span,
 					Message: "first defined here",
 				}).Build())
@@ -581,16 +563,16 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 
 		var target TypeRef
 		if rd.Target != nil {
-			target = NewTypeRef(rd.Target.Qualifier, rd.Target.Name, rd.Target.Span)
+			target = newTypeRef(rd.Target.Qualifier, rd.Target.Name, rd.Target.Span)
 		}
 
 		fieldName := strings.ToLower(rd.Name)
 
 		// Convert edge properties (associations only). A name declared twice
 		// is one error, as it is for a node property.
-		var props []*Property
+		var props []Property
 		if rd.Kind == RelationAssociation && len(rd.Properties) > 0 {
-			props = make([]*Property, 0, len(rd.Properties))
+			props = make([]Property, 0, len(rd.Properties))
 			seenProp := make(map[string]*propertyDecl, len(rd.Properties))
 			for _, pd := range rd.Properties {
 				if pd == nil {
@@ -600,11 +582,11 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 					c.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_PROPERTY,
 						fmt.Sprintf("edge property %q is defined multiple times on relation %q in type %q", pd.Name, rd.Name, ownerType)).
 						WithSpan(pd.Span).
-						WithRelated(location.RelatedInfo{Span: existing.Span, Message: "first defined here"}).Build())
+						WithRelated(diag.RelatedInfo{Span: existing.Span, Message: "first defined here"}).Build())
 					continue
 				}
 				seenProp[pd.Name] = pd
-				scope := RelationScope(rd.Name)
+				scope := relationScope(rd.Name)
 				p := newProperty(
 					pd.Name,
 					pd.Span,
@@ -655,9 +637,10 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 
 // convertInvariants converts invariantDecl to Invariant. An invariant's
 // message is its identity, so a message declared twice on one type is a
-// duplicate: the first declaration is kept and the second reported.
-func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) []*Invariant {
-	invs := make([]*Invariant, 0, len(decls))
+// duplicate: the first declaration with a message and an expression is kept,
+// and each later one reported.
+func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) []Invariant {
+	invs := make([]Invariant, 0, len(decls))
 	first := make(map[string]*invariantDecl, len(decls))
 
 	for _, id := range decls {
@@ -679,12 +662,18 @@ func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) [
 		}
 		if prior, dup := first[id.Name]; dup {
 			c.errorfRelated(id.Span, diag.E_DUPLICATE_INVARIANT,
-				[]location.RelatedInfo{{Span: prior.Span, Message: "first declared here"}},
+				[]diag.RelatedInfo{{Span: prior.Span, Message: "first declared here"}},
 				"type %q declares invariant %q twice", typeName, id.Name)
 			continue
 		}
 		first[id.Name] = id
-		invs = append(invs, newInvariant(id.Name, id.Expr, id.Span, id.Documentation))
+		for _, nv := range id.NoValue {
+			if c.noValue == nil {
+				c.noValue = make(map[*expr.Literal]parse.LiteralKind)
+			}
+			c.noValue[nv.Literal] = nv.Kind
+		}
+		invs = append(invs, newInvariant(id.Name, id.Text, id.Expr, id.Span, id.Documentation))
 	}
 
 	return invs
@@ -695,11 +684,11 @@ func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) [
 // validateAnnotations stamps them after linearization, before sealing. Used for
 // both type-level annotations (in indexTypes) and property-trailing ones (in
 // convertProperties), so property and type annotations share one conversion.
-func convertAnnotations(decls []*annotationDecl) []*Annotation {
+func convertAnnotations(decls []*annotationDecl) []Annotation {
 	if len(decls) == 0 {
 		return nil
 	}
-	anns := make([]*Annotation, 0, len(decls))
+	anns := make([]Annotation, 0, len(decls))
 	for _, d := range decls {
 		if d == nil {
 			continue
@@ -727,16 +716,19 @@ func convertAnnotations(decls []*annotationDecl) []*Annotation {
 // resolveAliasConstraints resolves every datatype reference in datatypes,
 // properties and edge properties. Datatypes resolve depth-first over the
 // reference graph, each once, so a datatype is complete before any reference
-// copies its constraint, whatever the declaration order. A reference cycle,
-// through an alias or a List element, is reported at every datatype on it.
+// copies its constraint, whatever the declaration order. A reference cycle
+// runs through List elements alone, since no door admits a datatype declared as
+// another, and is reported at every datatype on it. A datatype or a property
+// whose List nests past the parser's bound through the datatypes it names is
+// refused as one the source writes out is.
 func (c *completer) resolveAliasConstraints() {
-	c.dtStates = make(map[*DataType]dtState, len(c.schema.dataTypes))
+	c.dtStates = make(map[DataType]dtState, len(c.schema.dataTypes))
 	for _, dt := range c.schema.dataTypes {
 		c.resolveDataType(dt)
 	}
 	for _, t := range c.schema.types {
 		for p := range t.Properties() {
-			if resolved, ok := c.resolveConstraint(p.Constraint(), p.Span()); ok {
+			if resolved, ok := c.resolveConstraint(p.Constraint(), p.Span()); ok && c.listWithinBound(resolved, p.Span()) {
 				p.setConstraint(resolved)
 			}
 		}
@@ -757,37 +749,99 @@ const (
 	dtResolving
 	dtResolved
 	dtFailed
+	dtTooDeep // failed: its List nests past the bound, which one issue reports
 )
 
-// resolveDataType resolves dt's constraint once. A datatype re-entered while
-// it resolves closes a cycle: every datatype on the stack from it upward is
-// reported and fails. A datatype that fails keeps its declared constraint.
-func (c *completer) resolveDataType(dt *DataType) {
-	switch c.dtStates[dt] {
-	case dtResolved, dtFailed:
-		return
-	case dtResolving:
-		i := len(c.dtStack) - 1
-		for c.dtStack[i] != dt {
-			i--
+// resolveDataType resolves dt's constraint once, after that of each datatype
+// the chain from dt names, and nests no call per link. A chain that returns to
+// one of its datatypes is a cycle: each datatype from that one on is reported
+// and fails, and a datatype that fails keeps its declared constraint.
+func (c *completer) resolveDataType(dt DataType) {
+	var chain []DataType
+walk:
+	for next, named := dt, true; named; next, named = c.namedDataType(next) {
+		switch c.dtStates[next] {
+		case dtUnvisited:
+			c.dtStates[next] = dtResolving
+			chain = append(chain, next)
+		case dtResolving:
+			for _, member := range chain[slices.Index(chain, next):] {
+				c.errorf(member.Span(), diag.E_INVALID_CONSTRAINT,
+					"datatype %q forms a cycle", member.Name())
+				c.dtStates[member] = dtFailed
+			}
+			break walk
+		case dtResolved, dtFailed, dtTooDeep:
+			break walk
 		}
-		for _, member := range c.dtStack[i:] {
-			c.errorf(member.Span(), diag.E_INVALID_CONSTRAINT,
-				"datatype %q forms a cycle", member.Name())
+	}
+	for _, member := range slices.Backward(chain) {
+		if c.dtStates[member] == dtFailed {
+			continue
+		}
+		resolved, ok := c.resolveConstraint(member.Constraint(), member.Span())
+		switch {
+		case !ok:
 			c.dtStates[member] = dtFailed
+		case !c.listWithinBound(resolved, member.Span()):
+			c.dtStates[member] = dtTooDeep
+		default:
+			member.setConstraint(resolved)
+			c.dtStates[member] = dtResolved
 		}
-		return
 	}
-	c.dtStates[dt] = dtResolving
-	c.dtStack = append(c.dtStack, dt)
-	resolved, ok := c.resolveConstraint(dt.Constraint(), dt.Span())
-	c.dtStack = c.dtStack[:len(c.dtStack)-1]
-	if c.dtStates[dt] == dtFailed || !ok {
-		c.dtStates[dt] = dtFailed
-		return
+}
+
+// namedDataType returns the local datatype that dt's constraint names under
+// its List levels, as [completer.resolveReference] finds it.
+func (c *completer) namedDataType(dt DataType) (DataType, bool) {
+	con := dt.Constraint()
+	for {
+		list, ok := con.(ListConstraint)
+		if !ok {
+			break
+		}
+		con = list.Element()
 	}
-	dt.setConstraint(resolved)
-	c.dtStates[dt] = dtResolved
+	alias, ok := con.(AliasConstraint)
+	if !ok {
+		return DataType{}, false
+	}
+	qualifier, name, _ := referenceParts(alias.DataTypeName())
+	if qualifier != "" {
+		return DataType{}, false
+	}
+	named, found := c.dataIndex[name]
+	return named, found
+}
+
+// listWithinBound reports whether the List levels of con, a resolved
+// constraint, stay within [parse.MaxNesting] through the datatypes it names,
+// and reports one past it at span. A datatype con names passed here or was
+// reported too deep where it is declared: con is then refused with no issue of
+// its own, and the count ends within twice the bound.
+func (c *completer) listWithinBound(con Constraint, span location.Span) bool {
+	levels := 0
+	for {
+		switch x := con.(type) {
+		case ListConstraint:
+			levels++
+			con = x.Element()
+			continue
+		case AliasConstraint:
+			if dt, local := c.dataIndex[x.DataTypeName()]; local && c.dtStates[dt] == dtTooDeep {
+				return false
+			}
+			con = x.Resolved()
+			continue
+		}
+		break
+	}
+	if levels <= parse.MaxNesting {
+		return true
+	}
+	c.errorf(span, diag.E_INVALID_CONSTRAINT, "List nests deeper than %d levels", parse.MaxNesting)
+	return false
 }
 
 // resolveConstraint resolves every datatype reference in con, at any List
@@ -805,13 +859,13 @@ func (c *completer) resolveConstraint(con Constraint, span location.Span) (Const
 		maxLen, hasMax := x.MaxLen()
 		switch {
 		case hasMin && hasMax:
-			return ListLenBetween(elem, minLen, maxLen), true
+			return listLenBetween(elem, minLen, maxLen), true
 		case hasMin:
-			return ListMinLen(elem, minLen), true
+			return listMinLen(elem, minLen), true
 		case hasMax:
-			return ListMaxLen(elem, maxLen), true
+			return listMaxLen(elem, maxLen), true
 		default:
-			return NewListConstraint(elem), true
+			return newListConstraint(elem), true
 		}
 	}
 	return con, true
@@ -819,48 +873,44 @@ func (c *completer) resolveConstraint(con Constraint, span location.Span) (Const
 
 // resolveReference resolves one datatype name to an alias carrying the
 // datatype's resolved constraint. An unknown name is E_UNKNOWN_TYPE at the
-// reference, and a declared-but-failed import defers. A local datatype that
-// failed was reported by its own resolution; the reference carries the
-// constraint it declares, so a later phase still judges its shape (a List
-// datatype is refused on an edge whether or not its element resolved).
+// reference, and a declared-but-failed import and a displaced name defer. A
+// local datatype that failed was reported by its own resolution; the reference
+// carries the constraint it declares, so a later phase still judges its shape
+// (a List datatype is refused on an edge whether or not its element resolved).
 func (c *completer) resolveReference(dataTypeName string, span location.Span) (Constraint, bool) {
-	qualifier, name := parseQualifiedName(dataTypeName)
+	qualifier, name, _ := referenceParts(dataTypeName)
 	if qualifier == "" {
 		dt, found := c.dataIndex[name]
 		if !found {
+			if c.displaced[name] {
+				return nil, false
+			}
 			c.errorf(span, diag.E_UNKNOWN_TYPE,
 				"unknown type %q in datatype reference; a property type must be a built-in or a declared datatype",
 				dataTypeName)
 			return nil, false
 		}
 		c.resolveDataType(dt)
-		return NewAliasConstraint(dataTypeName, dt.Constraint()), true
+		return newAliasConstraint(dataTypeName, dt.Constraint()), true
 	}
 	state, sourceID := c.classifyQualifier(qualifier)
 	switch state {
 	case aliasDeferred:
-		return NewAliasConstraint(dataTypeName, nil), true
+		return nil, false
 	case aliasAbsent:
 		c.errorf(span, diag.E_UNKNOWN_TYPE,
 			"unknown type %q in datatype reference: no import declared with alias %q",
 			dataTypeName, qualifier)
 		return nil, false
 	}
-	importedSchema, ok := c.registry.LookupBySourceID(sourceID)
-	if !ok {
-		c.errorf(span, diag.E_UNKNOWN_TYPE,
-			"unknown type %q in datatype reference: schema imported as %q is not registered",
-			dataTypeName, qualifier)
-		return nil, false
-	}
-	dt, found := importedSchema.DataType(name)
+	dt, found := c.loaded[sourceID].DataType(name)
 	if !found {
 		c.errorf(span, diag.E_UNKNOWN_TYPE,
 			"unknown type %q in datatype reference: datatype %q does not exist in the schema imported as %q",
 			dataTypeName, name, qualifier)
 		return nil, false
 	}
-	return NewAliasConstraint(dataTypeName, dt.Constraint()), true
+	return newAliasConstraint(dataTypeName, dt.Constraint()), true
 }
 
 // aliasResolution classifies an import qualifier against the resolution map —
@@ -869,16 +919,12 @@ func (c *completer) resolveReference(dataTypeName string, span location.Span) (C
 // deferral and resolution sites cannot disagree about an alias the way a Schema.ImportByAlias
 // reader and a resolvedImports reader once could (the divergence that let a
 // completion-rejected alias resolve silently on one path while re-blaming
-// E_UNKNOWN_TYPE on another). Callers layer their own registry policy on top.
+// E_UNKNOWN_TYPE on another).
 type aliasResolution int
 
 const (
 	// aliasAbsent: the qualifier names no declared import — a genuine unknown
-	// reference (a user typo). This folds in the no-map case (a Builder schema
-	// or deferred-completion bridge with zero imports): a completion consumer
-	// reaches classification only with a registry present, where a nil map can
-	// only mean a zero-import schema, so any qualified reference names no import
-	// — exactly aliasAbsent, not a deferral.
+	// reference (a user typo).
 	aliasAbsent aliasResolution = iota
 	// aliasDeferred: the import is declared but unresolved (failed load or
 	// rejected declaration); its root cause already carries a diagnostic.
@@ -887,16 +933,8 @@ const (
 	aliasResolved
 )
 
-// classifyQualifier interprets the resolution map for one qualifier. It reads
-// only the map, never the registry: its callers ([completer.referenceDeferred],
-// [completer.resolveReference] and [completer.resolveImportedSchema]) layer
-// their own registry policy on top.
+// classifyQualifier interprets the resolution map for one qualifier.
 func (c *completer) classifyQualifier(qualifier string) (aliasResolution, location.SourceID) {
-	if c.resolvedImports == nil {
-		// No resolution map means zero declared imports (with or without a
-		// registry), so any qualifier names no import — absent.
-		return aliasAbsent, location.SourceID{}
-	}
 	res, declared := c.resolvedImports[qualifier]
 	switch {
 	case !declared:
@@ -908,63 +946,58 @@ func (c *completer) classifyQualifier(qualifier string) (aliasResolution, locati
 	}
 }
 
-// referenceDeferred reports whether a qualified reference's failure to resolve
-// stays silent: only a declared-but-failed import defers, its root cause being
-// already reported. An undeclared qualifier is unknown regardless of registry
-// presence — no link step ever comes, so deferring would hide a dangling ref.
-func (c *completer) referenceDeferred(qualifier string) bool {
-	if qualifier == "" {
-		return false
+// referenceDeferred reports whether a type reference's failure to resolve stays
+// silent, its root cause being already reported: a local name that is
+// displaced, or a qualifier that names a declared-but-failed import. An
+// undeclared qualifier is unknown. A caller asks only once the reference has
+// failed to resolve, so a displaced name's refused declaration is the type.
+func (c *completer) referenceDeferred(ref TypeRef) bool {
+	if ref.Qualifier() == "" {
+		return c.displaced[ref.Name()]
 	}
-	state, _ := c.classifyQualifier(qualifier)
+	state, _ := c.classifyQualifier(ref.Qualifier())
 	return state == aliasDeferred
 }
 
-// primaryKeyTypeDeferred reports whether a primary property's primary-key TYPE
-// check should be skipped because its constraint bottoms out in an unresolved
-// alias. Such a terminal's type is unknowable here, so validating it against the
-// allowed key types (String, UUID, Date, Timestamp) is meaningless — and its
-// unresolvability is already accounted for by alias resolution (phase 3,
-// [completer.resolveAliasConstraints]), which runs before this check:
+// constraintKindUnknown reports whether a constraint's kind is not known: the schema
+// parser could not build the type (a nil constraint, such as a Vector dimension
+// it refused), or the constraint bottoms out in an alias that did not resolve
+// (an undeclared name, a deferred import, a displaced name). The cause of each
+// is already reported, so a rule that judges a property by its kind, as the
+// primary-key and annotation-target rules do, defers rather than stack a second
+// issue on it. A List is known whatever its element resolves to, since no such
+// rule reads the element; one whose element the parser could not build, such as
+// List<Vector[0]>, is nil.
 //
-//   - reported — an undeclared local name, or a qualifier naming no declared
-//     import, draws E_UNKNOWN_TYPE at the reference;
-//   - silently deferred — a declared-but-failed import, whose failure is the
-//     root cause and already carries its own diagnostic.
-//
-// Either way the root cause is owned elsewhere, so the type check defers rather
-// than stacking a (usually misleading) E_INVALID_PRIMARY_KEY_TYPE on top of a
-// reported error. A resolved terminal (a builtin, or an alias resolved to one)
-// is checked normally, and so is a reference to a local datatype that failed (a
-// cycle, an unknown element): it carries the datatype's declared List, which is
-// no primary key whatever its element.
-//
-// Keying off the terminal's resolved state alone — not a re-derived
-// qualifier/registry prediction — is what keeps this in step with
-// [completer.resolveReference]: every unresolved terminal it leaves behind was
-// reported or deferred there, and a resolved one is the only shape this checks.
-//
-// This couples to [completer.resolveAliasConstraints] leaving a deferred
-// terminal as an unresolved AliasConstraint. A change
-// that instead resolved such terminals to a placeholder would silently flip this
-// predicate to false and resurface a mis-attributed E_INVALID_PRIMARY_KEY_TYPE,
-// so the two must move together.
-func (c *completer) primaryKeyTypeDeferred(constraint Constraint) bool {
+// It couples to [completer.resolveAliasConstraints] leaving an unresolved
+// terminal as an [AliasConstraint]: a placeholder there would turn this false.
+func constraintKindUnknown(constraint Constraint) bool {
 	if constraint == nil {
-		return false
+		return true
 	}
 	terminal, isAlias := ResolveAlias(constraint).(AliasConstraint)
-	return isAlias && !terminal.IsResolved()
+	return isAlias && !terminal.isResolved()
 }
 
-// parseQualifiedName splits a qualified name into qualifier and local name.
-// For "foo.Bar", returns ("foo", "Bar"). For "Bar", returns ("", "Bar").
-func parseQualifiedName(name string) (qualifier, localName string) {
-	before, after, ok := strings.Cut(name, ".")
-	if !ok {
-		return "", name
+// referenceParts splits a datatype reference as the DSL writes one, Name or
+// alias.Name, into its import qualifier and its datatype name. ok is false for
+// any other text, which is returned whole as the name, so it names no datatype.
+func referenceParts(ref string) (qualifier, name string, ok bool) {
+	before, after, qualified := strings.Cut(ref, ".")
+	if !qualified {
+		return "", ref, isDataTypeName(ref)
 	}
-	return before, after
+	if parse.IsIdentifier(before) && !parse.IsReserved(before) && isDataTypeName(after) {
+		return before, after, true
+	}
+	return "", ref, false
+}
+
+// isDataTypeName reports whether s is a name the DSL declares a datatype by:
+// an uppercase letter, then letters, digits and underscores, and no built-in
+// type name.
+func isDataTypeName(s string) bool {
+	return parse.IsIdentifier(s) && s[0] <= 'Z' && !parse.IsDatatypeKeyword(s)
 }
 
 // validateRelationProperties validates edge properties on all relations.
@@ -975,13 +1008,16 @@ func (c *completer) validateRelationProperties() {
 	for _, t := range c.schema.types {
 		for rel := range t.Associations() {
 			for p := range rel.Properties() {
-				if isVectorConstraint(p.Constraint()) {
-					c.errorf(p.Span(), diag.E_INVALID_CONSTRAINT,
-						"relationship property %q cannot use Vector type", p.Name())
+				kind := ""
+				switch {
+				case isVectorConstraint(p.Constraint()):
+					kind = "Vector"
+				case isListConstraint(p.Constraint()):
+					kind = "List"
 				}
-				if isListConstraint(p.Constraint()) {
-					c.errorf(p.Span(), diag.E_LIST_ON_EDGE,
-						"relationship property %q cannot use List type", p.Name())
+				if kind != "" {
+					c.errorf(p.Span(), diag.E_INVALID_EDGE_PROPERTY_TYPE,
+						"relationship property %q cannot use %s type", p.Name(), kind)
 				}
 			}
 		}
@@ -1028,19 +1064,8 @@ func isListConstraint(constraint Constraint) bool {
 // permitted as a primary key. Only String, UUID, Date, and Timestamp are
 // allowed. Aliases are unwrapped to check the resolved type.
 func isPrimaryKeyAllowed(constraint Constraint) bool {
-	if constraint == nil {
-		return false
-	}
-	// Unwrap aliases to the resolved type.
-	for {
-		alias, ok := constraint.(AliasConstraint)
-		if !ok || alias.Resolved() == nil {
-			break
-		}
-		constraint = alias.Resolved()
-	}
 	//exhaustive:enforce
-	switch constraint.Kind() {
+	switch ResolveAlias(constraint).Kind() {
 	case KindString, KindUUID, KindDate, KindTimestamp:
 		return true
 	case KindInteger, KindFloat, KindBoolean, KindEnum,
@@ -1053,10 +1078,10 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 
 // validatePropertyNames refuses an own property named self, at its declaration:
 // self is bound to the instance in every invariant, at load and at evaluation
-// alike, so the property could never be read. Own properties only — an
+// alike, so neither the bare name nor $self reaches the property. Own properties only — an
 // inherited one was refused where it was declared. The grammar admits the
-// spelling; this is a binding rule, not a lexical one, and it is the one rule
-// the parse front door and the Builder share.
+// spelling; this is a binding rule, not a lexical one. A relation is read by its
+// UPPER_SNAKE name, which is never self.
 func (c *completer) validatePropertyNames() {
 	const why = "the bare name and $self resolve to the instance first, so the member is unreachable by its own name and readable only as self.self"
 	for _, t := range c.schema.types {
@@ -1068,28 +1093,13 @@ func (c *completer) validatePropertyNames() {
 				"property %q in type %q cannot be named %s: %s",
 				p.Name(), t.Name(), expr.SelfVariable, why)
 		}
-		// A relation is a member too, and it is read by its FIELD name, so the
-		// same rule decides it: one rule for both member kinds.
-		for _, rels := range []iterRelationSeq{t.AllAssociations(), t.AllCompositions()} {
-			for rel := range rels {
-				if rel.FieldName() != expr.SelfVariable {
-					continue
-				}
-				c.errorf(rel.Span(), diag.E_INVALID_NAME,
-					"relation %q in type %q cannot have field name %s: %s",
-					rel.Name(), t.Name(), expr.SelfVariable, why)
-			}
-		}
 	}
 }
-
-// iterRelationSeq is the shape both relation iterators share.
-type iterRelationSeq = iter.Seq[*Relation]
 
 // validatePrimaryKeys enforces that every concrete (non-abstract, non-part) type
 // declares or inherits at least one primary key. A node needs identity to be added to
 // a graph (see Graph.Add / E_GRAPH_MISSING_PK) or referenced by an association;
-// enforcing it at load fails fast for every consumer (gogen, the neo4j adapter, the
+// enforcing it at load fails fast for every consumer (gogen, schema/cypher, neo4j, the
 // LSP), not only graph construction. Abstract types (not instantiable) and part types
 // (embedded, no independent identity — PK-less parts are a supported composition
 // feature) are exempt. Errors are collected; the caller's final error gate aborts.
@@ -1106,17 +1116,35 @@ func (c *completer) validatePrimaryKeys() {
 		if hasDeclaredPrimary(t) {
 			continue
 		}
-		// Skip a type whose supertype chain has an unresolved link (a deferred
-		// cross-schema reference when the registry lacks the import, or an unknown type
-		// already reported elsewhere): its primary key may be inherited from an ancestor
-		// not yet visible, and the unresolved reference already carries its own diagnostic.
+		// Skip a type whose supertype chain has an unresolved link: its primary
+		// key may be inherited from an ancestor not yet visible, and the link's
+		// root cause is already reported.
 		if c.hasUnresolvedSupertype(t) {
+			continue
+		}
+		// A member that did not parse, here or in a supertype, may be the key;
+		// its E_SYNTAX is the report.
+		if c.lostAMember(t) {
 			continue
 		}
 		c.errorf(t.Span(), diag.E_NO_PRIMARY_KEY,
 			"concrete type %q has no primary key; declare a 'primary' property or inherit one from a parent type",
 			t.Name())
 	}
+}
+
+// lostAMember reports whether t or one of its supertypes lost a member of its
+// body to a syntax error.
+func (c *completer) lostAMember(t Type) bool {
+	if t.lostMember {
+		return true
+	}
+	for super := range t.SuperTypes() {
+		if st := c.resolveTypeID(super); !st.IsZero() && st.lostMember {
+			return true
+		}
+	}
+	return false
 }
 
 // hasDeclaredPrimary reports whether any merged property carries the
@@ -1129,7 +1157,7 @@ func (c *completer) validatePrimaryKeys() {
 // shared a counting helper with this, now reads the EXTRACTED keys
 // ([Type.PrimaryKeys]) instead — a stricter question that this gate deliberately
 // does not ask, since a primary rejected for its type is still a declared one.
-func hasDeclaredPrimary(t *Type) bool {
+func hasDeclaredPrimary(t Type) bool {
 	for p := range t.AllProperties() {
 		if p.IsPrimaryKey() {
 			return true
@@ -1140,8 +1168,8 @@ func hasDeclaredPrimary(t *Type) bool {
 
 // hasUnresolvedSupertype reports whether t, or any type in its declared-inheritance
 // closure, names an `extends` supertype that does not resolve at this point in
-// completion — a deferred cross-schema reference when the registry lacks the import, or
-// an unknown type already reported elsewhere. The walk is transitive, not just over t's
+// completion — a deferred cross-schema reference, a displaced name, or an unknown
+// type already reported elsewhere. The walk is transitive, not just over t's
 // direct supertypes: a primary key may be inherited through a local parent that itself
 // extends an unresolved root, so the presence check must skip the whole chain, not only
 // types that declare the unresolved reference directly. Recursion follows local
@@ -1158,7 +1186,7 @@ func hasDeclaredPrimary(t *Type) bool {
 // detectCycles rejects inheritance cycles before this runs, so the graph is acyclic; the
 // memo is seeded false before recursing purely so the walk still terminates should that
 // ever cease to hold, then overwritten with the real answer.
-func (c *completer) hasUnresolvedSupertype(t *Type) bool {
+func (c *completer) hasUnresolvedSupertype(t Type) bool {
 	if cached, ok := c.unresolvedSupertypeMemo[t]; ok {
 		return cached
 	}
@@ -1173,7 +1201,7 @@ func (c *completer) hasUnresolvedSupertype(t *Type) bool {
 	result := false
 	for ref := range t.Inherits() {
 		super := c.resolveTypeRef(ref)
-		if super == nil {
+		if super.IsZero() {
 			result = true
 			break
 		}
@@ -1190,47 +1218,14 @@ func (c *completer) hasUnresolvedSupertype(t *Type) bool {
 
 // errorf reports an error at the given span.
 func (c *completer) errorf(span location.Span, code diag.Code, format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	issue := diag.NewIssue(diag.Error, code, msg)
-	if !span.IsZero() {
-		issue = issue.WithSpan(span)
-	}
-	c.collector.Collect(issue.Build())
+	c.collector.Collect(diag.NewIssue(diag.Error, code, fmt.Sprintf(format, args...)).WithSpan(span).Build())
 }
 
 // errorfRelated is [completer.errorf] for a diagnostic that points at other
-// declarations as well as its own. Every completer site that emits related
-// locations routes through here so the span policy is decided once: a related
-// entry without a usable location is dropped rather than rendered.
+// declarations as well as its own.
 func (c *completer) errorfRelated(
-	span location.Span, code diag.Code, related []location.RelatedInfo, format string, args ...any,
+	span location.Span, code diag.Code, related []diag.RelatedInfo, format string, args ...any,
 ) {
-	msg := fmt.Sprintf(format, args...)
-	issue := diag.NewIssue(diag.Error, code, msg)
-	if !span.IsZero() {
-		issue = issue.WithSpan(span)
-	}
-	if located := locatedRelated(related); len(located) > 0 {
-		issue = issue.WithRelated(located...)
-	}
-	c.collector.Collect(issue.Build())
-}
-
-// locatedRelated returns the related entries that carry a usable location.
-//
-// A span-less entry is worse than no entry: the text renderer writes its
-// "note:" line and then suppresses the location, so the reader gets a bare
-// label pointing nowhere — and one per member, so a clash whose sides hold
-// several declarations renders as a stack of identical, information-free
-// lines. The LSP drops such entries outright, so the two surfaces disagree
-// about what the diagnostic even contains. Schemas built through
-// [Builder] carry no spans, which is where this arises.
-func locatedRelated(related []location.RelatedInfo) []location.RelatedInfo {
-	located := related[:0:0]
-	for _, r := range related {
-		if !r.Span.IsZero() {
-			located = append(located, r)
-		}
-	}
-	return located
+	c.collector.Collect(diag.NewIssue(diag.Error, code, fmt.Sprintf(format, args...)).
+		WithSpan(span).WithRelated(related...).Build())
 }

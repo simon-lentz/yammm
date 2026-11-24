@@ -1,0 +1,177 @@
+package neo4j
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/simon-lentz/yammm/internal/schematest"
+
+	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/cypher"
+)
+
+// Neo4j has no nested collection property type, so the write path refuses a
+// value of a List<List<T>>, List<Vector[N]> or list-of-a-list-alias property,
+// as Constraints refuses the property itself. An empty list is refused
+// too: the property's type is what Neo4j cannot hold.
+func TestNodeQueries_RefusesANestedCollectionValue(t *testing.T) {
+	t.Parallel()
+	a := cypher.Config{}
+	s, v := loadSchemaAndValidator(t, "nested_collection.yammm")
+	for name, tc := range map[string]struct {
+		property string
+		value    any
+	}{
+		"a list of lists":              {"matrix", []any{[]any{int64(1), int64(2)}}},
+		"an empty list of lists":       {"matrix", []any{}},
+		"a list of vectors":            {"embeddings", []any{[]any{1.0, 2.0, 3.0}}},
+		"a list of a list-typed alias": {"codes", []any{[]any{"a"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			snap := buildGraphResult(t, s, v, map[string][]map[string]any{
+				"Grid": {{"id": "g1", tc.property: tc.value}},
+			})
+			_, err := NodeQueries(context.Background(), a, snap)
+			if !errors.Is(err, ErrUnsupportedListElem) {
+				t.Fatalf("NodeQueries error = %v; want ErrUnsupportedListElem", err)
+			}
+			if !strings.Contains(err.Error(), `"`+tc.property+`"`) {
+				t.Errorf("error %q does not name the property %q", err, tc.property)
+			}
+		})
+	}
+}
+
+// A composed part's nested collection property is refused as a root's is.
+func TestNodeQueries_RefusesAComposedPartsNestedCollectionValue(t *testing.T) {
+	t.Parallel()
+	a := cypher.Config{}
+	s, v := loadSchemaAndValidator(t, "nested_collection.yammm")
+	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Grid": {{"id": "g1", "cells": []any{map[string]any{"label": "c1", "matrix": []any{[]any{int64(1)}}}}}},
+	})
+	_, err := NodeQueries(context.Background(), a, snap)
+	if !errors.Is(err, ErrUnsupportedListElem) {
+		t.Fatalf("NodeQueries error = %v; want ErrUnsupportedListElem", err)
+	}
+	if !strings.Contains(err.Error(), `"matrix"`) {
+		t.Errorf("error %q does not name the property", err)
+	}
+}
+
+// A nested collection property is refused by its type before its value is read,
+// as coerceScalar refuses it, so an element of a held value that heldForm refuses
+// draws the same refusal.
+func TestNodeQueries_RefusesANestedCollectionBeforeItsElements(t *testing.T) {
+	t.Parallel()
+	for name, value := range map[string]any{
+		"a number no driver number holds": []any{[]any{"ok"}, []any{json.Number("1e400")}},
+		"a list nested past the depth":    []any{deepList(maxFormDepth+1, "x")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			a, snap := cypher.Config{}, holderSnapshot(t, holderValues{props: map[string]any{"nested": value}})
+			_, err := NodeQueries(t.Context(), a, snap)
+			if !errors.Is(err, ErrUnsupportedListElem) || !errors.Is(err, ErrUnrepresentable) {
+				t.Fatalf("NodeQueries error = %v; want ErrUnsupportedListElem and ErrUnrepresentable", err)
+			}
+			if !strings.Contains(err.Error(), `property "nested"`) {
+				t.Errorf("error %q does not name the property", err)
+			}
+		})
+	}
+}
+
+// A nested collection property that holds no value writes as null, as every
+// absent property does.
+func TestNodeQueries_WritesAnAbsentNestedCollection(t *testing.T) {
+	t.Parallel()
+	a := cypher.Config{}
+	s, v := loadSchemaAndValidator(t, "nested_collection.yammm")
+	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Grid": {{"id": "g1", "cells": []any{map[string]any{"label": "c1"}}}},
+	})
+	if _, err := NodeQueries(context.Background(), a, snap); err != nil {
+		t.Fatalf("NodeQueries: %v", err)
+	}
+	snap = holderSnapshot(t, holderValues{props: map[string]any{"nested": nil}})
+	nodes, err := NodeQueries(t.Context(), a, snap)
+	if err != nil {
+		t.Fatalf("NodeQueries, a null: %v", err)
+	}
+	for _, q := range nodes {
+		for _, row := range q.Params["rows"].([]map[string]any) {
+			props, _ := row["props"].(map[string]any)
+			if v, ok := props["nested"]; ok && v != nil {
+				t.Errorf("NodeQueries, a null: sent %#v; want nil", v)
+			}
+		}
+	}
+}
+
+// coerceScalar and CoerceParams refuse a present value at a nested collection
+// constraint whatever Go type carries it, a typed slice included, and a nil
+// inner list too, which the driver would pack as an empty one. The refusal wraps
+// mapping.ListElementType's reason, whatever Go type carries the value, and coerceScalar
+// returns the value with it, as its other refusals do.
+func TestCoerceScalar_RefusesANestedCollectionValue(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		c      schema.Constraint
+		kind   string
+		values map[string]any
+	}{
+		"List<List<Integer>>": {
+			schematest.Constraint(t, "List<List<Integer>>"), "List",
+			map[string]any{
+				"a []any of []any":   []any{[]any{int64(1)}},
+				"a [][]int64":        [][]int64{{1}},
+				"a nil inner list":   []any{[]any(nil)},
+				"an empty []any":     []any{},
+				"an empty [][]int64": [][]int64{},
+			},
+		},
+		"List<Vector[3]>": {
+			schematest.Constraint(t, "List<Vector[3]>"), "Vector",
+			map[string]any{
+				"a []any of []any": []any{[]any{1.0, 2.0, 3.0}},
+				"a [][]float64":    [][]float64{{1, 2, 3}},
+			},
+		},
+		"List<Codes>": {
+			schematest.Constraint(t, "List<Codes>", "type Codes = List<String>"), "List",
+			map[string]any{
+				"a []any of []any": []any{[]any{"a"}},
+				"a [][]string":     [][]string{{"a"}},
+			},
+		},
+	} {
+		for vname, raw := range tc.values {
+			at := name + ", " + vname
+			refusal := "neo4j: unsupported list element type: list element kind " + tc.kind
+			got, err := coerceScalar(tc.c, raw)
+			if !errors.Is(err, ErrUnsupportedListElem) {
+				t.Errorf("coerceScalar(%s) error = %v; want ErrUnsupportedListElem", at, err)
+			} else if err.Error() != refusal {
+				t.Errorf("coerceScalar(%s) error = %q; want %q", at, err, refusal)
+			}
+			if !reflect.DeepEqual(got, raw) {
+				t.Errorf("coerceScalar(%s) returned %#v with its error; want the value unchanged", at, got)
+			}
+			_, err = CoerceParams(map[string]any{"m": raw}, ParamTypes{"m": tc.c})
+			if want := `param "m": ` + refusal; !errors.Is(err, ErrUnsupportedListElem) {
+				t.Errorf("CoerceParams(%s) error = %v; want ErrUnsupportedListElem", at, err)
+			} else if err.Error() != want {
+				t.Errorf("CoerceParams(%s) error = %q; want %q", at, err, want)
+			}
+		}
+		if got, err := coerceScalar(tc.c, nil); err != nil || got != nil {
+			t.Errorf("coerceScalar(%s, nil) = %#v, %v; want nil, nil", name, got, err)
+		}
+	}
+}

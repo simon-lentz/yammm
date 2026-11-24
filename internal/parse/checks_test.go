@@ -1,8 +1,12 @@
 package parse
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
@@ -126,24 +130,21 @@ func TestChecks_ConstraintDiagnostics(t *testing.T) {
 			name: "every duplicate after the first is reported",
 			decl: `e Enum["a", "a", "a"]`,
 			want: []wantIssue{
-				{diag.E_INVALID_CONSTRAINT, diag.Error, 2, 21, `Enum["a", "a", "a"]`, "enum must have at least two values (got 1)"},
 				{diag.E_INVALID_CONSTRAINT, diag.Error, 12, 15, `"a"`, `duplicate enum value "a"`},
 				{diag.E_INVALID_CONSTRAINT, diag.Error, 17, 20, `"a"`, `duplicate enum value "a"`},
 			},
 		},
 		{
-			name: "duplicate enum value is dropped and the survivor count reported",
+			name: "a duplicate enum value is dropped and reported alone, since the source wrote two values",
 			decl: `e Enum["a", "a"]`,
 			want: []wantIssue{
-				{diag.E_INVALID_CONSTRAINT, diag.Error, 2, 16, `Enum["a", "a"]`, "enum must have at least two values (got 1)"},
 				{diag.E_INVALID_CONSTRAINT, diag.Error, 12, 15, `"a"`, `duplicate enum value "a"`},
 			},
 		},
 		{
-			name: "empty enum value is dropped",
+			name: "an empty enum value is dropped and reported alone",
 			decl: `e Enum["", "b"]`,
 			want: []wantIssue{
-				{diag.E_INVALID_CONSTRAINT, diag.Error, 2, 15, `Enum["", "b"]`, "enum must have at least two values (got 1)"},
 				{diag.E_INVALID_CONSTRAINT, diag.Error, 7, 9, `""`, "enum value cannot be empty"},
 			},
 		},
@@ -176,7 +177,7 @@ func TestChecks_ConstraintDiagnostics(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			src := checkSource(tc.decl)
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			assertIssues(t, src, len(checkPrelude), issues, tc.want)
 		})
 	}
@@ -197,7 +198,7 @@ func TestChecks_VectorDimensionBoundariesAreAccepted(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.dims, func(t *testing.T) {
 			src := checkSource("v Vector[" + tc.dims + "]")
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Fatalf("Vector[%s] reported %v, want nothing", tc.dims, issues)
 			}
@@ -243,7 +244,6 @@ func TestChecks_UnquoteFailuresAreSyntaxErrors(t *testing.T) {
 			src:  checkSource(`e Enum["\x", "b"]`),
 			base: len(checkPrelude),
 			want: []wantIssue{
-				{diag.E_INVALID_CONSTRAINT, diag.Error, 2, 17, `Enum["\x", "b"]`, "enum must have at least two values (got 1)"},
 				{diag.E_SYNTAX, diag.Error, 7, 11, `"\x"`, "invalid enum value: unquote string: invalid syntax"},
 			},
 		},
@@ -256,20 +256,11 @@ func TestChecks_UnquoteFailuresAreSyntaxErrors(t *testing.T) {
 				"invalid pattern: unquote string: invalid syntax",
 			}},
 		},
-		{
-			name: "timestamp format",
-			src:  checkSource(`t Timestamp["\x"]`),
-			base: len(checkPrelude),
-			want: []wantIssue{{
-				diag.E_SYNTAX, diag.Error, 12, 16, `"\x"`,
-				"invalid timestamp format: unquote string: invalid syntax",
-			}},
-		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(tc.src), sourcetest.ID("s.yammm"))
 			assertIssues(t, tc.src, tc.base, issues, tc.want)
 		})
 	}
@@ -295,8 +286,8 @@ func TestChecks_UnquoteResolvesLexerEscapeVocabulary(t *testing.T) {
 		{"literal single quote in double quotes", `"a'b"`, `a'b`},
 		{"zero escape is not octal", `'\012'`, "\x0012"},
 		{"valid multi-byte rune", "\"café\"", "café"},
-		{"invalid utf-8 byte", "\"a\xffb\"", "a�b"},
-		{"truncated utf-8 sequence", "\"a\xe2\x82b\"", "a��b"},
+		{"escapes that write a three-byte character", `"\xef\xbf\xbd"`, "\uFFFD"},
+		{"the last ASCII byte as an escape", `"\x7f"`, "\x7f"},
 	}
 	for _, tc := range accepted {
 		t.Run(tc.name, func(t *testing.T) {
@@ -306,6 +297,25 @@ func TestChecks_UnquoteResolvesLexerEscapeVocabulary(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("unquote(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// A literal holding text the source rules refuse has no value: the bytes come
+	// back as written, for a judgement of form alone, and no character stands
+	// in for them.
+	for _, tc := range []struct{ name, in, written string }{
+		{"invalid utf-8 byte", "\"a\xffb\"", "a\xffb"},
+		{"truncated utf-8 sequence", "\"a\xe2\x82b\"", "a\xe2\x82b"},
+		{"raw NUL", "\"a\x00b\"", "a\x00b"},
+		{"raw byte order mark", "\"a\uFEFFb\"", "a\uFEFFb"},
+		{"an escape and a raw byte that make one character", "\"\\xc3\xa9\"", "é"},
+		{"a raw byte and an escape that make one character", "\"\xc3\\xa9\"", "é"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := unquote(tc.in)
+			if !errors.Is(err, errRefusedText) || got != tc.written {
+				t.Errorf("unquote(%q) = %q, %v; want %q and errRefusedText", tc.in, got, err, tc.written)
 			}
 		})
 	}
@@ -334,14 +344,14 @@ func TestChecks_UnquoteResolvesLexerEscapeVocabulary(t *testing.T) {
 // the parse level: a single-quoted literal carrying an unescaped '"' or a \'
 // escape reaches every unquote site and loads without a diagnostic.
 func TestChecks_SingleQuotedLiteralsLoadAtEveryUnquoteSite(t *testing.T) {
-	src := "schema 'sc\"hema'\n" +
+	src := "schema 'sch\\u0065ma'\n" +
 		"type T {\n" +
 		"\tid String primary\n" +
 		"\tkind Enum['a\"b', 'don\\'t']\n" +
 		"\tcode Pattern['^x\"?$']\n" +
-		"\tts Timestamp['2006-01-02T15:04:05Z07:00']\n" +
+		"\t! 'it\\'s \"set\"' id != \"\"\n" +
 		"}\n"
-	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("single-quoted spellings drew %d diagnostics, want none: %v", len(issues), issues)
 	}
@@ -371,8 +381,8 @@ func TestChecks_SchemaNameUnquoteFailureMarksTheFileFailed(t *testing.T) {
 // spelling.
 func TestChecks_CarriedValuesNeedNoReparse(t *testing.T) {
 	src := checkSource("n Integer[-3, 7]") +
-		"type U {\n\tid String primary\n\tf Float[-1.5, _]\n\ts String[2, _]\n\tt Timestamp[\"2006\"]\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		"type U {\n\tid String primary\n\tf Float[-1.5, _]\n\ts String[2, _]\n}\n"
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -394,9 +404,6 @@ func TestChecks_CarriedValuesNeedNoReparse(t *testing.T) {
 	if s.LenMin == nil || *s.LenMin != 2 || s.LenMax != nil {
 		t.Errorf("string length = %v..%v, want 2..unbounded", s.LenMin, s.LenMax)
 	}
-	if got, ok := u.Properties[3].Constraint.Format(); !ok || got != "2006" {
-		t.Errorf("timestamp format = %q ok=%v, want 2006", got, ok)
-	}
 }
 
 // TestChecks_MinusBoundSpanCoversTheSign pins the anchor an unparseable signed
@@ -404,15 +411,15 @@ func TestChecks_CarriedValuesNeedNoReparse(t *testing.T) {
 // the whole thing.
 func TestChecks_MinusBoundSpanCoversTheSign(t *testing.T) {
 	src := checkSource("n Integer[-9, -2]")
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
 	b := file.Types[0].Properties[1].Constraint.Bounds
-	if got := src[b.Min.Span.Start.Byte:b.Min.Span.End.Byte]; got != "-9" {
+	if got := src[b.Min.Span.Start.Offset:b.Min.Span.End.Offset]; got != "-9" {
 		t.Errorf("min bound span covers %q, want %q", got, "-9")
 	}
-	if got := src[b.Max.Span.Start.Byte:b.Max.Span.End.Byte]; got != "-2" {
+	if got := src[b.Max.Span.Start.Offset:b.Max.Span.End.Offset]; got != "-2" {
 		t.Errorf("max bound span covers %q, want %q", got, "-2")
 	}
 }
@@ -426,7 +433,7 @@ func assertIssues(t *testing.T, src string, base int, got []diag.Issue, want []w
 		t.Errorf("got %d issues, want %d", len(got), len(want))
 		for _, iss := range got {
 			t.Logf("  got: %s %s [%d,%d) %s", iss.Code(), iss.Severity(),
-				iss.Span().Start.Byte-base, iss.Span().End.Byte-base, iss.Message())
+				iss.Span().Start.Offset-base, iss.Span().End.Offset-base, iss.Message())
 		}
 		return
 	}
@@ -441,9 +448,9 @@ func assertIssues(t *testing.T, src string, base int, got []diag.Issue, want []w
 		if g.Message() != w.message {
 			t.Errorf("issue %d message = %q, want %q", i, g.Message(), w.message)
 		}
-		if g.Span().Start.Byte != wantStart || g.Span().End.Byte != wantEnd {
+		if g.Span().Start.Offset != wantStart || g.Span().End.Offset != wantEnd {
 			t.Errorf("issue %d span = [%d,%d), want [%d,%d) — offsets relative to base %d",
-				i, g.Span().Start.Byte-base, g.Span().End.Byte-base, w.start, w.end, base)
+				i, g.Span().Start.Offset-base, g.Span().End.Offset-base, w.start, w.end, base)
 			continue
 		}
 		if covered := src[wantStart:wantEnd]; covered != w.covers {
@@ -460,11 +467,10 @@ func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
 	for _, tc := range []struct{ name, prop, want string }{
 		{"one enum value", "e Enum[\"a\"]", "enum must have at least two values (got 1)"},
 		{"no enum values", "e Enum[]", "enum must have at least two values (got 0)"},
-		{"three patterns", "p Pattern[\"a\", \"b\", \"c\"]", "pattern constraint exceeds maximum of 2 patterns (got 3)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + tc.prop + "\n}\n"
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 1 {
 				t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
 			}
@@ -475,7 +481,7 @@ func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
 			// The oracle anchors both rules on the whole constraint; an anchor
 			// on one value underlines a region the rule is not about.
 			want := tc.prop[strings.Index(tc.prop, " ")+1:]
-			if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != want {
+			if got := src[issues[0].Span().Start.Offset:issues[0].Span().End.Offset]; got != want {
 				t.Errorf("anchored on %q, want the whole constraint %q", got, want)
 			}
 		})
@@ -488,7 +494,7 @@ func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
 // gets nil — or a swapped pair — with every other assertion green.
 func TestChecks_FloatBoundsCarryTheWrittenSpelling(t *testing.T) {
 	src := checkSource("f Float[-1.5, 2.5]")
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -502,99 +508,57 @@ func TestChecks_FloatBoundsCarryTheWrittenSpelling(t *testing.T) {
 	if bounds.Max.Text != "2.5" || bounds.Max.Neg {
 		t.Errorf("max = %+v, want the written 2.5 unsigned", bounds.Max)
 	}
-	if got := src[bounds.Min.Span.Start.Byte:bounds.Min.Span.End.Byte]; got != "-1.5" {
+	if got := src[bounds.Min.Span.Start.Offset:bounds.Min.Span.End.Offset]; got != "-1.5" {
 		t.Errorf("min span covers %q, want the sign too", got)
 	}
 }
 
-// TestChecks_PatternListRejectsATrailingComma pins the grammar against the
-// generated one. patternT carries no trailing COMMA, so admitting one accepts
-// source production refuses — a schema that loads here and not there.
-func TestChecks_PatternListRejectsATrailingComma(t *testing.T) {
-	for _, prop := range []string{`p Pattern["a", "b",]`, `p Pattern["a",]`} {
+// TestChecks_PatternTakesOnePattern pins the grammar: a Pattern takes exactly
+// one literal, so a second, a trailing comma or none is a syntax error.
+func TestChecks_PatternTakesOnePattern(t *testing.T) {
+	for _, prop := range []string{`p Pattern["a", "b"]`, `p Pattern["a", "b", "c"]`, `p Pattern["a",]`, `p Pattern[]`} {
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + prop + "\n}\n"
-		_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX {
 			t.Errorf("%s: got %v, want one E_SYNTAX", prop, issues)
 		}
 	}
 }
 
-// TestChecks_PatternArityCountsWhatCompiles pins the count against the
-// generated parser's, which appends only patterns that unquote and compile. A
-// count of written literals reports an arity error production never raises, and
-// a pattern past the cap keeps its own diagnostic either way.
-func TestChecks_PatternArityCountsWhatCompiles(t *testing.T) {
+// TestChecks_APatternKeepsItsLiteral pins node.go's Kept contract: the literal
+// is always held, and Kept says whether the constraint enforces its regexp.
+func TestChecks_APatternKeepsItsLiteral(t *testing.T) {
 	for _, tc := range []struct {
-		name, prop string
-		wantCodes  []diag.Code
+		text  string
+		kept  bool
+		codes []diag.Code
 	}{
-		{
-			"an uncompilable third pattern leaves two survivors",
-			`p Pattern["a", "b", "("]`,
-			[]diag.Code{diag.E_INVALID_CONSTRAINT},
-		},
-		{
-			"an unquotable middle pattern leaves two survivors",
-			`p Pattern["a", "\\x", "b"]`,
-			[]diag.Code{diag.E_INVALID_CONSTRAINT},
-		},
-		{
-			"three that compile is three",
-			`p Pattern["a", "b", "c"]`,
-			[]diag.Code{diag.E_INVALID_CONSTRAINT},
-		},
+		{`^a$`, true, nil},
+		{`(`, false, []diag.Code{diag.E_INVALID_CONSTRAINT}},
+		{`\x4g`, false, []diag.Code{diag.E_SYNTAX}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + tc.prop + "\n}\n"
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-			if len(issues) != len(tc.wantCodes) {
-				t.Fatalf("got %d issues, want %d: %v", len(issues), len(tc.wantCodes), issues)
-			}
-			for i, want := range tc.wantCodes {
-				if issues[i].Code() != want {
-					t.Errorf("issue %d = %s, want %s", i, issues[i].Code(), want)
-				}
-			}
-		})
-	}
-}
-
-// TestChecks_EveryWrittenPatternKeepsItsLiteral pins node.go's Kept contract at
-// the cap: a consumer reading PatternLits sees everything the author wrote, and
-// Kept is what says which of them the constraint enforces.
-func TestChecks_EveryWrittenPatternKeepsItsLiteral(t *testing.T) {
-	src := "schema \"s\"\ntype T {\n\tid String primary\n\tp Pattern[\"^a$\", \"^b$\", \".*\"]\n}\n"
-	file, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
-	c := file.Types[0].Properties[1].Constraint
-	if got := len(c.PatternLits); got != 3 {
-		t.Fatalf("PatternLits = %d, want all 3 written literals", got)
-	}
-	for i, want := range []bool{true, true, false} {
-		if c.PatternLits[i].Kept != want {
-			t.Errorf("literal %d (%s) Kept = %v, want %v", i, c.PatternLits[i].Raw, c.PatternLits[i].Kept, want)
+		src := "schema \"s\"\ntype T {\n\tid String primary\n\tp Pattern[\"" + tc.text + "\"]\n}\n"
+		file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
+		var codes []diag.Code
+		for _, iss := range issues {
+			codes = append(codes, iss.Code())
 		}
-	}
-	res := c.PatternRegexps()
-	if len(res) != 2 || res[0].String() != "^a$" || res[1].String() != "^b$" {
-		t.Errorf("enforced patterns = %v, want the first two written", res)
-	}
-}
-
-// TestChecks_PatternListIsTruncatedAtTheCap pins that a rejected pattern list
-// does not reach the constraint. The grammar now admits any number, so without
-// the truncation a caller compiling PatternRegexps would enforce patterns the
-// constraint reported as too many.
-func TestChecks_PatternListIsTruncatedAtTheCap(t *testing.T) {
-	src := "schema \"s\"\ntype T {\n\tid String primary\n\tp Pattern[\"a\", \"b\", \"c\", \"d\"]\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-	if len(issues) != 1 {
-		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
-	}
-	c := file.Types[0].Properties[1].Constraint
-	if got := len(c.PatternRegexps()); got != MaxPatterns {
-		t.Errorf("PatternRegexps() = %d, want %d — the list past the cap must not reach the constraint",
-			got, MaxPatterns)
+		if !slices.Equal(codes, tc.codes) {
+			t.Errorf("%s: codes = %v, want %v", tc.text, codes, tc.codes)
+		}
+		c := file.Types[0].Properties[1].Constraint
+		if !tc.kept && len(tc.codes) == 1 && tc.codes[0] == diag.E_SYNTAX {
+			if c.PatternLit == nil || c.PatternLit.Text != "" || c.PatternLit.Kept || c.PatternRegexp() != nil {
+				t.Errorf("%s: a pattern that does not unquote holds %+v, want no text and no regexp", tc.text, c.PatternLit)
+			}
+			continue
+		}
+		if c.PatternLit == nil || c.PatternLit.Text != tc.text || c.PatternLit.Kept != tc.kept {
+			t.Fatalf("%s: literal = %+v, want its text with Kept %v", tc.text, c.PatternLit, tc.kept)
+		}
+		if re := c.PatternRegexp(); (re != nil) != tc.kept || (re != nil && re.String() != tc.text) {
+			t.Errorf("%s: PatternRegexp = %v, want the regexp only when kept", tc.text, re)
+		}
 	}
 }
 
@@ -605,13 +569,13 @@ func TestChecks_PatternListIsTruncatedAtTheCap(t *testing.T) {
 func TestChecks_UnquoteFailureTextIsStableAtBothSites(t *testing.T) {
 	t.Parallel()
 
-	_, issues := Parse([]byte("schema \"\\x\"\ntype T {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
+	_, issues := Parse([]byte("schema \"\\x\"\ntype T {\n\tid String primary\n}\n"), sourcetest.ID("s.yammm"))
 	if !hasMessage(issues, "invalid schema name: unquote string: invalid syntax") {
 		t.Errorf("schema-name site text moved; got %s", messages(issues))
 	}
 
 	src := "schema \"s\"\n\ntype T {\n\tid String primary\n\t! \"m\" id == \"\\x\"\n}\n"
-	_, issues = Parse([]byte(src), location.NewSourceID("s.yammm"))
+	_, issues = Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if !hasMessage(issues, "invalid string literal: invalid syntax") {
 		t.Errorf("expression site text moved; got %s", messages(issues))
 	}

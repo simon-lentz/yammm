@@ -1,13 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -38,17 +45,99 @@ func saveInto(t *testing.T) (base, more string) {
 
 // readHeader reads a .ys header without verifying the body, so a test can
 // assert on what a merge wrote.
-func readHeader(t *testing.T, path string) *snapshot.HeaderInfo {
+func readHeader(t *testing.T, path string) *snapshot.Header {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read snapshot: %v", err)
 	}
-	header, result := snapshot.HeaderOnly(context.Background(), data)
-	if err := result.Err(); err != nil {
+	header, readErr := snapshot.ReadHeader(context.Background(), bytes.NewReader(data))
+	if err := readErr; err != nil {
 		t.Fatalf("read header: %v", err)
 	}
 	return header
+}
+
+// The merged file's header is the one the load accepted, so a header past
+// snapshot.MaxHeaderSize, which a header read refuses, still carries forward.
+func TestSnapshotSave_IntoCarriesAHeaderPastTheHeaderCap(t *testing.T) {
+	t.Parallel()
+	// The 16 MiB header is read on one goroutine, and the detector multiplies each byte.
+	raceskip.Skip(t)
+
+	_, more := saveInto(t)
+	base := filepath.Join(t.TempDir(), "big.ys")
+	big := strings.Repeat("x", snapshot.MaxHeaderSize)
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--timestamp",
+		"-m", "big="+big, "-m", "env=prod",
+		"testdata/valid.yammm", "testdata/data.json", "-o", base)
+	if code != cli.ExitOK {
+		t.Fatalf("base save exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
+	}
+	before := statHeader(t, base)
+	if before.CreatedAt.IsZero() {
+		t.Fatal("the base snapshot has no created_at, so the assertion below is vacuous")
+	}
+
+	code, _, errOut = executeCmdOutput(t, "snapshot", "save",
+		"testdata/valid.yammm", more, "--into", base)
+	if code != cli.ExitOK {
+		t.Fatalf("merge exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
+	}
+
+	after := statHeader(t, base)
+	if !after.CreatedAt.Equal(before.CreatedAt) {
+		t.Errorf("created_at = %s, want %s", after.CreatedAt, before.CreatedAt)
+	}
+	if after.Metadata["env"] != "prod" || after.Metadata["big"] != big {
+		t.Errorf("metadata keys after the merge = %v, want big and env carried forward", slices.Sorted(maps.Keys(after.Metadata)))
+	}
+}
+
+// A document the load refuses comes back with no header, so a merge carries
+// nothing forward from bytes it did not accept.
+func TestLoadSnapshotFile_ARefusedDocumentHasNoHeader(t *testing.T) {
+	t.Parallel()
+
+	base, _ := saveInto(t)
+	data, err := os.ReadFile(base)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	tampered := bytes.Replace(data, []byte(`"name":"Bob"`), []byte(`"name":"Rob"`), 1)
+	if bytes.Equal(tampered, data) {
+		t.Fatal("fixture shape changed; Bob not found")
+	}
+	if err := os.WriteFile(base, tampered, 0o600); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+
+	s, loadErr := schema.Load(t.Context(), mustAbs(t, "testdata/valid.yammm"))
+	if err := loadErr; err != nil {
+		t.Fatalf("load schema: %v", err)
+	}
+	_, header, err := cli.LoadSnapshotFile(t.Context(), base, s)
+	if _, ok := errors.AsType[*diag.ResultError](err); !ok {
+		t.Fatalf("load snapshot: %v, want the tampered document refused with diagnostics", err)
+	}
+	if header != nil {
+		t.Errorf("header = %+v, want nil beside a refused load", header)
+	}
+}
+
+// statHeader reads a .ys header with [snapshot.Stat], which reads a header of
+// any size.
+func statHeader(t *testing.T, path string) snapshot.Header {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	info, readErr := snapshot.Stat(t.Context(), data)
+	if err := readErr; err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	return info.Header
 }
 
 // TestSnapshotSave_IntoCarriesTheHeaderForward pins that a merge keeps the
@@ -59,7 +148,7 @@ func TestSnapshotSave_IntoCarriesTheHeaderForward(t *testing.T) {
 
 	base, more := saveInto(t)
 	before := readHeader(t, base)
-	if before.CreatedAt == "" {
+	if before.CreatedAt.IsZero() {
 		t.Fatal("the base snapshot has no created_at, so the assertion below is vacuous")
 	}
 
@@ -70,8 +159,8 @@ func TestSnapshotSave_IntoCarriesTheHeaderForward(t *testing.T) {
 	}
 
 	after := readHeader(t, base)
-	if after.CreatedAt != before.CreatedAt {
-		t.Errorf("created_at = %q, want %q — an in-place merge preserves it", after.CreatedAt, before.CreatedAt)
+	if !after.CreatedAt.Equal(before.CreatedAt) {
+		t.Errorf("created_at = %s, want %s — an in-place merge preserves it", after.CreatedAt, before.CreatedAt)
 	}
 	for key, want := range map[string]string{"env": "prod", "owner": "simon"} {
 		if got := after.Metadata[key]; got != want {
@@ -87,12 +176,11 @@ func TestSnapshotSave_IntoLetsFlagsOverride(t *testing.T) {
 	t.Parallel()
 
 	base, more := saveInto(t)
-	// The base is seeded with a timestamp yammm would never write, so a
+	// The base is seeded with a timestamp --timestamp would never write, so a
 	// --timestamp that failed to override is visible. Comparing two
 	// time.Now() values would not: both render at second precision, and two
 	// saves inside one second are equal without the flag doing anything.
-	const seeded = "2020-02-02T02:02:02.020202+02:00"
-	writeForeignSnapshot(t, base, seeded)
+	seeded := writeForeignSnapshot(t, base, "2020-02-02T02:02:02.020202+02:00")
 
 	code, _, errOut := executeCmdOutput(t, "snapshot", "save",
 		"--timestamp", "-m", "env=staging",
@@ -102,10 +190,10 @@ func TestSnapshotSave_IntoLetsFlagsOverride(t *testing.T) {
 	}
 
 	after := readHeader(t, base)
-	if after.CreatedAt == seeded {
-		t.Errorf("created_at = %q, unchanged — --timestamp must replace the carried value", after.CreatedAt)
+	if after.CreatedAt.Equal(seeded) {
+		t.Errorf("created_at = %s, unchanged — --timestamp must replace the carried value", after.CreatedAt)
 	}
-	if after.CreatedAt == "" {
+	if after.CreatedAt.IsZero() {
 		t.Error("created_at is empty — --timestamp must set one")
 	}
 	if got := after.Metadata["env"]; got != "staging" {
@@ -116,12 +204,10 @@ func TestSnapshotSave_IntoLetsFlagsOverride(t *testing.T) {
 	}
 }
 
-// TestSnapshotSave_IntoKeepsAForeignTimestampByte pins why the repair carries
-// bytes rather than a parsed time. yammm writes created_at at second precision,
-// so its own documents round-trip through a parse; a foreign header carrying
-// fractional seconds and an offset does not, and rewriting an operator's bytes
-// is the defect class this unit exists to remove.
-func TestSnapshotSave_IntoKeepsAForeignTimestampByte(t *testing.T) {
+// A merge carries the merged file's created_at as the time it states, written
+// as Marshal writes a time: its fraction and its offset survive, where
+// --timestamp writes whole seconds in UTC.
+func TestSnapshotSave_IntoKeepsAForeignTimestamp(t *testing.T) {
 	t.Parallel()
 
 	const foreign = "2026-01-01T12:00:00.123456+02:00"
@@ -129,56 +215,57 @@ func TestSnapshotSave_IntoKeepsAForeignTimestampByte(t *testing.T) {
 	base, more := saveInto(t)
 	writeForeignSnapshot(t, base, foreign)
 
-	if got := readHeader(t, base).CreatedAt; got != foreign {
-		t.Fatalf("fixture created_at = %q, want %q — the fixture itself is wrong", got, foreign)
-	}
-
 	code, _, errOut := executeCmdOutput(t, "snapshot", "save",
 		"testdata/valid.yammm", more, "--into", base)
 	if code != cli.ExitOK {
 		t.Fatalf("merge exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
 	}
 
-	if got := readHeader(t, base).CreatedAt; got != foreign {
-		t.Errorf("created_at = %q, want %q byte for byte — a parse-and-reformat loses the fraction and the offset",
-			got, foreign)
+	data, err := os.ReadFile(base)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"created_at":"`+foreign+`"`)) {
+		t.Errorf("created_at = %s, want %s with its fraction and its offset", readHeader(t, base).CreatedAt, foreign)
 	}
 }
 
-// writeForeignSnapshot rewrites the snapshot at path so its created_at is a
-// form yammm does not write, changing nothing else. Marshal computes the
-// integrity hash over the header it is given, so the document loads; patching
-// the bytes would not.
-func writeForeignSnapshot(t *testing.T, path, createdAt string) {
+// writeForeignSnapshot rewrites the snapshot at path so its created_at is
+// createdAt, a form --timestamp does not write, changing nothing else, and
+// returns that time. Marshal computes the integrity hash over the header it is
+// given, so the document loads; patching the bytes would not.
+func writeForeignSnapshot(t *testing.T, path, createdAt string) time.Time {
 	t.Helper()
 	ctx := context.Background()
 
-	s, schemaResult := schema.Load(ctx, mustAbs(t, "testdata/valid.yammm"))
-	if err := schemaResult.Err(); err != nil {
+	stamp, err := time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		t.Fatalf("parse %q: %v", createdAt, err)
+	}
+	s, loadErr := schema.Load(ctx, mustAbs(t, "testdata/valid.yammm"))
+	if err := loadErr; err != nil {
 		t.Fatalf("load schema: %v", err)
 	}
-	snap, header, loadResult, err := cli.LoadSnapshotFile(ctx, path, s)
+	snap, header, err := cli.LoadSnapshotFile(ctx, path, s)
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
-	}
-	if err := loadResult.Err(); err != nil {
 		t.Fatalf("load snapshot: %v", err)
 	}
 
 	// The metadata is carried too: a fixture that quietly dropped it would
 	// make the overlay assertions pass or fail for the wrong reason.
-	opts := []snapshot.Option{snapshot.WithCreatedAtFrom(&snapshot.HeaderInfo{CreatedAt: createdAt})}
+	opts := []snapshot.Option{snapshot.WithCreatedAt(stamp)}
 	if len(header.Metadata) > 0 {
 		opts = append(opts, snapshot.WithMetadata(header.Metadata))
 	}
 
-	data, marshalResult := snapshot.Marshal(ctx, snap, opts...)
-	if err := marshalResult.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap, opts...)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write snapshot: %v", err)
 	}
+	return stamp
 }
 
 func mustAbs(t *testing.T, path string) string {
@@ -190,51 +277,10 @@ func mustAbs(t *testing.T, path string) string {
 	return abs
 }
 
-// TestSnapshotSave_SummaryCountsTheArtefact pins that the summary counts the
-// document it wrote, not the instances this invocation parsed, so a merge
-// reports a number a reader of the file can reproduce.
-func TestSnapshotSave_SummaryCountsTheArtefact(t *testing.T) {
-	t.Parallel()
-
-	base, more := saveInto(t)
-
-	_, _, errOut := executeCmdOutput(t, "snapshot", "save",
-		"testdata/valid.yammm", more, "--into", base)
-
-	// testdata/data.json holds two instances and more.json holds one.
-	const want = "saved snapshot: 3 instances of 1 types"
-	if !strings.Contains(errOut, want) {
-		t.Errorf("stderr does not contain %q — the summary describes the artefact, not the input:\n%s", want, errOut)
-	}
-}
-
-// TestSnapshotSave_SummaryAgreesWithSnapshotInfo is the second implementation
-// of the count above: whatever route the summary takes, it must land on the
-// number the reader of the same file reports.
-func TestSnapshotSave_SummaryAgreesWithSnapshotInfo(t *testing.T) {
-	t.Parallel()
-
-	base, more := saveInto(t)
-	_, _, errOut := executeCmdOutput(t, "snapshot", "save",
-		"testdata/valid.yammm", more, "--into", base)
-
-	_, out, _ := executeCmdOutput(t, "snapshot", "info", base)
-
-	summary := strings.TrimSpace(lineContaining(t, errOut, "saved snapshot:"))
-	reported := strings.TrimSpace(lineContaining(t, out, "Total instances:"))
-	summaryCount := strings.Fields(summary)[2]
-	reportedCount := strings.Fields(reported)[2]
-	if summaryCount != reportedCount {
-		t.Errorf("save reported %s instances and snapshot info reports %s — one file, two counts",
-			summaryCount, reportedCount)
-	}
-}
-
-// TestSnapshotSave_SummaryCountsEveryType covers the other half of the count.
-// A single-type fixture cannot tell a real type count from a hard-coded 1, so
-// this one merges a second type in and asserts both numbers against the reader
-// of the same file.
-func TestSnapshotSave_SummaryCountsEveryType(t *testing.T) {
+// TestSnapshotSave_IntoMergesEveryType pins that a merge writes the merged
+// file's instances and the new file's, of every type, and prints nothing: the
+// reader of the file reports both counts.
+func TestSnapshotSave_IntoMergesEveryType(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -257,19 +303,17 @@ func TestSnapshotSave_SummaryCountsEveryType(t *testing.T) {
 	if code != cli.ExitOK {
 		t.Fatalf("base save exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
 	}
-
-	_, _, errOut = executeCmdOutput(t, "snapshot", "save", schemaPath, companies, "--into", base)
-	summary := strings.TrimSpace(lineContaining(t, errOut, "saved snapshot:"))
-
-	const want = "saved snapshot: 3 instances of 2 types"
-	if !strings.Contains(summary, want) {
-		t.Errorf("summary is %q, want %q", summary, want)
+	code, out, errOut := executeCmdOutput(t, "snapshot", "save", schemaPath, companies, "--into", base)
+	if code != cli.ExitOK || out != "" || errOut != "" {
+		t.Fatalf("merge: exit %d with %q and %q, want %d and nothing printed", code, out, errOut, cli.ExitOK)
 	}
 
-	_, out, _ := executeCmdOutput(t, "snapshot", "info", base)
-	reportedTypes := strings.Fields(strings.TrimSpace(lineContaining(t, out, "Types:")))[1]
-	if got := strings.Fields(summary)[5]; got != reportedTypes {
-		t.Errorf("save reported %s types and snapshot info reports %s — one file, two counts", got, reportedTypes)
+	_, info, _ := executeCmdOutput(t, "snapshot", "info", base)
+	if got := strings.Fields(lineContaining(t, info, "Total instances:"))[2]; got != "3" {
+		t.Errorf("the merged file holds %s instances, want 3", got)
+	}
+	if got := strings.Fields(lineContaining(t, info, "Types:"))[1]; got != "2" {
+		t.Errorf("the merged file holds %s types, want 2", got)
 	}
 }
 

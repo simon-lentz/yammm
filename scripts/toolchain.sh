@@ -5,10 +5,10 @@
 # The gate and CI ran the same COMMANDS under different standard libraries. CI
 # resolves go.mod's `go` directive through actions/setup-go and pins the result
 # with GOTOOLCHAIN=local; a developer's `go` is whatever is on PATH. A host one
-# release ahead passes a 14-of-14 gate that CI then fails, and the failure is in
-# the standard library rather than in the change: encoding/json reports a
-# different SyntaxError.Offset in go1.26 and go1.27, so three assertions about
-# diagnostic positions passed here and failed on every CI host.
+# release ahead passes the gate that CI then fails, and the failure is in the
+# standard library rather than in the change: encoding/json reports a different
+# SyntaxError.Offset in go1.26 and go1.27, so assertions about diagnostic
+# positions passed here and failed on every CI host.
 #
 # Two jobs, in this order:
 #
@@ -20,9 +20,8 @@
 #     what checks that claim.
 #
 # The module file is the working directory's alone. A caller working on another
-# checkout changes into it first, as scripts/run_mutants.sh does; a variable
-# naming the root would reach every script that sources this one, including
-# ones that never meant to set it.
+# checkout changes into it first; a variable naming the root would reach every
+# script that sources this one, including ones that never meant to set it.
 #
 # Usage: source scripts/toolchain.sh          (from the repository root)
 

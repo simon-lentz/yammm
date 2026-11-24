@@ -33,13 +33,6 @@ type Registry struct {
 	entries map[location.SourceID]*sourceEntry
 }
 
-// RegistryStats contains memory usage statistics for a source registry.
-type RegistryStats struct {
-	SourceCount  int   // Number of registered sources
-	ContentBytes int64 // Total bytes of stored content (sum of all source sizes)
-	IndexBytes   int64 // Approximate bytes used by line/rune offset indices
-}
-
 // KeyCollisionError indicates that a registration was attempted with a SourceID
 // that already exists but with different content.
 type KeyCollisionError struct {
@@ -128,7 +121,7 @@ func (r *Registry) Content(span location.Span) ([]byte, bool) {
 
 // PositionAt converts a byte offset in the specified source to a Position.
 //
-// Returns a zero Position (check with [location.Position.IsZero]) if:
+// Returns the zero Position, which is not valid ([location.Position.IsValid]), if:
 //   - The source is not registered
 //   - The byte offset is negative
 //   - The byte offset exceeds the content length
@@ -143,12 +136,12 @@ func (r *Registry) PositionAt(source location.SourceID, byteOffset int) location
 
 	entry, ok := r.entries[source]
 	if !ok {
-		return location.UnknownPosition()
+		return location.Position{}
 	}
 
 	// Validate byte offset range
 	if byteOffset < 0 || byteOffset > len(entry.content) {
-		return location.UnknownPosition()
+		return location.Position{}
 	}
 
 	// Find the line containing this byte offset using binary search
@@ -158,7 +151,7 @@ func (r *Registry) PositionAt(source location.SourceID, byteOffset int) location
 	// Compute column using O(log n) binary search over precomputed rune offsets
 	column := columnFromByteOffset(entry.runeOffsets, lineStart, byteOffset, len(entry.content))
 
-	return location.NewPosition(line, column, byteOffset)
+	return location.Position{Line: line, Column: column, Offset: byteOffset}
 }
 
 // LineStartByte returns the byte offset of the start of the given line.
@@ -212,53 +205,6 @@ func (r *Registry) Has(sourceID location.SourceID) bool {
 
 	_, ok := r.entries[sourceID]
 	return ok
-}
-
-// Len returns the number of registered sources.
-func (r *Registry) Len() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	return len(r.entries)
-}
-
-// Clear removes all registered sources, resetting the registry to its
-// initial state.
-//
-// Clear acquires an exclusive write lock and blocks all readers/writers
-// during execution.
-//
-// After Clear returns:
-//   - Len() returns 0
-//   - Has(id) returns false for all sources
-//   - Keys() returns an empty slice
-//
-// Note: Previously-obtained []byte slices from Content/ContentBySource remain
-// valid since they are defensive copies, but re-fetching will fail.
-func (r *Registry) Clear() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Clear by creating a new empty map (allows GC of old entries)
-	r.entries = make(map[location.SourceID]*sourceEntry)
-}
-
-// Stats returns memory usage statistics for the registry.
-func (r *Registry) Stats() RegistryStats {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var stats RegistryStats
-	stats.SourceCount = len(r.entries)
-
-	for _, entry := range r.entries {
-		stats.ContentBytes += int64(len(entry.content))
-		// Each int in lineOffsets and runeOffsets is 8 bytes on 64-bit systems
-		stats.IndexBytes += int64(len(entry.lineOffsets) * 8)
-		stats.IndexBytes += int64(len(entry.runeOffsets) * 8)
-	}
-
-	return stats
 }
 
 // computeLineOffsets precomputes the byte offset of each line start.
@@ -364,28 +310,4 @@ func findRuneIndex(runeOffsets []int, byteOffset int) int {
 		}
 	}
 	return lo
-}
-
-// countRunesInRange counts the number of runes in content[start:end].
-// Returns a 1-based column number (first column is 1).
-//
-// Uses floor semantics for mid-rune offsets: if end falls inside a multi-byte
-// rune, that rune is NOT counted. This is consistent with LSP position semantics.
-func countRunesInRange(content []byte, start, end int) int {
-	if start >= end {
-		return 1 // At line start, column 1
-	}
-
-	count := 0
-	for i := start; i < end; {
-		_, size := utf8.DecodeRune(content[i:])
-		// Floor semantics: don't count partial rune at end boundary
-		if i+size > end {
-			break
-		}
-		count++
-		i += size
-	}
-
-	return count + 1 // 1-based column
 }

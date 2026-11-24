@@ -26,7 +26,7 @@ func TestSnapshotInfo_TextAndJSONRenderOneProjection(t *testing.T) {
 
 	t.Run("header-only text reports the file size the JSON reports", func(t *testing.T) {
 		t.Parallel()
-		doc, _ := decodeStdout(t, "snapshot", "info", "--header-only", "--format", "json", file).(map[string]any)
+		doc, _ := decodeStdout(t, "snapshot", "info", "--header-only", "--json", file).(map[string]any)
 		size, _ := doc["file_size"].(float64)
 		_, text, _ := executeCmdOutput(t, "snapshot", "info", "--header-only", file)
 		var failure string
@@ -36,7 +36,7 @@ func TestSnapshotInfo_TextAndJSONRenderOneProjection(t *testing.T) {
 		checkRepairState(t, "snapshot info: header-only text reports the file size", failure)
 	})
 
-	t.Run("an absent map or list is empty, never null", func(t *testing.T) {
+	t.Run("an absent map is empty, never null", func(t *testing.T) {
 		t.Parallel()
 		plain := filepath.Join(t.TempDir(), "plain.ys")
 		code, _, stderr := executeCmdOutput(t, "snapshot", "save", "testdata/valid.yammm", "testdata/data.json", "-o", plain)
@@ -44,16 +44,13 @@ func TestSnapshotInfo_TextAndJSONRenderOneProjection(t *testing.T) {
 			t.Fatalf("save: exit %d\n%s", code, stderr)
 		}
 		for _, mode := range [][]string{
-			{"snapshot", "info", "--format", "json", plain},
-			{"snapshot", "info", "--header-only", "--format", "json", plain},
+			{"snapshot", "info", "--json", plain},
+			{"snapshot", "info", "--header-only", "--json", plain},
 		} {
 			doc, _ := decodeStdout(t, mode...).(map[string]any)
 			var failure string
 			if _, ok := doc["metadata"].(map[string]any); !ok {
 				failure = fmt.Sprintf("metadata = %#v, want an object; types renders [] for the same absence", doc["metadata"])
-			}
-			if _, ok := doc["features"].([]any); !ok {
-				failure += fmt.Sprintf(" features = %#v, want an array", doc["features"])
 			}
 			checkRepairState(t, "snapshot info: absent metadata renders as an object, "+strings.Join(mode[2:len(mode)-1], " "), failure)
 		}
@@ -72,7 +69,7 @@ func TestSnapshotInfo_DirEntriesCarryTheDiagnosticWire(t *testing.T) {
 
 	t.Run("json", func(t *testing.T) {
 		t.Parallel()
-		_, out, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--format", "json")
+		_, out, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--json")
 		var entries []map[string]any
 		if err := json.Unmarshal([]byte(out), &entries); err != nil {
 			t.Fatalf("stdout is not a JSON array: %v\n%s", err, out)

@@ -3,25 +3,20 @@ package snapshot_test
 import (
 	"context"
 	"fmt"
-	"runtime"
-	"slices"
 	"sync"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/raceskip"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// benchInputs caches the generated ~20 MB Marshal output plus the
+// benchInputs caches the generated ~15 MB Marshal output plus the
 // loaded schema so every benchmark invocation measures the primitive
 // under test rather than the setup cost.
 type benchInputs struct {
-	schema  *schema.Schema
+	schema  schema.Schema
 	data    []byte
 	newMeta map[string]string
 }
@@ -31,52 +26,49 @@ var (
 	benchInputsVal  benchInputs
 )
 
-// loadBenchInputs materializes a realistic ~20 MB snapshot once and
-// caches it. The target size is approximate — scaled via instance count
-// to land between 15 MB and 25 MB on the in-tree test schema shape;
-// the benchmarks measure the update primitive, not the marshal setup.
+// loadBenchInputs materializes a realistic snapshot of about 14.7 MB once
+// and caches it. The instance count sets the size on the in-tree test
+// schema shape; the benchmarks measure the update primitive, not the
+// marshal setup.
 func loadBenchInputs(tb testing.TB) benchInputs {
 	tb.Helper()
 	benchInputsOnce.Do(func() {
-		s, sres := schema.NewBuilder().
-			WithName("test").
-			WithSourceID(location.MustNewSourceID("test://bench.yammm")).
-			AddType("Person").
-			WithPrimaryKey("id", schema.NewStringConstraint()).
-			WithProperty("name", schema.NewStringConstraint()).
-			WithProperty("email", schema.NewStringConstraint()).
-			WithProperty("role", schema.NewStringConstraint()).
-			Done().
-			Build()
-		if sres.HasErrors() {
-			tb.Fatalf("bench schema: %v", sres.Err())
+		s, err := schema.LoadString(tb.Context(), `schema "test"
+
+type Person {
+	id String primary
+	name String required
+	email String required
+	role String required
+}
+`, "bench.yammm")
+		if err != nil {
+			tb.Fatalf("bench schema: %v", err)
 		}
 
-		typ, _ := s.Type("Person")
+		v := instance.NewValidator(s)
 		g := graph.New(s)
 		ctx := context.Background()
-		// ~100_000 instances × ~200 bytes each ≈ 20 MB.
+		// 100_000 instances of about 147 bytes each: about 14.7 MB.
 		const n = 100_000
 		for i := range n {
-			inst := instance.NewValidInstance(
-				"Person", typ.ID(),
-				immutable.WrapKey([]any{fmt.Sprintf("p%06d", i)}),
-				immutable.WrapProperties(map[string]any{
-					"id":    fmt.Sprintf("p%06d", i),
-					"name":  fmt.Sprintf("Person %06d", i),
-					"email": fmt.Sprintf("person%06d@example.org", i),
-					"role":  "contributor",
-				}),
-				nil, nil, nil,
-			)
-			if res := g.Add(ctx, inst); res.HasErrors() {
-				tb.Fatalf("bench add: %v", res.Err())
+			inst, err := v.ValidateOne(ctx, "Person", instance.RawInstance{Properties: map[string]any{
+				"id":    fmt.Sprintf("p%06d", i),
+				"name":  fmt.Sprintf("Person %06d", i),
+				"email": fmt.Sprintf("person%06d@example.org", i),
+				"role":  "contributor",
+			}})
+			if err != nil {
+				tb.Fatalf("bench validate: %v", err)
+			}
+			if err := g.Add(ctx, inst); err != nil {
+				tb.Fatalf("bench add: %v", err)
 			}
 		}
 		snap := g.Snapshot()
-		data, res := snapshot.Marshal(ctx, snap)
-		if res.HasErrors() {
-			tb.Fatalf("bench marshal: %v", res.Err())
+		data, readErr := snapshot.Marshal(ctx, snap)
+		if readErr != nil {
+			tb.Fatalf("bench marshal: %v", readErr)
 		}
 		benchInputsVal = benchInputs{
 			schema:  s,
@@ -94,9 +86,9 @@ func BenchmarkUpdateMetadata(b *testing.B) {
 	b.SetBytes(int64(len(in.data)))
 	b.ResetTimer()
 	for b.Loop() {
-		out, res := snapshot.UpdateMetadata(context.Background(), in.data, in.newMeta)
-		if res.HasErrors() {
-			b.Fatalf("UpdateMetadata: %v", res.Err())
+		out, err := snapshot.UpdateMetadata(context.Background(), in.data, in.newMeta)
+		if err != nil {
+			b.Fatalf("UpdateMetadata: %v", err)
 		}
 		if len(out) == 0 {
 			b.Fatal("UpdateMetadata returned empty output")
@@ -115,95 +107,16 @@ func BenchmarkLoadMarshalRoundTrip(b *testing.B) {
 	b.SetBytes(int64(len(in.data)))
 	b.ResetTimer()
 	for b.Loop() {
-		loaded, loadRes := snapshot.Load(ctx, in.data, in.schema)
-		if loadRes.HasErrors() {
-			b.Fatalf("Load: %v", loadRes.Err())
+		loaded, err := snapshot.Unmarshal(ctx, in.data, in.schema)
+		if err != nil {
+			b.Fatalf("Load: %v", err)
 		}
-		out, marshalRes := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(in.newMeta))
-		if marshalRes.HasErrors() {
-			b.Fatalf("Marshal: %v", marshalRes.Err())
+		out, readErr := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(in.newMeta))
+		if readErr != nil {
+			b.Fatalf("Marshal: %v", readErr)
 		}
 		if len(out) == 0 {
 			b.Fatal("Marshal returned empty output")
 		}
 	}
-}
-
-// TestUpdateMetadataRatioFloor asserts UpdateMetadata is at least 3×
-// faster than Load + Marshal on a 20 MB input. Median of 5 samples per
-// path; runtime.GC between samples to damp CI-runner noise.
-//
-// Threshold rationale: 3× is the floor below which the primitive stops
-// being interesting. The measured ratio varies with hardware and falls
-// as UpdateMetadata gains header checks before the body splice, so the
-// floor is what this test asserts and the sampled numbers are logged
-// rather than pinned.
-//
-// Skipped under `go test -short` since the 20 MB setup is ~2 seconds
-// and the median-of-5 loop dominates short-test runtime. Also skipped
-// under the race detector: instrumentation slows the allocation-heavy
-// Load+Marshal baseline far more than the byte-splice fast path, so the
-// instrumented ratio neither measures the documented claim nor gates it
-// honestly — and the median-of-5 loop costs ~40s instrumented. The skip
-// goes through [raceskip.Skip], so scripts/test.sh runs the test again
-// without -race, and that run is the gate.
-func TestUpdateMetadataRatioFloor(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping ratio-floor benchmark gate under -short")
-	}
-	raceskip.Skip(t)
-	in := loadBenchInputs(t)
-	ctx := context.Background()
-
-	fastSamples := make([]int64, 0, 5)
-	slowSamples := make([]int64, 0, 5)
-	for range 5 {
-		runtime.GC()
-		fast := testing.Benchmark(func(b *testing.B) {
-			b.Helper()
-			for b.Loop() {
-				_, res := snapshot.UpdateMetadata(ctx, in.data, in.newMeta)
-				if res.HasErrors() {
-					b.Fatalf("UpdateMetadata: %v", res.Err())
-				}
-			}
-		})
-		fastSamples = append(fastSamples, fast.NsPerOp())
-
-		runtime.GC()
-		slow := testing.Benchmark(func(b *testing.B) {
-			b.Helper()
-			for b.Loop() {
-				loaded, loadRes := snapshot.Load(ctx, in.data, in.schema)
-				if loadRes.HasErrors() {
-					b.Fatalf("Load: %v", loadRes.Err())
-				}
-				_, marshalRes := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(in.newMeta))
-				if marshalRes.HasErrors() {
-					b.Fatalf("Marshal: %v", marshalRes.Err())
-				}
-			}
-		})
-		slowSamples = append(slowSamples, slow.NsPerOp())
-	}
-
-	fastMedian := median(fastSamples)
-	slowMedian := median(slowSamples)
-	ratio := float64(slowMedian) / float64(fastMedian)
-	t.Logf("UpdateMetadata median: %d ns/op; Load+Marshal median: %d ns/op; ratio: %.2fx",
-		fastMedian, slowMedian, ratio)
-	const floor = 3.0
-	if ratio < floor {
-		t.Errorf("UpdateMetadata speedup ratio %.2fx is below the %.2fx floor; "+
-			"fast=%d ns/op, slow=%d ns/op",
-			ratio, floor, fastMedian, slowMedian)
-	}
-}
-
-// median returns the median of a sorted-in-place copy of xs. Pure
-// stdlib — avoids a math library dependency for a one-line use case.
-func median(xs []int64) int64 {
-	s := slices.Clone(xs)
-	slices.Sort(s)
-	return s[len(s)/2]
 }

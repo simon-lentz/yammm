@@ -4,34 +4,35 @@ description: >-
   YAMMM schema DSL, Go library, and CLI. ALWAYS activate when
   working with .yammm files, writing Go code that imports yammm
   packages, running yammm CLI commands, or any question about
-  yammm's type system, validation, graph construction, adapters,
+  yammm's type system, validation, graph construction, Neo4j,
   diagnostics, or expression language -- even for quick lookups.
   Triggers on "yammm schema", "yammm validate", ".yammm file",
-  "yammm API", "yammm export", "yammm invariant".
+  "yammm API", "yammm check", "yammm invariant".
 allowed-tools: Read Grep Glob Bash(yammm *)
 argument-hint: "[question about yammm]"
 ---
 
 # yammm
 
-YAMMM is a schema DSL, Go library, and CLI for typed data validation, graph construction, multi-format data export (JSON, CSV, Neo4j Cypher), and schema-driven artifact generation (Go source, JSON Schema, Markdown). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and export to databases.
+YAMMM is a schema DSL, Go library, and CLI for typed data validation, graph construction, Neo4j DDL and write queries, and schema-driven artifact generation (Go source, Markdown). Define schemas once in a compact DSL, validate data at runtime with structured diagnostics, build integrity-checked instance graphs, persist snapshots, and write them to Neo4j.
 
 ```text
 data path:
   .yammm file --> schema.Load() --> instance.Validate() --> graph.Add()
                                                                 |
-                    adapter.Write() <-- snapshot.Marshal() <-- graph.Check()
-                    (JSON / CSV / Neo4j)
+        neo4j.NodeQueries()      <-- graph.Snapshot() <-- graph.Check()
+                                       |
+                                  snapshot.Marshal() (.ys)
 
 generator path:
-  .yammm file --> schema.Load() --> gogen | jschema | markdown --> bytes
-                                    (Go source / JSON Schema / Markdown)
+  .yammm file --> schema.Load() --> gogen | markdown --> bytes
+                                    (Go source / Markdown)
 ```
 
 The two paths are independent: the data path carries instances, while the
 generators are schema-in, bytes-out and never touch instance data.
 
-Every operation returns `(value, diag.Result)` with stable error codes and precise source locations. Loaded schemas, validated instances, and snapshots are immutable and thread-safe.
+Every call that can fail returns `(T, error)`, or an `error` alone. A call that judges its input returns its failures as a `*diag.ResultError`, read with `errors.AsType` and tested by code with `errors.Is`, with stable error codes and precise source locations; a Warning, Info or Hint goes to the call's `WithWarnings` callback, never into the error. Some operations return a plain `error`, among them the Neo4j batch query builders and the gogen and markdown generators. Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
 
 ---
 
@@ -43,11 +44,11 @@ Define types, properties, relationships, invariants, annotations, and imports in
 
 ### Use the Go Library
 
-Load schemas, validate raw data, build instance graphs, persist snapshots, and export via adapters. The public API lives in packages `schema`, `instance`, `graph`, `snapshot`, and `adapter/{json,csv,neo4j}`. All results are immutable and thread-safe.
+Load schemas, validate raw data, build instance graphs, persist snapshots, and write them to Neo4j. The public API lives in packages `schema`, `instance`, `graph`, `snapshot`, `schema/cypher` and `neo4j`. All results are immutable and thread-safe.
 
 ### Use the CLI
 
-`yammm validate`, `yammm fmt`, `yammm check`, `yammm load`, `yammm snapshot`, `yammm export`, `yammm gen`, `yammm neo4j`. Schema development, data pipelines, Go / JSON Schema / Markdown generation, and database setup from the terminal.
+`yammm validate`, `yammm fmt`, `yammm check`, `yammm snapshot`, `yammm gen`, `yammm neo4j`. Schema development, data pipelines, Go / Markdown generation, and database setup from the terminal.
 
 ---
 
@@ -55,7 +56,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 
 - **"I want to model a dataset"** -- Read `references/dsl-syntax.md` and `references/patterns.md`
 - **"I want to validate data in a Go application"** -- Read `references/api-pipeline.md`
-- **"I want to export data to Neo4j / JSON / CSV"** -- Read `references/adapters.md` and `references/cli.md`
+- **"I want to write data to Neo4j"** -- Read `references/adapters.md` and `references/cli.md`
 - **"I want to understand an error"** -- Read `references/diagnostics.md`
 - **"I want feedback on my schema"** -- Use `/yammm:review-schema`
 - **"I want to write a new schema from scratch"** -- Use `/yammm:author-schema`
@@ -65,9 +66,9 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 
 ## Key Design Principles
 
-- **Immutability**: Loaded schemas, validated instances, and snapshots are immutable and thread-safe.
-- **Structured diagnostics**: Every operation returns `(value, diag.Result)`. Stable error codes (`E_*`). Precise source locations.
-- **Layer discipline**: Foundation (`location`, `diag`, `immutable`) -> Primary API (`schema`, `instance`, `graph`, `snapshot`) -> Adapters (`json`, `csv`, `neo4j`). Adapters import the library; the library never imports adapters.
+- **Immutability**: Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
+- **Structured diagnostics**: A call returns its failures as a `*diag.ResultError`, after its value where it has one, and hands each warning to its `WithWarnings` callback. The Neo4j batch query builders and the `gogen` and `markdown` generators return a plain `error`. Stable error codes (`E_*`). Precise source locations.
+- **Layer discipline**: Foundation (`location`, `diag`, `immutable`) -> Primary API (`schema`, `instance`, `graph`, `snapshot`) -> Generators (`schema/cypher`, `schema/gogen`, `schema/markdown`) and the Neo4j write path (`neo4j`). `neo4j` imports the library; the library never imports `neo4j`.
 - **Deterministic output**: Snapshots, graph traversal, and diagnostic ordering are deterministic and reproducible.
 
 ---
@@ -83,7 +84,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 | `references/type-system.md` | Constraint types, aliases, abstract/part, inheritance | Type system questions, narrowing rules, PK restrictions |
 | `references/patterns.md` | Common modeling patterns with examples | Looking for schema design patterns |
 | `references/api-pipeline.md` | Go API: load -> validate -> graph -> snapshot | Writing Go code that uses yammm packages |
-| `references/adapters.md` | JSON/CSV/Neo4j/gogen/jschema/markdown adapter usage | Exporting, importing, or generating Go / JSON Schema / Markdown from a schema |
+| `references/adapters.md` | Neo4j DDL, write path and diff, and gogen/markdown generator usage | Writing to Neo4j, or generating Go / Markdown from a schema |
 | `references/diagnostics.md` | Error codes, troubleshooting | Understanding or fixing errors |
 | `references/cli.md` | CLI commands and workflows | Using yammm from the terminal |
 
@@ -111,7 +112,7 @@ Before/after transformation examples: see `examples/` directory.
 
 - [ ] `yammm validate` clean on all modified `.yammm` files -- and **read its stderr**: warnings do not change the exit code
 - [ ] No `W_ANNOTATION_SHADOWED` warnings (a re-declaration silently dropped an inherited `@index` / `@writeOnce`)
-- [ ] `yammm fmt` applied (deterministic formatting; `yammm fmt --check` in CI)
+- [ ] `yammm fmt` applied (deterministic formatting; `out=$(yammm fmt -l <files>) && test -z "$out"` in CI)
 - [ ] `yammm check` passes if instance data is available
 - [ ] Every concrete type has at least one `primary` field (one or more -- composite keys allowed)
 - [ ] Imported types use qualified references (`alias.TypeName`)

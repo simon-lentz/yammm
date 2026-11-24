@@ -13,22 +13,25 @@ import (
 // collection — the last because a List property reaches the evaluator as an
 // immutable.Slice and every consumer decides for itself what to do with it.
 //
-// The three benchmarks below separate those parts so a regression names its
-// own cause. Without them a normalization change is argued rather than
-// measured: nothing else in this repository times validation.
+// The first three benchmarks below separate those parts so a regression names
+// its own cause; of the two after them, one times relation invariants and the
+// other is its control. Without them
+// a normalization change is argued rather than measured: no benchmark outside
+// this file times validation.
 //
-// Not a CI gate. Gate 7 proves each one still runs; the numbers are for
+// scripts/test.sh runs each one once, at every full gate and in CI, which
+// proves it still runs; no gate reads their numbers, which are for
 // cross-checking a profile.
 
 // benchValidatorSchema loads a one-type schema carrying decls and invs. It
 // takes source rather than the schema builder because an invariant has no
 // builder form.
-func benchValidatorSchema(b *testing.B, decls, invs string) *schema.Schema {
+func benchValidatorSchema(b *testing.B, decls, invs string) schema.Schema {
 	b.Helper()
 	src := "schema \"vbench\"\n\ntype T {\n\tid String primary\n" + decls + invs + "}\n"
-	s, result := schema.LoadString(b.Context(), src, "vbench.yammm")
-	if result.HasErrors() {
-		b.Fatalf("benchmark schema did not load: %s", result)
+	s, err := schema.LoadString(b.Context(), src, "vbench.yammm")
+	if err != nil {
+		b.Fatalf("benchmark schema did not load: %s", err)
 	}
 	return s
 }
@@ -36,14 +39,14 @@ func benchValidatorSchema(b *testing.B, decls, invs string) *schema.Schema {
 // benchValidate runs ValidateOne in a tight loop and fails on the first
 // instance that does not validate — a benchmark measuring the error path
 // would report a number for work the caller never does.
-func benchValidate(b *testing.B, s *schema.Schema, props map[string]any) {
+func benchValidate(b *testing.B, s schema.Schema, props map[string]any) {
 	b.Helper()
 	v := instance.NewValidator(s)
 	ctx := b.Context()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, res := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: props}); !res.OK() {
-			b.Fatalf("instance did not validate: %s", res)
+		if _, err := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: props}); err != nil {
+			b.Fatalf("instance did not validate: %s", err)
 		}
 	}
 }
@@ -99,7 +102,7 @@ func benchValidatorProps() map[string]any {
 // The three benchmarks above use a relation-free schema, where invariantScope
 // returns the property map unchanged, so they cannot see this at all.
 
-func relationBenchSchema(b *testing.B, invariants string) *schema.Schema {
+func relationBenchSchema(b *testing.B, invariants string) schema.Schema {
 	b.Helper()
 	src := `schema "vbench"
 
@@ -116,9 +119,9 @@ type Order {
     *-> ITEMS (_:many) Item
 ` + invariants + `}
 `
-	s, result := schema.LoadString(b.Context(), src, "vbench.yammm")
-	if result.HasErrors() {
-		b.Fatalf("benchmark schema did not load: %s", result)
+	s, err := schema.LoadString(b.Context(), src, "vbench.yammm")
+	if err != nil {
+		b.Fatalf("benchmark schema did not load: %s", err)
 	}
 	return s
 }
@@ -134,15 +137,15 @@ func relationBenchProps() map[string]any {
 	}
 }
 
-func benchOrder(b *testing.B, s *schema.Schema) {
+func benchOrder(b *testing.B, s schema.Schema) {
 	b.Helper()
 	v := instance.NewValidator(s)
 	ctx := b.Context()
 	props := relationBenchProps()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, res := v.ValidateOne(ctx, "Order", instance.RawInstance{Properties: props}); !res.OK() {
-			b.Fatalf("instance did not validate: %s", res)
+		if _, err := v.ValidateOne(ctx, "Order", instance.RawInstance{Properties: props}); err != nil {
+			b.Fatalf("instance did not validate: %s", err)
 		}
 	}
 }
@@ -157,7 +160,7 @@ func BenchmarkValidateOne_RelationsPropertyInvariants(b *testing.B) {
 // so the scope carries edge targets and composed children.
 func BenchmarkValidateOne_RelationInvariants(b *testing.B) {
 	benchOrder(b, relationBenchSchema(b, `
-    ! "has_company" works_at != nil
+    ! "has_company" WORKS_AT != nil
     ! "has_items" ITEMS -> Len > 0
     ! "positive" ITEMS -> All |$i| { $i.qty > 0 }
 `))

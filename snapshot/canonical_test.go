@@ -2,15 +2,18 @@ package snapshot_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
 	"github.com/google/uuid"
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -35,7 +38,7 @@ part type Reading {
 type Sensor {
 	id String primary
 	created_at Timestamp
-	logged_at Timestamp["2006-01-02 15:04:05"]
+	logged_at Timestamp
 	aliased EventTime
 	run_id UUID
 	installed Date
@@ -47,11 +50,11 @@ type Sensor {
 }
 `
 
-func loadTemporalSchema(t *testing.T) *schema.Schema {
+func loadTemporalSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), temporalTestSchema, "temporaltest.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load temporaltest schema: %s", result)
+	s, err := schema.LoadString(t.Context(), temporalTestSchema, "temporaltest.yammm")
+	if err != nil {
+		t.Fatalf("load temporaltest schema: %s", err)
 	}
 	return s
 }
@@ -60,7 +63,7 @@ func loadTemporalSchema(t *testing.T) *schema.Schema {
 // representation the caller submitted.
 const (
 	canonicalCreated   = "2026-08-19T12:00:00.5Z"
-	canonicalLogged    = "2026-08-19 12:00:00"
+	canonicalLogged    = "2026-08-19T12:00:00+02:00"
 	canonicalRunID     = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
 	canonicalInstalled = "2026-08-19"
 )
@@ -70,7 +73,7 @@ func temporalProps(id string, native bool) map[string]any {
 		return map[string]any{
 			"id":         id,
 			"created_at": time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC),
-			"logged_at":  time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
+			"logged_at":  time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", 2*60*60)),
 			"aliased":    time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC),
 			"run_id":     uuid.MustParse(canonicalRunID),
 			"installed":  time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC),
@@ -93,31 +96,33 @@ func temporalProps(id string, native bool) map[string]any {
 
 // buildTemporalSnapshot validates every instance, so the graph holds what the
 // validation arm produced.
-func buildTemporalSnapshot(t *testing.T, s *schema.Schema, native bool) *graph.Snapshot {
+func buildTemporalSnapshot(t *testing.T, s schema.Schema, native bool) graph.Snapshot {
 	t.Helper()
 	ctx := t.Context()
 	v := instance.NewValidator(s)
 	g := graph.New(s)
 
 	station := mustValidate(t, v, "Station", map[string]any{"id": "st1"})
-	g.Add(ctx, station)
+	if err := g.Add(ctx, station); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	raw := instance.RawInstance{Properties: temporalProps("s1", native)}
 	raw.Properties["feed"] = map[string]any{
 		"_target_id": "st1",
 		"seen_at":    edgeSeenAt(native),
 	}
-	sensor, res := v.ValidateOne(ctx, "Sensor", raw)
-	if !res.OK() {
-		t.Fatalf("validating Sensor: %s", res)
-	}
-	g.Add(ctx, sensor)
-
-	reading := mustValidatePart(t, v, "Reading", map[string]any{
+	raw.Properties["readings"] = []any{map[string]any{
 		"name":     "r1",
 		"taken_at": edgeSeenAt(native),
-	})
-	g.AddComposed(ctx, mustTypeID(t, s, "Sensor"), graph.FormatKey("s1"), "READINGS", reading)
+	}}
+	sensor, err := v.ValidateOne(ctx, "Sensor", raw)
+	if err != nil {
+		t.Fatalf("validating Sensor: %s", err)
+	}
+	if err := g.Add(ctx, sensor); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	return g.Snapshot()
 }
@@ -129,22 +134,13 @@ func edgeSeenAt(native bool) any {
 	return "2026-08-19T14:00:00+00:00"
 }
 
-func mustValidate(t *testing.T, v *instance.Validator, typeName string, props map[string]any) *instance.ValidInstance {
+func mustValidate(t *testing.T, v *instance.Validator, typeName string, props map[string]any) instance.ValidInstance {
 	t.Helper()
-	vi, res := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
-	if !res.OK() {
-		t.Fatalf("validating %s: %s", typeName, res)
+	vi, err := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
+	if err != nil {
+		t.Fatalf("validating %s: %s", typeName, err)
 	}
 	return vi
-}
-
-func mustValidatePart(t *testing.T, v *instance.Validator, typeName string, props map[string]any) *instance.ValidInstance {
-	t.Helper()
-	vis, res := v.ValidateForComposition(t.Context(), "Sensor", "READINGS", []instance.RawInstance{{Properties: props}})
-	if !res.OK() {
-		t.Fatalf("validating composed %s: %s", typeName, res)
-	}
-	return vis[0]
 }
 
 // TestMarshal_TemporalKindsReachOneFixpoint is the assertion the defect fails:
@@ -155,12 +151,12 @@ func TestMarshal_TemporalKindsReachOneFixpoint(t *testing.T) {
 	ctx := context.Background()
 	s := loadTemporalSchema(t)
 
-	fromNative, result := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, true))
-	if err := result.Err(); err != nil {
+	fromNative, readErr := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, true))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal (go-native): %v", err)
 	}
-	fromStrings, result := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, false))
-	if err := result.Err(); err != nil {
+	fromStrings, readErr := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, false))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal (string): %v", err)
 	}
 
@@ -185,18 +181,12 @@ func TestMarshal_TemporalKindsReachOneFixpoint(t *testing.T) {
 		}
 	}
 
-	// The declared layout is satisfied by the text that was written under it,
-	// which is the second defect closed as a consequence of the first.
-	if _, err := time.Parse("2006-01-02 15:04:05", canonicalLogged); err != nil {
-		t.Fatalf("test constant is not valid under its own layout: %v", err)
-	}
-
-	loaded, lres := snapshot.Load(ctx, fromNative, s)
-	if err := lres.Err(); err != nil {
+	loaded, readErr2 := snapshot.Unmarshal(ctx, fromNative, s)
+	if err := readErr2; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	again, r2 := snapshot.Marshal(ctx, loaded)
-	if err := r2.Err(); err != nil {
+	if err := r2; err != nil {
 		t.Fatalf("second Marshal: %v", err)
 	}
 	if string(again) != doc {
@@ -204,41 +194,34 @@ func TestMarshal_TemporalKindsReachOneFixpoint(t *testing.T) {
 	}
 }
 
-// bypassSnapshot builds a graph through instance.NewValidInstance, which
-// receives no schema and runs no validation. It is the one path a value can
-// take into a graph without being canonicalized, and it is why the wire and
-// writer arms exist.
-func bypassSnapshot(t *testing.T, s *schema.Schema, props map[string]any) *graph.Snapshot {
+// loadedSensor loads a document holding Sensor s1 with props, text no validator
+// stored.
+func loadedSensor(t *testing.T, s schema.Schema, props map[string]any) graph.Snapshot {
 	t.Helper()
-	g := graph.New(s)
-	inst := instancetest.VI(
-		"Sensor",
-		instancetest.TypeID(mustTypeID(t, s, "Sensor")),
-		instancetest.PK("s1"),
-		instancetest.Props(props),
-	)
-	g.Add(t.Context(), inst)
-	return g.Snapshot()
+	return snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID: mustTypeID(t, s, "Sensor"), PrimaryKey: immutable.WrapKey([]any{"s1"}),
+		Properties: immutable.WrapProperties(props),
+	}}})
 }
 
-// TestMarshal_CanonicalizesABypassBuiltValue kills the wire arm. A validated
-// value is already canonical by the time it reaches wireValue, so only a graph
-// built through the bypass constructor can prove the arm runs.
-func TestMarshal_CanonicalizesABypassBuiltValue(t *testing.T) {
+// TestMarshal_CanonicalizesALoadedValue holds text a document spells another way
+// to the canonical form on the wire: a Timestamp at the offset +00:00 and with
+// trailing zeros, a UUID in upper case, and a list element.
+func TestMarshal_CanonicalizesALoadedValue(t *testing.T) {
 	t.Parallel()
 	s := loadTemporalSchema(t)
 
-	snap := bypassSnapshot(t, s, map[string]any{
+	snap := loadedSensor(t, s, map[string]any{
 		"id":         "s1",
-		"created_at": time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC),
-		"logged_at":  time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
-		"run_id":     uuid.MustParse(canonicalRunID),
-		"installed":  time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC),
-		"samples":    []any{time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC)},
+		"created_at": "2026-08-19T12:00:00.500+00:00",
+		"logged_at":  canonicalLogged,
+		"run_id":     strings.ToUpper(canonicalRunID),
+		"installed":  canonicalInstalled,
+		"samples":    []any{"2026-08-19T12:00:00.500+00:00"},
 	})
 
-	data, result := snapshot.Marshal(context.Background(), snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(context.Background(), snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	doc := string(data)
@@ -251,33 +234,31 @@ func TestMarshal_CanonicalizesABypassBuiltValue(t *testing.T) {
 		`"samples":["` + canonicalCreated + `"]`,
 	} {
 		if !strings.Contains(doc, want) {
-			t.Errorf("bypass-built value not canonicalized on the wire: want %s\ngot: %s", want, doc)
+			t.Errorf("value not canonicalized on the wire: want %s\ngot: %s", want, doc)
 		}
 	}
 }
 
-// TestMarshal_HealsOrPassesThroughNonConformingText pins the write contract on the
-// three new kinds, mirroring what TestMarshal_HealsNarrowedFloats pins for
-// Float: the write arm heals what it can, preserves what it cannot, and never
-// fails a write.
+// TestMarshal_HealsOrPassesThroughNonConformingText pins the write contract on
+// Timestamp, Date and UUID: the write arm heals what it can, preserves what it
+// cannot, and never fails a write.
 func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadTemporalSchema(t)
 
-	snap := bypassSnapshot(t, s, map[string]any{
+	snap := loadedSensor(t, s, map[string]any{
 		"id": "s1",
 		// Healable: a non-canonical spelling of a valid instant.
 		"created_at": "2026-08-19T12:00:00.500+00:00",
-		// Unhealable: RFC 3339 text under a declared layout that rejects it.
-		// This is what a pre-release document written under the old defect
-		// holds, so erroring here would make yammm's own output unwritable.
-		"logged_at": "2026-08-19T12:00:00Z",
+		// Unhealable: wall-clock text, which is not RFC 3339. A stored
+		// document can hold it, so erroring here would make it unwritable.
+		"logged_at": "2026-08-19 12:00:00",
 		"run_id":    "not-a-uuid",
 	})
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal refused a non-conforming value: %v", err)
 	}
 	doc := string(data)
@@ -285,7 +266,7 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	if !strings.Contains(doc, `"created_at":"`+canonicalCreated+`"`) {
 		t.Errorf("the healable value did not heal\ngot: %s", doc)
 	}
-	if !strings.Contains(doc, `"logged_at":"2026-08-19T12:00:00Z"`) {
+	if !strings.Contains(doc, `"logged_at":"2026-08-19 12:00:00"`) {
 		t.Errorf("the unhealable value was not preserved byte-for-byte\ngot: %s", doc)
 	}
 	if !strings.Contains(doc, `"run_id":"not-a-uuid"`) {
@@ -293,12 +274,12 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	}
 
 	// Healing is idempotent, so the healed document is the fixpoint.
-	loaded, lres := snapshot.Load(ctx, data, s)
-	if err := lres.Err(); err != nil {
+	loaded, readErr2 := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr2; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	again, r2 := snapshot.Marshal(ctx, loaded)
-	if err := r2.Err(); err != nil {
+	if err := r2; err != nil {
 		t.Fatalf("second Marshal: %v", err)
 	}
 	if string(again) != doc {
@@ -306,8 +287,8 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	}
 }
 
-// TestLoad_CanonicalizesNonConformingWireText proves the rebuild arm covers
-// the load path. A .ys can hold a non-canonical spelling — this library wrote
+// TestLoad_CanonicalizesNonConformingWireText proves the load path renders what
+// it reads. A .ys can hold a non-canonical spelling — this library wrote
 // such documents before the rule existed, and nothing re-validates on load —
 // so the graph a Load produces has to render it rather than carry it forward.
 //
@@ -318,8 +299,8 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 	ctx := context.Background()
 	s := loadTemporalSchema(t)
 
-	data, result := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, false))
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, false))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 
@@ -330,137 +311,24 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 		t.Fatalf("fixture did not carry %s; the edit is a no-op", canonical)
 	}
 
-	loaded, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
-	if err := lres.Err(); err != nil {
+	loaded, readErr2 := snapshot.Unmarshal(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	if err := readErr2; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
-	sensor := loaded.InstancesOf(mustTypeID(t, s, "Sensor"))[0]
+	sensor := slices.Collect(loaded.InstancesOf(mustTypeID(t, s, "Sensor")))[0]
 	v, ok := sensor.Property("created_at")
 	if !ok {
 		t.Fatal("created_at missing after load")
 	}
-	if got := v.Unwrap(); got != canonicalCreated {
-		t.Errorf("loaded created_at = %#v, want %q — the rebuild arm did not render it", got, canonicalCreated)
-	}
-}
-
-// nonConformingDocument returns a .ys whose created_at holds text no Timestamp
-// constraint can render. The bytes are edited after marshalling because
-// nothing in the library will write such a value — which is the point: a
-// document can hold one, and until this option nothing could say so.
-func nonConformingDocument(t *testing.T, s *schema.Schema) []byte {
-	t.Helper()
-	data, result := snapshot.Marshal(context.Background(), buildTemporalSnapshot(t, s, false))
-	if err := result.Err(); err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	edited := strings.Replace(string(data),
-		`"created_at":"`+canonicalCreated+`"`,
-		`"created_at":"not-a-timestamp"`, 1)
-	if edited == string(data) {
-		t.Fatal("fixture did not carry created_at; the edit is a no-op")
-	}
-	return []byte(edited)
-}
-
-// TestLoad_ValueConformanceReportsAndStillReturns covers the option's whole
-// contract in one place, both halves of it. Warning severity means Load
-// returns the snapshot together with the finding: reporting a document is not
-// refusing it.
-func TestLoad_ValueConformanceReportsAndStillReturns(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-	data := nonConformingDocument(t, s)
-
-	loaded, result := snapshot.Load(ctx, data, s,
-		snapshot.WithIntegrityCheck(false), snapshot.WithValueConformance(true))
-	if err := result.Err(); err != nil {
-		t.Fatalf("Load refused a non-conforming document: %v", err)
-	}
-	if loaded == nil {
-		t.Fatal("Load returned no snapshot; the option must report, not reject")
-	}
-	if !result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("no conformance warning: %s", result)
-	}
-	if !result.HasWarnings() {
-		t.Error("the finding is not a warning")
-	}
-}
-
-// TestLoad_ValueConformanceIsOffByDefault is the control that tells the option
-// from a hard-coded warning. Without it, a test asserting only the finding
-// would pass against an implementation that always reports.
-func TestLoad_ValueConformanceIsOffByDefault(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-	data := nonConformingDocument(t, s)
-
-	_, result := snapshot.Load(ctx, data, s, snapshot.WithIntegrityCheck(false))
-	if result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("a conformance warning without the option: %s", result)
-	}
-}
-
-// TestLoad_ValueConformanceFalseIsOff pins that an explicit false is the
-// default: the option carries a value, and false must not read as presence.
-func TestLoad_ValueConformanceFalseIsOff(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-	data := nonConformingDocument(t, s)
-
-	_, result := snapshot.Load(ctx, data, s,
-		snapshot.WithIntegrityCheck(false), snapshot.WithValueConformance(false))
-	if result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("a conformance warning under WithValueConformance(false): %s", result)
-	}
-}
-
-// TestLoad_ValueConformanceIsSilentOnAConformingDocument is the positive
-// control. Without it the option could report everything and still pass.
-func TestLoad_ValueConformanceIsSilentOnAConformingDocument(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-
-	data, result := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, true))
-	if err := result.Err(); err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	_, lres := snapshot.Load(ctx, data, s, snapshot.WithValueConformance(true))
-	if lres.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("a conforming document drew a conformance warning: %s", lres)
-	}
-}
-
-// TestVerify_HonorsValueConformance is why the walk lives in the shared
-// validation body rather than at materialization: Verify stops before a
-// Snapshot exists, so a check placed later would be absent from the surface
-// whose whole job is answering whether a document is sound.
-func TestVerify_HonorsValueConformance(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-	data := nonConformingDocument(t, s)
-
-	if result := snapshot.Verify(ctx, data, s, snapshot.WithIntegrityCheck(false)); result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("Verify reported without the option: %s", result)
-	}
-	result := snapshot.Verify(ctx, data, s,
-		snapshot.WithIntegrityCheck(false), snapshot.WithValueConformance(true))
-	if !result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("Verify did not report under the option: %s", result)
+	if got := v.Any(); got != canonicalCreated {
+		t.Errorf("loaded created_at = %#v, want %q — Load did not render it", got, canonicalCreated)
 	}
 }
 
 // TestMarshal_TemporalGoldenBytes pins the wire bytes of every canonical
 // spelling the validator produces for Timestamp, UUID and Date — node
-// property, declared-layout property, alias, list element, edge property
+// property, alias, list element, edge property
 // and composed child — so a change to a stored form is a reviewed golden
 // diff rather than a silent move of every persisted key.
 func TestMarshal_TemporalGoldenBytes(t *testing.T) {
@@ -468,8 +336,8 @@ func TestMarshal_TemporalGoldenBytes(t *testing.T) {
 	s := loadTemporalSchema(t)
 	snap := buildTemporalSnapshot(t, s, true)
 
-	data, result := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	yammmtest.Golden(t, "marshal_temporal_representative.ys", data)

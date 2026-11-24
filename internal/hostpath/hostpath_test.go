@@ -127,6 +127,9 @@ func TestFollowLink_NamesTheFileTheKernelReaches(t *testing.T) {
 	}
 }
 
+// TestText_EvaluatesADotDotOnTheText holds Text to the text rule, and to
+// ending in a separator where the path ends in one or in a "." element, the
+// spellings that make the kernel require a directory.
 func TestText_EvaluatesADotDotOnTheText(t *testing.T) {
 	sep := string(filepath.Separator)
 	wd, err := os.Getwd()
@@ -137,7 +140,15 @@ func TestText_EvaluatesADotDotOnTheText(t *testing.T) {
 		{"", ""},
 		{"f", "f"},
 		{"d" + sep + ".." + sep + "f", "f"},
-		{"d" + sep + "." + sep + "f" + sep, "d" + sep + "f"},
+		{"d" + sep + "." + sep + "f" + sep, "d" + sep + "f" + sep},
+		{"f" + sep + sep, "f" + sep},
+		{"f" + sep + ".", "f" + sep},
+		{"f" + sep + "." + sep + ".", "f" + sep},
+		{".", "."},
+		{sep + ".", sep},
+		{"." + sep, "." + sep},
+		{".." + sep, filepath.Dir(wd) + sep},
+		{sep, sep},
 		{"d" + sep + "link" + sep + ".." + sep + "f", "d" + sep + "f"},
 		{"..", filepath.Dir(wd)},
 		{".." + sep + "f", filepath.Join(filepath.Dir(wd), "f")},
@@ -174,5 +185,41 @@ func TestText_ClimbsFromTheWorkingDirectoryAsSpelled(t *testing.T) {
 	}
 	if want := filepath.Join(root, "logical", "x.ys"); got != want {
 		t.Errorf("Text(../x.ys) from %s = %q, want %q", cwd, got, want)
+	}
+}
+
+// TestDirectoryForm_CarriesTheDirectoryAnswerPastAClean holds DirectoryForm to
+// NamesDirectory's answer for p, whatever cleaned holds, and to one separator.
+func TestDirectoryForm_CarriesTheDirectoryAnswerPastAClean(t *testing.T) {
+	sep := string(filepath.Separator)
+	for _, c := range []struct{ p, cleaned, want string }{
+		{"f", "/r/f", "/r/f"},
+		{"f" + sep, "/r/f", "/r/f" + sep},
+		{"f" + sep + ".", "/r/f", "/r/f" + sep},
+		{"f" + sep + sep, "/r/f", "/r/f" + sep},
+		{"d" + sep + ".." + sep, "/r", "/r" + sep},
+		{".", "/r", "/r"},
+		{sep, sep, sep},
+	} {
+		if got := DirectoryForm(c.p, c.cleaned); got != c.want {
+			t.Errorf("DirectoryForm(%q, %q) = %q, want %q", c.p, c.cleaned, got, c.want)
+		}
+	}
+}
+
+// TestNamesDirectory_ARootAloneDoesNotAsk holds a path with nothing after its
+// root, and "." alone, to false: each names a directory already, so a caller
+// has no directory form to carry.
+func TestNamesDirectory_ARootAloneDoesNotAsk(t *testing.T) {
+	sep := string(filepath.Separator)
+	for _, p := range []string{"", sep, sep + sep, "/", "."} {
+		if NamesDirectory(p) {
+			t.Errorf("NamesDirectory(%q) = true", p)
+		}
+	}
+	for _, p := range []string{"a" + sep, "a" + sep + ".", "." + sep} {
+		if !NamesDirectory(p) {
+			t.Errorf("NamesDirectory(%q) = false", p)
+		}
 	}
 }

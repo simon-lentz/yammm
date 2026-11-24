@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
+	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -24,46 +24,6 @@ func (e *tableMissError) Error() string {
 	return fmt.Sprintf("type %s at %s position is absent from the types table", e.id, e.position)
 }
 
-// depthExceededError is the writer's half of the composed-nesting bound. It
-// is typed so Marshal reports it under the code and severity the reader uses
-// for the same condition, instead of as an internal failure the caller cannot
-// distinguish from a corrupt writer state.
-type depthExceededError struct {
-	depth int
-	ref   string
-	key   string
-}
-
-func (e *depthExceededError) Error() string {
-	return fmt.Sprintf("composed nesting depth %d exceeds limit %d at %s[%s]",
-		e.depth, maxComposedDepth, e.ref, e.key)
-}
-
-// unwritableValueError names a property whose value the wire cannot carry: an
-// instance's, or, where relation is set, an edge property of one of its
-// association records. ref and key address a root, or a duplicate record's
-// instance where duplicate is set; path names the composition hops below it.
-type unwritableValueError struct {
-	ref, key, relation, property string
-	path                         []string
-	duplicate                    bool
-}
-
-func (e *unwritableValueError) Error() string {
-	where := fmt.Sprintf("%s[%s]", e.ref, e.key)
-	if e.duplicate {
-		where = "duplicate record " + where
-	}
-	if len(e.path) > 0 {
-		where += "." + strings.Join(e.path, ".")
-	}
-	if e.relation != "" {
-		where += fmt.Sprintf(" under %q", e.relation)
-	}
-	return fmt.Sprintf("%s: property %q holds a value the wire cannot carry: a non-finite float, or a Go value encoding/json refuses",
-		where, e.property)
-}
-
 // schemaNames maps each import-closure member's source identity to its
 // declared name — the form the .ys wire states a type in. It is built once
 // per Marshal because a closure walk per type identity would repeat the same
@@ -71,14 +31,10 @@ func (e *unwritableValueError) Error() string {
 type schemaNames map[location.SourceID]string
 
 // newSchemaNames indexes the entry schema's whole import closure. A name is
-// unique across a closure: the loader registers every member and
-// [schema.Registry.Register] refuses a second schema with an existing name.
-func newSchemaNames(s *schema.Schema) schemaNames {
-	if s == nil {
-		return nil
-	}
+// unique across a closure: a load refuses a second schema with an existing name.
+func newSchemaNames(s schema.Schema) schemaNames {
 	names := make(schemaNames)
-	for _, cs := range s.Closure() {
+	for cs := range s.Closure() {
 		names[cs.SourceID()] = cs.Name()
 	}
 	return names
@@ -99,19 +55,6 @@ func (n schemaNames) entry(id schema.TypeID) typeTableEntry {
 	return typeTableEntry{Schema: n[id.SchemaPath()], Name: id.Name()}
 }
 
-// requireDenotable reports the first type identity the closure cannot name.
-// Every constructor of a snapshot refuses such an identity, so this guards
-// that invariant: a document that cannot state its own types is one no reader
-// can bind.
-func (n schemaNames) requireDenotable(ids []schema.TypeID) (schema.TypeID, bool) {
-	for _, id := range ids {
-		if _, ok := n[id.SchemaPath()]; !ok {
-			return id, false
-		}
-	}
-	return schema.TypeID{}, true
-}
-
 // typeTable is the types section under construction: every type identity the
 // document denotes, ordered by (schema name, type name), with the row index
 // each reference uses.
@@ -121,10 +64,8 @@ type typeTable struct {
 }
 
 // ref renders id the way the document states it — "schema#name" — reading the
-// row the table already holds. The writer's diagnostics use it so that the
-// one code both halves share, [diag.E_SNAPSHOT_DEPTH_EXCEEDED], carries the
-// same detail from the writer as [streamDecoder.refAt] gives from the reader.
-// An identity absent from the table falls back to its own rendering.
+// row the table already holds. An identity absent from the table falls back to
+// its own rendering.
 func (tt *typeTable) ref(id schema.TypeID) string {
 	if row, ok := tt.index[id]; ok {
 		return TypeRef(tt.entries[row]).String()
@@ -145,20 +86,17 @@ func (tt *typeTable) rowRef(id schema.TypeID, position string) (*int, error) {
 }
 
 // buildTypeTable collects every type identity the view denotes — instance,
-// composed child, edge target, duplicate, conflict, parent, unresolved edge —
-// and orders them by TypeID. An unresolved target has no instance, so the
-// table can be wider than the set of types holding one.
+// composed child, edge target, duplicate, conflict, unresolved edge —
+// and orders them by schema name, then type name. An unresolved target has no
+// instance, so the table can be wider than the set of types holding one.
 func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 	seen := make(map[schema.TypeID]struct{})
 
-	var collectInstance func(inst *graph.Instance)
-	collectInstance = func(inst *graph.Instance) {
-		if inst == nil {
-			return
-		}
+	var collectInstance func(inst graph.Instance)
+	collectInstance = func(inst graph.Instance) {
 		seen[inst.TypeID()] = struct{}{}
 		for _, relName := range inst.ComposedRelations() {
-			for _, child := range inst.Composed(relName) {
+			for child := range inst.Composed(relName) {
 				collectInstance(child)
 			}
 		}
@@ -168,7 +106,7 @@ func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 		seen[group.id] = struct{}{}
 		for _, inst := range group.instances {
 			collectInstance(inst)
-			for _, e := range view.edges[inst] {
+			for e := range view.snap.EdgesFrom(inst) {
 				seen[e.Target().TypeID()] = struct{}{}
 			}
 		}
@@ -176,18 +114,11 @@ func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 
 	for _, d := range view.duplicates {
 		collectInstance(d.Instance())
-		if d.Conflict() != nil {
-			seen[d.Conflict().TypeID()] = struct{}{}
-		}
-		if d.Parent() != nil {
-			seen[d.Parent().TypeID()] = struct{}{}
-		}
+		seen[d.Conflict().TypeID()] = struct{}{}
 	}
 
 	for _, u := range view.unresolved {
-		if u.Source() != nil {
-			seen[u.Source().TypeID()] = struct{}{}
-		}
+		seen[u.Source().TypeID()] = struct{}{}
 		seen[u.TargetType()] = struct{}{}
 	}
 
@@ -224,31 +155,37 @@ func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 func (sd *streamDecoder) resolveTypeTable() {
 	sd.tableIDs = make([]schema.TypeID, len(sd.typeTable))
 
+	// firstRow[i] is the first row carrying row i's identity. A repeated row
+	// is malformed once and binds as its first row does, so a row the closure
+	// does not declare draws E_SNAPSHOT_UNKNOWN_TYPE once.
+	firstRow := make([]int, len(sd.typeTable))
 	seen := make(map[typeTableEntry]int, len(sd.typeTable))
 	for i, e := range sd.typeTable {
+		firstRow[i] = i
 		if first, dup := seen[e]; dup {
+			firstRow[i] = first
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("types table rows %d and %d carry one identity %s", first, i, TypeRef(e))).Build())
+				fmt.Sprintf("types table rows %d and %d carry one identity %s", first, i, sd.duplicateEntryText(e))).Build())
 			continue
 		}
 		seen[e] = i
 	}
 
-	if sd.schema == nil {
+	if sd.schema.IsZero() {
 		return
 	}
-	// The tag renders from the row alone, so it is derived once here rather
-	// than per instance and per composed child during materialization.
-	sd.tableTags = make([]string, len(sd.typeTable))
 	for i, e := range sd.typeTable {
+		if first := firstRow[i]; first != i {
+			sd.tableIDs[i] = sd.tableIDs[first]
+			continue
+		}
 		if t, ok := typeByWireID(sd.schema, e.Schema, e.Name); ok {
 			sd.tableIDs[i] = t.ID()
-			sd.tableTags[i] = schema.TagForm(sd.schema, t.ID())
 			continue
 		}
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
 			fmt.Sprintf("types table row %d names %s, which the import closure does not declare",
-				i, TypeRef(e))).
+				i, sd.entryText(e))).
 			WithDetail(diag.DetailKeyTypeName, TypeRef(e).String()).
 			Build())
 	}
@@ -289,6 +226,79 @@ func (sd *streamDecoder) refAt(row int) string {
 		return fmt.Sprintf("types[%d]", row)
 	}
 	return TypeRef(sd.typeTable[row]).String()
+}
+
+// refText is refAt for a message. A row the schema resolves names a declared
+// type and is shown whole; any other row is the document's, so it is cut as
+// [streamDecoder.entryText] cuts it.
+func (sd *streamDecoder) refText(row int) string {
+	if !sd.rowWritten(row) {
+		return sd.refAt(row)
+	}
+	return sd.entryText(sd.typeTable[row])
+}
+
+// refQuoted is refText for a message that quotes the identity. A row cut by
+// its parts quotes each part, so the type name survives the cut. A reader
+// with a schema refuses an unresolved row before the walk, so a written row
+// reaches it only with no schema, and no part is a name the closure holds.
+func (sd *streamDecoder) refQuoted(row int) string {
+	if !sd.rowWritten(row) {
+		return strconv.Quote(sd.refAt(row))
+	}
+	e := sd.typeTable[row]
+	if whole := TypeRef(e).String(); diag.QuoteValue(whole) == strconv.Quote(whole) {
+		return strconv.Quote(whole)
+	}
+	return diag.QuoteValue(e.Schema) + "#" + diag.QuoteValue(e.Name)
+}
+
+// rowWritten reports whether row is a types-table row the schema does not
+// resolve, so its identity is the document's text alone.
+func (sd *streamDecoder) rowWritten(row int) bool {
+	if row < 0 || row >= len(sd.typeTable) {
+		return false
+	}
+	return row >= len(sd.tableIDs) || sd.tableIDs[row].IsZero()
+}
+
+// entryText renders a types-table row the schema does not resolve by its parts:
+// the schema name whole when the import closure holds it, and otherwise each
+// part cut as a value is, since a document can name a schema and a type of any
+// length.
+func (sd *streamDecoder) entryText(e typeTableEntry) string {
+	schemaName := diag.CutValue(e.Schema)
+	if sd.closureHolds(e.Schema) {
+		schemaName = e.Schema
+	}
+	return schemaName + "#" + diag.CutValue(e.Name)
+}
+
+// closureHolds reports whether the import closure holds a schema named name.
+func (sd *streamDecoder) closureHolds(name string) bool {
+	if sd.schema.IsZero() {
+		return false
+	}
+	if sd.closureNames == nil {
+		closure := slices.Collect(sd.schema.Closure())
+		sd.closureNames = make(map[string]struct{}, len(closure))
+		for _, cs := range closure {
+			sd.closureNames[cs.Name()] = struct{}{}
+		}
+	}
+	_, ok := sd.closureNames[name]
+	return ok
+}
+
+// duplicateEntryText renders a repeated row before the table is resolved: whole
+// where the schema declares it, as refText renders a resolved row.
+func (sd *streamDecoder) duplicateEntryText(e typeTableEntry) string {
+	if !sd.schema.IsZero() {
+		if _, ok := typeByWireID(sd.schema, e.Schema, e.Name); ok {
+			return TypeRef(e).String()
+		}
+	}
+	return sd.entryText(e)
 }
 
 // typeRefs returns the table as the schema-less display surface.

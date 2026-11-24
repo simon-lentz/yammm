@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -19,6 +18,11 @@ const (
 	MinVectorDimensions = 1
 	MaxVectorDimensions = 65536
 )
+
+// MaxIndexedVectorDimensions is the most dimensions a Neo4j vector index takes.
+// A Vector may hold more, up to MaxVectorDimensions, but no @vector names one:
+// the load refuses it, and schema/cypher's index target rule mirrors the load.
+const MaxIndexedVectorDimensions = 4096
 
 // unbounded is the spelling that leaves one side of a bound pair open.
 const unbounded = "_"
@@ -80,7 +84,7 @@ func (b *builder) builtin(c *builtinNode, span location.Span) *Constraint {
 	case c.Pat != nil:
 		return b.patternConstraint(c.Pat, span)
 	case c.Tim != nil:
-		return b.timestampConstraint(c.Tim, span)
+		return &Constraint{Kind: ConstraintTimestamp, Span: span}
 	case c.Dat != nil:
 		return &Constraint{Kind: ConstraintDate, Span: span}
 	case c.UUID != nil:
@@ -240,21 +244,21 @@ func (b *builder) lengthBound(t *lenTok, kind, side string) (*int64, bool) {
 	return &v, false
 }
 
-// enumConstraint collects the enum's values, dropping any that will not
-// unquote, are empty, or repeat an earlier value. The two-value minimum counts
-// survivors rather than written values, so "one good and one duplicate" is
-// reported as the single value it really is.
+// enumConstraint collects the enum's values, dropping any that has no value,
+// is empty, or repeats an earlier value. The two-value minimum counts the
+// values the source wrote: a value dropped for its own fault has a diagnostic
+// that says what is wrong with it, and one break is one diagnostic, so
+// "one good and one duplicate" is reported as the duplicate alone.
 func (b *builder) enumConstraint(c *enuC, span location.Span) *Constraint {
 	out := &Constraint{Kind: ConstraintEnum, Span: span}
 	seen := make(map[string]bool, len(c.Values))
-	kept := 0
 	for i := range c.Values {
 		v := &c.Values[i]
 		lit := Literal{Raw: v.Raw, Span: b.spanOf(v.Pos, v.EndPos)}
 		text, err := unquote(v.Raw)
 		switch {
 		case err != nil:
-			b.reportf(diag.E_SYNTAX, lit.Span, "invalid enum value: %v", err)
+			b.reportUnquote(lit.Span, "invalid enum value", err)
 		case text == "":
 			b.report(diag.Error, diag.E_INVALID_CONSTRAINT, lit.Span, "enum value cannot be empty")
 		case seen[text]:
@@ -262,120 +266,44 @@ func (b *builder) enumConstraint(c *enuC, span location.Span) *Constraint {
 		default:
 			seen[text] = true
 			lit.Text, lit.Kept = text, true
-			kept++
 		}
 		out.EnumLits = append(out.EnumLits, lit)
 	}
-	if kept < 2 {
+	if len(c.Values) < 2 {
 		b.reportf(diag.E_INVALID_CONSTRAINT, b.spanOf(c.Pos, c.EndPos),
-			"enum must have at least two values (got %d)", kept)
+			"enum must have at least two values (got %d)", len(c.Values))
 	}
 	return out
 }
-
-// MaxPatterns is the largest pattern list a Pattern constraint accepts. The
-// count is of patterns that compile; every written literal stays in PatternLits, and only the first MaxPatterns
-// survivors carry a Regex, so nothing downstream enforces a pattern past the cap.
-// The schema Builder refuses a longer list by the same bound.
-const MaxPatterns = 2
 
 func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
-	out := &Constraint{Kind: ConstraintPattern, Span: span}
-	kept := 0
-	for i := range c.Patterns {
-		p := &c.Patterns[i]
-		lit := Literal{Raw: p.Raw, Span: b.spanOf(p.Pos, p.EndPos)}
-		text, err := unquote(p.Raw)
-		if err != nil {
-			b.reportf(diag.E_SYNTAX, lit.Span, "invalid pattern: %v", err)
-			out.PatternLits = append(out.PatternLits, lit)
-			continue
-		}
-		lit.Text = text
-		re, err := regexp.Compile(text)
-		surrogate, namesSurrogate := SurrogateEscape(text)
-		switch {
-		case err != nil:
-			b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span,
-				"invalid regex pattern %q: %v", text, err)
-		case namesSurrogate:
-			b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span, "%s", SurrogateMessage(text, surrogate))
-		case kept < MaxPatterns:
-			lit.Regex, lit.Kept = re, true
-			kept++
-		default:
-			kept++
-		}
-		out.PatternLits = append(out.PatternLits, lit)
-	}
-	if kept > MaxPatterns {
-		b.reportf(diag.E_INVALID_CONSTRAINT, span,
-			"pattern constraint exceeds maximum of %d patterns (got %d)", MaxPatterns, kept)
-	}
-	return out
-}
-
-// SurrogateEscape returns the first surrogate code point (U+D800 to U+DFFF)
-// that pattern writes with a \x{…} escape, the one spelling RE2 has for one,
-// and reports whether there is one. Go's regexp compiles it, but no string
-// holds a surrogate, so it has no reading another dialect shares; a Pattern
-// constraint refuses it as a string literal refuses \uD800. Text between \Q and \E is
-// literal, and a class that spans the surrogate block writes none.
-func SurrogateEscape(pattern string) (rune, bool) {
-	for i := 0; i < len(pattern); i++ {
-		if pattern[i] != '\\' || i+1 >= len(pattern) {
-			continue
-		}
-		switch pattern[i+1] {
-		case 'Q':
-			end := strings.Index(pattern[i+2:], `\E`)
-			if end < 0 {
-				return 0, false
-			}
-			i += 2 + end + 1
-		case 'x':
-			rest := pattern[i+2:]
-			if !strings.HasPrefix(rest, "{") {
-				i++
-				continue
-			}
-			end := strings.IndexByte(rest, '}')
-			if end < 0 {
-				return 0, false
-			}
-			// A surrogate fits sixteen bits; a longer value is none.
-			v, err := strconv.ParseUint(rest[1:end], 16, 16)
-			if r := rune(uint16(v)); err == nil && utf16.IsSurrogate(r) {
-				return r, true
-			}
-			i += 2 + end
-		default:
-			i++
-		}
-	}
-	return 0, false
-}
-
-// SurrogateMessage is the diagnostic for a pattern [SurrogateEscape] refuses;
-// the schema Builder refuses one in the same words.
-func SurrogateMessage(pattern string, r rune) string {
-	return fmt.Sprintf("regex pattern %q names the surrogate code point U+%04X, which no string holds", pattern, r)
-}
-
-func (b *builder) timestampConstraint(c *timC, span location.Span) *Constraint {
-	out := &Constraint{Kind: ConstraintTimestamp, Span: span}
-	if c.Format == nil {
+	p := &c.Pattern
+	lit := &Literal{Raw: p.Raw, Span: b.spanOf(p.Pos, p.EndPos)}
+	out := &Constraint{Kind: ConstraintPattern, Span: span, PatternLit: lit}
+	written, err := unquote(p.Raw)
+	refused := errors.Is(err, errRefusedText)
+	if err != nil && !refused {
+		b.reportUnquote(lit.Span, "invalid pattern", err)
 		return out
 	}
-	f := c.Format
-	lit := Literal{Raw: f.Raw, Span: b.spanOf(f.Pos, f.EndPos)}
-	text, err := unquote(f.Raw)
-	if err != nil {
-		b.reportf(diag.E_SYNTAX, lit.Span, "invalid timestamp format: %v", err)
-	} else {
-		lit.Text, lit.Kept = text, true
+	if !utf8.ValidString(p.Raw) {
+		// The byte is reported where it stands, and the pattern has no text to
+		// compile.
+		return out
 	}
-	out.FormatLit = &lit
+	if !refused {
+		lit.Text = written
+	}
+	// A NUL and a byte order mark are characters regexp reads, so a pattern the
+	// source rules refuse for one is still judged, as written.
+	re, err := regexp.Compile(written)
+	switch {
+	case err != nil:
+		b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span,
+			"invalid regex pattern %q: %v", written, err)
+	case !refused:
+		lit.Regex, lit.Kept = re, true
+	}
 	return out
 }
 
@@ -433,15 +361,29 @@ func (b *builder) lenBoundsOf(bd *lenBoundsC) *Bounds {
 
 // ---- string literals ----
 
-// unquoteAt unquotes a literal and reports a syntax error on the literal
-// itself when it will not unquote, returning whether the value is usable.
-func (b *builder) unquoteAt(t *strTok, what string) (string, bool) {
+// unquoteAt unquotes a literal and returns its value, or no value and the
+// error [reportUnquote] was given.
+func (b *builder) unquoteAt(t *strTok, what string) (string, error) {
 	text, err := unquote(t.Raw)
 	if err != nil {
-		b.reportf(diag.E_SYNTAX, b.spanOf(t.Pos, t.EndPos), "%s: %v", what, err)
-		return "", false
+		b.reportUnquote(b.spanOf(t.Pos, t.EndPos), what, err)
+		return "", err
 	}
-	return text, true
+	return text, nil
+}
+
+// reportUnquote reports why the literal at span has no value. An escape the
+// language does not have is text the grammar does not match. Text the source
+// rules refuse is reported at its own bytes by checkSourceText, and one break
+// is one diagnostic, so it draws nothing here.
+func (b *builder) reportUnquote(span location.Span, what string, err error) {
+	switch {
+	case errors.Is(err, errRefusedText):
+	case errors.Is(err, errUnquoteSyntax):
+		b.reportUnparsed(diag.Error, span, fmt.Sprintf("%s: %v", what, err))
+	default:
+		b.reportf(diag.E_SYNTAX, span, "%s: %v", what, err)
+	}
 }
 
 // unquotePrefix begins every unquote error, as the strconv-backed unquoter's
@@ -452,14 +394,21 @@ const unquotePrefix = "unquote string: "
 var (
 	errUnquoteSyntax = errors.New(unquotePrefix + "invalid syntax")
 	errUnquoteUTF8   = errors.New(unquotePrefix + "the value its escapes write is not valid UTF-8")
+	errRefusedText   = errors.New(unquotePrefix + "the literal holds text the source rules refuse")
 )
 
 // unquote strips a literal's surrounding quotes and resolves exactly the
 // lexer's STRING escape vocabulary: \b \t \n \f \r \0 \xHH \uHHHH \" \' \\.
 // The quote character not delimiting the literal appears literally unescaped.
-// A value is valid UTF-8: a \xHH escape writes one byte, so escapes that do
-// not form UTF-8 are refused. A raw invalid byte becomes U+FFFD, since the
-// source rules already refuse it where it stands and one diagnostic is enough.
+// A value is valid UTF-8: a \xHH escape writes one byte, and a byte an escape
+// wrote that is no part of a character is errUnquoteUTF8, judged over the
+// bytes the literal writes as they stand.
+//
+// A literal holding text the source rules refuse has no value: unless an
+// escape fault comes first, unquote returns errRefusedText with the bytes the
+// literal writes, raw bytes as written. No stand-in takes their place, so no reader judges a value the
+// source did not write; the bytes serve a judgement of form alone, which a
+// pattern holding a NUL or a byte order mark is given.
 func unquote(s string) (string, error) {
 	if !isQuoted(s) {
 		return s, nil
@@ -467,19 +416,14 @@ func unquote(s string) (string, error) {
 	body := s[1 : len(s)-1]
 	var out strings.Builder
 	out.Grow(len(body))
+	// escaped holds the offset in out of each byte a \xHH escape wrote: the
+	// only bytes an escape writes that can break a character.
+	var escaped []int
 	for i := 0; i < len(body); {
 		c := body[i]
 		if c != '\\' {
-			if c < utf8.RuneSelf {
-				out.WriteByte(c)
-				i++
-				continue
-			}
-			// DecodeRuneInString yields (RuneError, 1) on an invalid byte, so
-			// WriteRune substitutes U+FFFD one byte at a time.
-			r, size := utf8.DecodeRuneInString(body[i:])
-			out.WriteRune(r)
-			i += size
+			out.WriteByte(c)
+			i++
 			continue
 		}
 		if i+1 >= len(body) {
@@ -514,6 +458,7 @@ func unquote(s string) (string, error) {
 			if err != nil {
 				return "", errUnquoteSyntax
 			}
+			escaped = append(escaped, out.Len())
 			out.WriteByte(byte(v))
 			i += 2
 		case 'u':
@@ -534,10 +479,61 @@ func unquote(s string) (string, error) {
 			return "", errUnquoteSyntax
 		}
 	}
-	if !utf8.ValidString(out.String()) {
+	written := out.String()
+	if escapeBreaksUTF8(written, escaped) {
 		return "", errUnquoteUTF8
 	}
-	return out.String(), nil
+	if _, refused := nextTextFault(body, 0); refused {
+		return written, errRefusedText
+	}
+	return written, nil
+}
+
+// escapeBreaksUTF8 reports whether one of the bytes at the offsets escaped is
+// no part of a valid character of written.
+func escapeBreaksUTF8(written string, escaped []int) bool {
+	next := 0
+	for i := 0; i < len(written) && next < len(escaped); {
+		r, size := utf8.DecodeRuneInString(written[i:])
+		for next < len(escaped) && escaped[next] < i+size {
+			if r == utf8.RuneError && size == 1 {
+				return true
+			}
+			next++
+		}
+		i += size
+	}
+	return false
+}
+
+// Quote returns s as a double-quoted STRING literal that unquote reads back as
+// s. It escapes the quote, the backslash, and each byte the lexer or the source
+// rules refuse inside a literal: a line break, a NUL and a byte order mark. s
+// must be valid UTF-8, as every value unquote returns is.
+func Quote(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case 0:
+			b.WriteString(`\0`)
+		case '\uFEFF':
+			b.WriteString(`\uFEFF`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func isQuoted(s string) bool {

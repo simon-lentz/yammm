@@ -1,0 +1,14 @@
+schema "temporallist"
+
+type Day    = Date
+type Stamp  = Timestamp
+type Days   = List<Date>
+type Dates  = List<Day>
+type Stamps = List<Stamp>
+
+type Calendar {
+	id     String primary
+	days   Days
+	grid   List<List<Day>>
+	shifts List<List<Stamp>>
+}

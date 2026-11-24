@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/internal/snapread"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -13,21 +14,21 @@ func newSnapshotUpdateMetadataCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update-metadata <snapshot.ys>",
 		Short: "Rewrite metadata on an existing .ys file",
-		Long: `Update the metadata header of a .ys file in-place using the
-body-byte-reuse fast path (snapshot.UpdateMetadata). Preserves created_at
-unchanged; operators requiring a different created_at should re-run
-snapshot save with --timestamp.
+		Long: `Update the metadata of a .ys file in place with snapshot.UpdateMetadata,
+which rewrites the header and keeps every other byte of the file. It keeps
+created_at unchanged; to change it, run snapshot save with --timestamp.
 
 Use --set key=value to set or override a metadata key (repeatable).
 Use --unset key to remove a metadata key (repeatable).
 At least one --set or --unset is required.
 
-The write is atomic (tmp+fsync+rename) and preserves the file's mode.
+A document whose integrity hash does not verify, or that a reader refuses
+for its shape, is refused and the file is not written. The command does not
+check the instances of the body: the verified hash seals the body a writer
+wrote, and snapshot info checks it whole.
 
-This command uses the strict fast path and surfaces an
-E_UPDATE_METADATA_BODY_OFFSET diagnostic if the input does not match a
-Marshal-produced shape; recovery in that case is a fresh snapshot save
-round-trip.`,
+A regular file is replaced atomically (tmp+fsync+rename) and keeps its
+permission bits; a FIFO or a device is written through.`,
 		Args: cobra.ExactArgs(1),
 		RunE: withDiagnostics(runSnapshotUpdateMetadata),
 	}
@@ -71,11 +72,14 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 
 	ctx := cmd.Context()
 
-	header, headerRes := snapshot.HeaderOnly(ctx, data)
-	sink.Add(headerRes)
-	if headerRes.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(headerRes)}
+	// A header read accepts an unknown hash algorithm, which UpdateMetadata
+	// then refuses. The read takes no size cap, since UpdateMetadata updates a
+	// header of any size.
+	read, headerErr := snapread.HeaderOf(ctx, data)
+	if headerErr != nil {
+		return sink.AddSnapshot(headerErr)
 	}
+	header := read.(*snapshot.Header)
 
 	// Build the new metadata map from the existing header.Metadata, apply
 	// --set overrides, then remove --unset keys.
@@ -88,21 +92,15 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 		delete(newMeta, k)
 	}
 
-	// No UpdateOption needed: UpdateMetadata preserves the existing
-	// CreatedAt byte-for-byte by default, which is the right behavior
-	// for an in-place metadata rewrite. Operators who want to change
-	// CreatedAt re-save with snapshot save --timestamp.
-	out, updateRes := snapshot.UpdateMetadata(ctx, data, newMeta)
-	sink.Add(updateRes)
-	if updateRes.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(updateRes)}
+	// UpdateMetadata refuses a document whose hash does not verify, so a
+	// tampered file is never sealed under a fresh hash.
+	out, updateErr := snapshot.UpdateMetadata(ctx, data, newMeta)
+	if err := sink.AddSnapshot(updateErr); err != nil {
+		return err
 	}
 
 	if err := cli.WriteFile(path, out); err != nil {
 		return cli.Runtimef("write %q: %v", path, err)
 	}
-
-	sink.Flush()
-	sink.Statusf("updated metadata on %s (%d keys)\n", path, len(newMeta))
 	return nil
 }

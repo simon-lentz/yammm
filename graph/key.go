@@ -7,19 +7,23 @@ import (
 	"io"
 	"strings"
 
-	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/value"
 )
 
 // FormatKey renders primary key components as the JSON array string the
 // graph's addresses use: ["value1", value2, ...].
 //
-// It renders the values AS GIVEN and canonicalizes nothing; the graph does,
-// at every address it receives. The graph indexes an instance by the key it
-// carries, and for a Timestamp, Date or UUID key that is the canonical text
-// the value was rewritten into at entry — so [Graph.AddComposed] and
-// [Snapshot.InstanceByKey] canonicalize the address they are handed under the
-// type's key constraints before the lookup, and FormatKey over any spelling
-// of the instant addresses it. [Instance.PrimaryKey] is the address itself.
+// It renders the values AS GIVEN and canonicalizes nothing. The graph indexes
+// an instance by the key it carries, and moves a key only at
+// [Snapshot.InstanceByKey]'s lookup. For a
+// Timestamp, Date or UUID key whose constraint renders the value, the key is
+// the canonical text that value took at entry — so
+// [Snapshot.InstanceByKey] canonicalizes an address that misses as spelled under
+// the type's key constraints, and FormatKey over each text spelling of one
+// instant at one offset addresses it, as does a time.Time at a Timestamp key.
+// A time.Time at a Date key misses: pass the stored text there.
+// [Instance.PrimaryKey] is the address itself.
 //
 // Examples:
 //
@@ -27,17 +31,17 @@ import (
 //	FormatKey("us", 12345)    -> `["us",12345]`
 //	FormatKey(42)             -> `[42]`
 //
-// Valid component types are those produced by JSON unmarshaling: string,
-// int64, float64, bool, and nil.
+// It renders each value as [encoding/json] does, and the graph reads a key
+// component only as a scalar.
 //
-// Calling FormatKey with no values renders `null`, not `[]`: a variadic
-// parameter given no arguments is a nil slice, and so is one given a nil slice
-// to spread. [ParseKey] is the inverse over rendered scalars, not over that
-// case.
+// Calling FormatKey with no arguments, or with a nil slice to spread, renders
+// `null`, since the variadic parameter is then a nil slice. An empty slice spread
+// renders `[]`. [ParseKey] reads a rendered key back and refuses `null`, and
+// its doc names the components it does not read back as written.
 //
 // FormatKey panics if any value cannot be JSON-marshaled (e.g., channels,
-// functions, cyclic structs). This is a programmer error—primary key values
-// come from validated instances and are guaranteed JSON-marshalable.
+// functions, cyclic structs, a time.Time outside years 0 to 9999 or at a UTC
+// offset of 24 hours or more). No key a graph holds holds such a component.
 func FormatKey(values ...any) string {
 	data, err := json.Marshal(values)
 	if err != nil {
@@ -48,31 +52,26 @@ func FormatKey(values ...any) string {
 
 // ParseKey decodes a [FormatKey] string back into its component values.
 //
-// Components come back as the types a snapshot round trip produces: string,
-// int64, float64, bool, and nil. Numbers are classified by lexical form, the
-// same rule the .ys reader applies — a literal carrying '.', 'e', or 'E' is
-// float64, an int-shaped literal is int64. Two consequences follow:
+// Components come back as string, int64, float64, bool and nil. A number reads
+// as the .ys reader reads a key component: an integer literal is int64, and a
+// literal carrying '.', 'e' or 'E' is float64, whole or not. An integer literal
+// no int64 holds, and a literal no finite float64 holds, is an error naming the
+// component's index: an integer literal past the int64 range is one, which
+// FormatKey writes for an unsigned integer
+// above math.MaxInt64, a json.Number that spells one and a whole float64 or
+// float32 of magnitude 2^63 to below 1e21, and a literal such as 1e999.
 //
-//   - An int-shaped literal beyond the int64 range comes back as float64, with
-//     the precision loss that implies. FormatKey writes one for a whole float64
-//     of magnitude 2^63 to below 1e21, on either sign, and for a uint64 above
-//     math.MaxInt64.
-//   - A literal that is valid JSON but has no finite Go value, such as 1e999,
-//     is an error naming the component's index. FormatKey never writes one.
-//
-// The round-trip law holds over normalized components — string, int64, bool,
-// nil, and non-whole float64: ParseKey(FormatKey(vs...)) returns vs, and
-// FormatKey(ParseKey(s)...) returns s for any s that FormatKey produced from
-// such values. One carve-out is documented rather than hidden: FormatKey renders
-// float64(5) as the literal 5, and ParseKey reads that literal back as int64(5).
-// The snapshot wire has the same asymmetry, for the same reason.
+// The round-trip law holds over a valid UTF-8 string, int64, bool, nil and a
+// finite float64 that is not whole: ParseKey(FormatKey(vs...)) returns vs, and
+// FormatKey(ParseKey(s)...) returns s for any s that FormatKey produced from such
+// values. FormatKey renders a whole float64 below 2^63 in magnitude as an integer
+// literal, so float64(5) reads back as int64(5) at the same rendering, and a
+// float64 negative zero as -0, which reads back as int64(0), rendered 0.
 //
 // The string must hold exactly one JSON array and nothing else; surrounding
 // whitespace is tolerated, trailing content is not. A component that is itself
 // an array or object is an error naming its index: FormatKey's documented
 // domain is scalars.
-//
-// Use [ParseKeyStrings] when every component must be a string.
 func ParseKey(s string) ([]any, error) {
 	raw, err := decodeKeyArray(s)
 	if err != nil {
@@ -80,37 +79,17 @@ func ParseKey(s string) ([]any, error) {
 	}
 	out := make([]any, len(raw))
 	for i, v := range raw {
-		norm := immutable.NormalizeValue(v)
-		switch norm.(type) {
+		read := value.Read(v)
+		switch n := read.(type) {
 		case []any, map[string]any:
-			return nil, fmt.Errorf("graph.ParseKey: component %d is not a scalar: %T", i, norm)
+			return nil, fmt.Errorf("graph.ParseKey: component %d is not a scalar: %T", i, read)
 		case json.Number:
-			// NormalizeNumber hands back the raw number when no finite Go value
-			// represents it. Reporting it keeps the documented component set exact.
-			return nil, fmt.Errorf("graph.ParseKey: component %d is not a representable number: %v", i, norm)
+			if value.IsIntegerLiteral(n) {
+				return nil, fmt.Errorf("graph.ParseKey: component %d is an integer literal no int64 holds: %v", i, diag.CutValue(string(n)))
+			}
+			return nil, fmt.Errorf("graph.ParseKey: component %d is a number literal no finite float64 holds: %v", i, diag.CutValue(string(n)))
 		}
-		out[i] = norm
-	}
-	return out, nil
-}
-
-// ParseKeyStrings decodes a [FormatKey] string whose every component is a JSON
-// string, which is the shape of a key over String-typed primary key properties.
-//
-// It shares [ParseKey]'s decoding and adds the string requirement: a component
-// of any other type is an error naming its index.
-func ParseKeyStrings(s string) ([]string, error) {
-	raw, err := decodeKeyArray(s)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, len(raw))
-	for i, v := range raw {
-		str, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("graph.ParseKeyStrings: component %d is %T, want string", i, immutable.NormalizeValue(v))
-		}
-		out[i] = str
+		out[i] = read
 	}
 	return out, nil
 }
@@ -127,35 +106,13 @@ func decodeKeyArray(s string) ([]any, error) {
 	dec.UseNumber()
 	var out []any
 	if err := dec.Decode(&out); err != nil {
-		return nil, fmt.Errorf("graph: parsing key %q: %w", s, err)
+		return nil, fmt.Errorf("graph: parsing key %s: %w", diag.QuoteValue(s), err)
 	}
 	if out == nil {
-		return nil, fmt.Errorf("graph: parsing key %q: want a JSON array", s)
+		return nil, fmt.Errorf("graph: parsing key %s: want a JSON array", diag.QuoteValue(s))
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("graph: parsing key %q: trailing content after the array", s)
+		return nil, fmt.Errorf("graph: parsing key %s: trailing content after the array", diag.QuoteValue(s))
 	}
 	return out, nil
-}
-
-// unreadableComponent returns the index of the first component of k that
-// [ParseKey] cannot read back — one rendering as a JSON array or object, or as
-// a number no finite float64 holds — or -1. A string, a bool, an int64 and a
-// finite float64 settle without rendering.
-func unreadableComponent(k immutable.Key) int {
-	for i := range k.Len() {
-		v := k.Get(i)
-		switch v.Unwrap().(type) {
-		case string, bool, int64, float64, nil:
-			continue
-		}
-		b, err := json.Marshal(v.Clone())
-		if err != nil {
-			return i
-		}
-		if _, err := ParseKey("[" + string(b) + "]"); err != nil {
-			return i
-		}
-	}
-	return -1
 }

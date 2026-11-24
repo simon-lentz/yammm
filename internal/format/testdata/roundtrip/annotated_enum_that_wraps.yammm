@@ -1,0 +1,9 @@
+schema "annotated_enum"
+
+// A long annotated enum property. Wrapping moves the annotation onto the
+// closing "]" line, after the property's last token, where it still attaches
+// to the property.
+type T {
+	id    String primary
+	state Enum["pending_review", "approved", "rejected", "needs_revision", "escalated", "archived"] @index
+}

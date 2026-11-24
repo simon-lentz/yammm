@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/neo4j"
 )
 
 // A remote object that parsed a name but no type means the introspection
@@ -22,7 +22,7 @@ import (
 func TestUntypedRemoteObjects_CountsOnlyMissingTypes(t *testing.T) {
 	t.Parallel()
 
-	constraints := []adaptern4j.RemoteConstraint{
+	constraints := []neo4j.RemoteConstraint{
 		{Name: "ok", Type: "UNIQUENESS"},
 		{Name: "missing"},                         // the column did not arrive
 		{Name: "also-missing", Type: ""},          // explicit, same thing
@@ -40,7 +40,7 @@ func TestUntypedRemoteObjects_HealthyRecordsCountZero(t *testing.T) {
 
 	// Every type string a current server reports for an index, including the
 	// kinds this schema can never declare. None is a projection failure.
-	indexes := []adaptern4j.RemoteIndex{
+	indexes := []neo4j.RemoteIndex{
 		{Name: "a", Type: "RANGE"},
 		{Name: "b", Type: "VECTOR"},
 		{Name: "c", Type: "TEXT"},

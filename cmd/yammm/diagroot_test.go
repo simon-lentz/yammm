@@ -90,10 +90,10 @@ func TestDiagRootFor_NeverReturnsASchemeString(t *testing.T) {
 	sources := map[string][]byte{
 		"assets/main.yammm": []byte("schema \"main\"\n\ntype T {\n\tid String primary\n}\n"),
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "assets/main.yammm", "",
+	s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "assets/main.yammm",
 		schema.WithSyntheticRoot("embedded://app"), schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("synthetic load: %v", res.Err())
+	if err != nil {
+		t.Fatalf("synthetic load: %v", err)
 	}
 	if s.ModuleRoot() != "embedded://app" {
 		t.Fatalf("fixture does not exercise the guard: ModuleRoot = %q", s.ModuleRoot())
@@ -128,7 +128,7 @@ func TestDiagRootFor_DiscoversOnTheFailurePath(t *testing.T) {
 	}
 	entry := filepath.Join(sub, "bad.yammm")
 
-	got := diagRootFor(nil, "", entry)
+	got := diagRootFor(schema.Schema{}, "", entry)
 	onDisk, err := yammmtest.DiskSpelling(root)
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestDiagRootFor_ResolvesAnExplicitRootOnTheFailurePath(t *testing.T) {
 			}
 			typed := row.typed(t, base)
 
-			got := diagRootFor(nil, typed, filepath.Join(typed, "bad.yammm"))
+			got := diagRootFor(schema.Schema{}, typed, filepath.Join(typed, "bad.yammm"))
 			onDisk, err := yammmtest.DiskSpelling(real)
 			if err != nil {
 				t.Fatal(err)
@@ -190,5 +190,27 @@ func TestDiagRootFor_ResolvesAnExplicitRootOnTheFailurePath(t *testing.T) {
 				t.Errorf("diagRootFor(nil, %q, ...) = %q, want %q", typed, got, onDisk)
 			}
 		})
+	}
+}
+
+// TestDiagRootFor_ASchemaPathInDirectoryFormStartsFromTheFilesDirectory holds
+// a failed load of "s.yammm/" to the directory holding s.yammm: the resolver
+// refuses the directory form, and the fallback cleans it before taking the
+// parent, so the root is not the file itself.
+func TestDiagRootFor_ASchemaPathInDirectoryFormStartsFromTheFilesDirectory(t *testing.T) {
+	t.Parallel()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "s.yammm")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want, err := yammmtest.DiskSpelling(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := diagRootFor(schema.Schema{}, "", file+string(filepath.Separator)); got != want {
+		t.Errorf("diagRootFor = %q, want %q", got, want)
 	}
 }

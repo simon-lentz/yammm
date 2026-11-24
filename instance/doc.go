@@ -7,18 +7,25 @@
 // # Overview
 //
 // The validation pipeline takes [RawInstance] objects and produces
-// [ValidInstance] objects (on success) along with a [diag.Result] containing
-// any diagnostics. The [Validator] orchestrates this process using a
-// compiled [schema.Schema].
+// [ValidInstance] objects. A refusal is one error, a *[diag.ResultError] that
+// holds the failures as issues with stable codes, at most [WithIssueLimit]'s
+// number of them for one instance, and counts every one, save on a row a
+// cancellation stopped, which keeps only its E_INTERNAL issues; read it with
+// errors.AsType, and test it for a code with errors.Is. The validator draws no
+// issue below failure severity, so its calls take no warnings callback. The
+// [Validator] orchestrates this process using a compiled [schema.Schema].
 //
 //	validator := instance.NewValidator(compiledSchema)
-//	valids, result := validator.Validate(ctx, "Person", raws)
+//	valids, err := validator.Validate(ctx, "Person", raws)
 //
 // # Instance Types
 //
 // [RawInstance] represents unvalidated input data with optional provenance
 // information for error reporting. [ValidInstance] is the immutable output
-// containing typed properties, validated edges, and the extracted primary key.
+// containing typed properties, validated edges and composed children, the
+// extracted primary key, and the provenance. It holds the [schema.Type] that
+// validated it, one handle of the validator's schema load, and
+// [github.com/simon-lentz/yammm/graph.Graph.Add] panics on a handle of another load.
 //
 // These two types use different access patterns by design:
 //   - [RawInstance] uses public struct fields (Properties, Provenance) because
@@ -30,7 +37,7 @@
 //
 // [BuilderFor] and [SchemaBuilder] provide fluent, schema-aware construction
 // of [RawInstance] values. Unlike a free-form map literal, SchemaBuilder
-// validates property names, relation names, and cardinality at
+// validates property names, relation names, cardinality and each edge's shape at
 // [SchemaBuilder.Build] time with call-site
 // file:line locators — shifting shape errors out of ValidateOne's domain:
 //
@@ -49,7 +56,7 @@
 //
 // # Validation Semantics
 //
-// The validator performs:
+// The validator performs, among other checks:
 //   - Type resolution (qualified and unqualified type names)
 //   - Property type validation against schema constraints
 //   - Required property enforcement
@@ -57,28 +64,18 @@
 //   - Edge object validation (associations and compositions)
 //   - Invariant expression evaluation
 //
-// [Validator.ValidateForComposition] is a second entry point for streaming
-// composition scenarios where composed children are validated separately
-// from their parent.
+// Every input key names its member exactly: a property by its declared name, a
+// relation by its field name (its declared name in lower case), and in an edge
+// object a foreign-key field by its `_target_` name and an edge property by its
+// name. A key that names no member draws E_UNKNOWN_FIELD, or
+// E_UNKNOWN_EDGE_FIELD in an edge object, and the member a key in another case
+// was meant for stays absent.
 //
 // # Validator Options
 //
 // [NewValidator] accepts [Option] values to configure behavior:
 //
-//   - [WithStrictPropertyNames]: require exact-case property names
-//   - [WithAllowUnknownFields]: allow extra properties without diagnostics
 //   - [WithIssueLimit]: cap the issues one instance stores
-//   - [WithLogger]: receive a debug record when a property name is normalized,
-//     and the evaluator's per-node Debug trace for every invariant evaluated,
-//     each record logged with the context passed to Validate
-//
-// # Value Functions
-//
-// [CheckValue] and [CanonicalValue] are the validator's two per-value rules —
-// does this value conform, and what is its stored form — exported for a
-// boundary this library does not own: a hand-built export, a direct-Cypher
-// parameter map, a pre-filter in front of a write the validator never sees.
-// Both accept nil.
 //
 // # Thread Safety
 //
@@ -88,6 +85,6 @@
 //
 // # Dependencies
 //
-//	instance  ──imports──▶  schema, diag, location, location/path, immutable,
-//	                        instance/internal/eval, internal/trace
+//	instance  ──imports──▶  schema, diag, location, instance/path, immutable,
+//	                        instance/internal/eval, internal/expr, internal/value
 package instance

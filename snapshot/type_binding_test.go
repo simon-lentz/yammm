@@ -1,10 +1,17 @@
 package snapshot_test
 
 import (
+	"bytes"
+	"errors"
+	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -21,40 +28,40 @@ type County {
 // so two loads of identical text produce identical StructuralHashes and
 // different type identities — the shape a consumer hits when a snapshot outlives
 // the layout it was written under.
-func loadUnderModuleRoot(t *testing.T, moduleRoot string) *schema.Schema {
+func loadUnderModuleRoot(t *testing.T, moduleRoot string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(),
-		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm", moduleRoot)
-	if res.HasErrors() {
-		t.Fatalf("load under %q: %v", moduleRoot, res.Err())
+	s, err := schema.LoadSourcesWithEntry(t.Context(),
+		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm", schema.WithModuleRoot(moduleRoot))
+	if err != nil {
+		t.Fatalf("load under %q: %v", moduleRoot, err)
 	}
 	return s
 }
 
 // loadUnderSyntheticRoot loads the same fixture hermetically under a synthetic
 // root, which is what makes its identities independent of the process.
-func loadUnderSyntheticRoot(t *testing.T, root string) *schema.Schema {
+func loadUnderSyntheticRoot(t *testing.T, root string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(),
-		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm", "",
+	s, err := schema.LoadSourcesWithEntry(t.Context(),
+		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm",
 		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
-	if res.HasErrors() {
-		t.Fatalf("load under %q: %v", root, res.Err())
+	if err != nil {
+		t.Fatalf("load under %q: %v", root, err)
 	}
 	return s
 }
 
 // marshalCounty writes a one-instance snapshot over s.
-func marshalCounty(t *testing.T, s *schema.Schema) []byte {
+func marshalCounty(t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	county, ok := s.Type("County")
 	if !ok {
 		t.Fatal("fixture is missing County")
 	}
 	id := county.ID()
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{id},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     id,
 				PrimaryKey: immutable.WrapKey([]any{"01001"}),
@@ -62,22 +69,19 @@ func marshalCounty(t *testing.T, s *schema.Schema) []byte {
 			},
 		},
 	})
-	if res.HasErrors() {
-		t.Fatalf("rebuild: %v", res.Err())
-	}
-	data, res := snapshot.Marshal(t.Context(), built)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res.Err())
+	data, err := snapshot.Marshal(t.Context(), built)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 	return data
 }
 
 // headerOf reads back only the header, the way a dispatch caller classifies.
-func headerOf(t *testing.T, data []byte) *snapshot.HeaderInfo {
+func headerOf(t *testing.T, data []byte) *snapshot.Header {
 	t.Helper()
-	header, res := snapshot.HeaderOnly(t.Context(), data)
-	if res.HasErrors() {
-		t.Fatalf("header-only read: %v", res.Err())
+	header, err := snapshot.ReadHeader(t.Context(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("header-only read: %v", err)
 	}
 	return header
 }
@@ -86,16 +90,16 @@ func headerOf(t *testing.T, data []byte) *snapshot.HeaderInfo {
 // document as current and the full load succeeds. Together they are the
 // whole of what a dispatch caller checks — the hash covers every declared
 // schema and type name, so a matching hash already implies every row binds.
-func mustBind(t *testing.T, data []byte, s *schema.Schema, what string) {
+func mustBind(t *testing.T, data []byte, s schema.Schema, what string) {
 	t.Helper()
 	if !headerOf(t, data).SchemaHashMatches(s) {
 		t.Fatalf("%s: the header does not classify the document as current", what)
 	}
-	loaded, res := snapshot.Load(t.Context(), data, s)
-	if res.HasErrors() {
-		t.Fatalf("%s: full load: %v", what, res.Err())
+	loaded, err := snapshot.Unmarshal(t.Context(), data, s)
+	if err != nil {
+		t.Fatalf("%s: full load: %v", what, err)
 	}
-	if loaded == nil {
+	if loaded.IsZero() {
 		t.Fatalf("%s: expected a loaded snapshot", what)
 	}
 }
@@ -143,4 +147,131 @@ func TestSyntheticRoot_SnapshotReadsBackFromAnotherWorkingDirectory(t *testing.T
 	// every type a different source path from the written document's — and the
 	// rows still bind, because the wire names the schema rather than its path.
 	mustBind(t, data, loadUnderModuleRoot(t, "."), "a cwd-derived load")
+}
+
+const layoutEntry = `schema "app"
+
+import "lib/item" as x
+
+type Item {
+	id String primary
+	--> HOLDS (_:one) x.Item
+}
+`
+
+const layoutLib = `schema "lib"
+
+type Item {
+	id String primary
+	--> NEXT (_:one) Item
+}
+`
+
+// loadLayout loads layoutEntry from entryPath and layoutLib from lib/item.yammm
+// under one module root. Moving the entry file moves its source path past the
+// library's while both texts and both schema names stay the same. Both schemas
+// declare Item, so only the schema name tells their identities apart.
+func loadLayout(t *testing.T, entryPath string) schema.Schema {
+	t.Helper()
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		entryPath:        []byte(layoutEntry),
+		"lib/item.yammm": []byte(layoutLib),
+	}, entryPath, schema.WithSourcesOnly(true), schema.WithModuleRoot("/project"))
+	if err != nil {
+		t.Fatalf("load with the entry at %s: %v", entryPath, err)
+	}
+	return s
+}
+
+// entryAfterLibrary reports whether s's entry source sorts after its library's.
+// Keys resolve on the host, so the library's path is read from the closure.
+func entryAfterLibrary(t *testing.T, s schema.Schema) bool {
+	t.Helper()
+	for member := range s.Closure() {
+		if member.Name() == "lib" {
+			return s.SourceID().String() > member.SourceID().String()
+		}
+	}
+	t.Fatal("the closure holds no schema lib")
+	return false
+}
+
+// layoutGraph builds a snapshot in which each schema's type sources one edge,
+// one unresolved record and one rejected duplicate, so every order that
+// compares types meets both schemas.
+func layoutGraph(t *testing.T, s schema.Schema) graph.Snapshot {
+	t.Helper()
+	g := graph.New(s)
+	target := func(key string) map[string]any { return map[string]any{"_target_id": key} }
+	adds := []struct {
+		typeName string
+		props    map[string]any
+	}{
+		{"Item", map[string]any{"id": "k", "holds": target("k")}},
+		{"Item", map[string]any{"id": "k", "holds": target("k")}},
+		{"Item", map[string]any{"id": "a2", "holds": target("gone")}},
+		{"x.Item", map[string]any{"id": "k", "next": target("gone")}},
+		{"x.Item", map[string]any{"id": "k", "next": target("gone")}},
+		{"x.Item", map[string]any{"id": "j", "next": target("k")}},
+	}
+	for _, add := range adds {
+		err := g.Add(t.Context(), instancetest.Valid(t, s, add.typeName, add.props))
+		if err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+			t.Fatalf("add %s %v: %v", add.typeName, add.props["id"], err)
+		}
+	}
+	return g.Snapshot()
+}
+
+// typeNames returns the name of each of snap.Types as the entry schema renders
+// it, in its order.
+func typeNames(snap graph.Snapshot) []string {
+	var names []string
+	for _, id := range snap.Types() {
+		names = append(names, schema.TagForm(snap.Schema(), id))
+	}
+	return names
+}
+
+// edgeSources returns the source type of each of snap.Edges as the entry
+// schema renders it, in its order.
+func edgeSources(snap graph.Snapshot) []string {
+	var names []string
+	for e := range snap.Edges() {
+		names = append(names, schema.TagForm(snap.Schema(), e.Source().TypeID()))
+	}
+	return names
+}
+
+// TestMarshal_ClosureLayoutDoesNotMoveBytes pins that a document's bytes follow
+// the schema names, not the source paths: one closure loaded with its entry
+// file at two places writes one document.
+func TestMarshal_ClosureLayoutDoesNotMoveBytes(t *testing.T) {
+	t.Parallel()
+
+	atRoot, inDir := loadLayout(t, "main.yammm"), loadLayout(t, "a/main.yammm")
+	if entryAfterLibrary(t, atRoot) == entryAfterLibrary(t, inDir) {
+		t.Fatal("fixture is vacuous: the two layouts order the entry and the library alike")
+	}
+	a, b := layoutGraph(t, atRoot), layoutGraph(t, inDir)
+	if n, u, d := len(slices.Collect(a.Edges())), len(slices.Collect(a.Unresolved())), len(slices.Collect(a.Duplicates())); n != 2 || u != 2 || d != 2 {
+		t.Fatalf("fixture is vacuous: %d edges, %d unresolved, %d duplicates, want 2 of each", n, u, d)
+	}
+	if an, bn := typeNames(a), typeNames(b); !slices.Equal(an, bn) {
+		t.Errorf("Types orders one closure in two layouts as %v and %v", an, bn)
+	}
+	if an, bn := edgeSources(a), edgeSources(b); !slices.Equal(an, bn) {
+		t.Errorf("Edges orders one closure in two layouts by source as %v and %v", an, bn)
+	}
+	ab, err := snapshot.Marshal(t.Context(), a)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	bb, err := snapshot.Marshal(t.Context(), b)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Equal(ab, bb) {
+		t.Errorf("one closure in two layouts writes two documents:\n%s\n---\n%s", ab, bb)
+	}
 }

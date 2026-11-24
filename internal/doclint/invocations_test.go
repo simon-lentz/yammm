@@ -12,23 +12,21 @@ import (
 )
 
 // invocationRules is a small CLI: persistent --format and --no-color on the
-// program, --version on the program alone, and a help flag everywhere, the
-// last two defined only after the lookup, as cobra defines them.
+// program, --version on the program alone, and a help flag everywhere.
 func invocationRules() doclint.CommandRules {
-	help := doclint.Flag{Name: "help", Shorthand: "h", NoValue: true, AfterLookup: true}
+	help := doclint.Flag{Name: "help", Shorthand: "h", NoValue: true}
 	inherited := []doclint.Flag{{Name: "format"}, {Name: "no-color", NoValue: true}, help}
 	with := func(own ...doclint.Flag) []doclint.Flag { return append(own, inherited...) }
 	return doclint.CommandRules{
 		Program: "yammm",
 		Commands: []doclint.Command{
-			{Path: "", Flags: with(doclint.Flag{Name: "version", Shorthand: "v", NoValue: true, AfterLookup: true})},
+			{Path: "", Flags: with(doclint.Flag{Name: "version", Shorthand: "v", NoValue: true})},
 			{Path: "check", Flags: with(doclint.Flag{Name: "type"}, doclint.Flag{Name: "from"})},
 			{Path: "fmt", Flags: with(doclint.Flag{Name: "write", Shorthand: "w", NoValue: true}, doclint.Flag{Name: "check", NoValue: true})},
 			{Path: "gen", Flags: with(doclint.Flag{Name: "to"}, doclint.Flag{Name: "output"})},
 			{Path: "snapshot", Flags: with()},
 			{Path: "snapshot save", Flags: with(doclint.Flag{Name: "output", Shorthand: "o"}, doclint.Flag{Name: "into"})},
 		},
-		Exclude: []string{"notes/*.md"},
 	}
 }
 
@@ -87,10 +85,9 @@ func invocationFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	for rel, body := range map[string]string{
-		"README.md":         invocationDoc,
-		"docs/crlf.md":      "```\r\nyammm check --crlf x.yammm\r\n```\r\n",
-		"notes/excluded.md": "`yammm check --excluded`\n",
-		"notes.txt":         "`yammm check --not-markdown`\n",
+		"README.md":    invocationDoc,
+		"docs/crlf.md": "```\r\nyammm check --crlf x.yammm\r\n```\r\n",
+		"notes.txt":    "`yammm check --not-markdown`\n",
 	} {
 		p := filepath.Join(root, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
@@ -427,9 +424,9 @@ const resolveDoc = "`yammm --no-color verify`\n" + // 1: a flag taking no value 
 	"`yammm -é verify`\n" + // 19: a single-dash word of three bytes takes no word
 	"`yammm check --output x`\n" +
 	"`yammm check -=x y`\n" + // 21: "=" first is a shorthand
-	"`yammm --help snapshot save`\n" + // 22: a flag defined after the lookup takes a word
-	"`yammm --version check`\n" +
-	"`yammm check -h`\n" + // 24: and is defined once the command is found
+	"`yammm --help snapshot save`\n" + // 22: a help flag takes no word
+	"`yammm --version check`\n" + // 23: and so does --version, judged on the command it precedes
+	"`yammm check -h`\n" + // 24: every command defines the help flag
 	"`yammm fmt -w= x`\n" + // 25: "=" with nothing after it is the next shorthand
 	"`yammm fmt -w=true x`\n" +
 	"`yammm check --type -weird x`\n" + // 27: a flag taking a value takes the next word, dash and all
@@ -442,10 +439,8 @@ func TestAssertInvocationsExist_ResolvesAsCobraDoes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "resolve.md"), []byte(resolveDoc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	rules := invocationRules()
-	rules.Exclude = nil
 	r := &recorder{}
-	n := doclint.AssertInvocationsExist(r, root, rules)
+	n := doclint.AssertInvocationsExist(r, root, invocationRules())
 	want := []string{
 		"resolve.md:1: `yammm --no-color verify` names \"verify\", which is no command of \"yammm\"",
 		"resolve.md:3: `yammm snapshot x.ys save -o out.ys` passes -o, which \"yammm snapshot\" does not define (defined on yammm snapshot save)",
@@ -459,7 +454,7 @@ func TestAssertInvocationsExist_ResolvesAsCobraDoes(t *testing.T) {
 		"resolve.md:19: `yammm -é verify` passes -é, which \"yammm\" does not define",
 		"resolve.md:20: `yammm check --output x` passes --output, which \"yammm check\" does not define (defined on yammm gen, yammm snapshot save)",
 		"resolve.md:21: `yammm check -=x y` passes -=, which \"yammm check\" does not define",
-		"resolve.md:22: `yammm --help snapshot save` names \"save\", which is no command of \"yammm\"",
+		"resolve.md:23: `yammm --version check` passes --version, which \"yammm check\" does not define (defined on yammm)",
 		"resolve.md:25: `yammm fmt -w= x` passes -=, which \"yammm fmt\" does not define",
 		"resolve.md:29: `yammm check -z --after-unknown-shorthand` passes -z, which \"yammm check\" does not define",
 		"resolve.md:29: `yammm check -z --after-unknown-shorthand` passes --after-unknown-shorthand, which \"yammm check\" does not define",
@@ -480,34 +475,6 @@ func TestAssertInvocationsExist_CountsWhatItRead(t *testing.T) {
 	r := &recorder{}
 	if n := doclint.AssertInvocationsExist(r, invocationFixture(t), invocationRules()); n != 31 {
 		t.Errorf("read %d invocations, want 31", n)
-	}
-}
-
-func TestAssertInvocationsExist_ReportsStaleAndMalformedExclusions(t *testing.T) {
-	t.Parallel()
-	rules := invocationRules()
-	rules.Exclude = append(rules.Exclude, "notes/excluded.md", "notes.txt", "gone/*.md")
-	r := &recorder{}
-	doclint.AssertInvocationsExist(r, invocationFixture(t), rules)
-	for _, stale := range []string{`exclusion "notes.txt" matches no tracked Markdown file`, `exclusion "gone/*.md" matches no tracked Markdown file`} {
-		if !r.reports(stale) {
-			t.Errorf("no report %q; got %v", stale, r.msgs)
-		}
-	}
-	for _, used := range []string{`exclusion "notes/*.md"`, `exclusion "notes/excluded.md"`} {
-		if r.reports(used) {
-			t.Errorf("reported %s as stale: %v", used, r.msgs)
-		}
-	}
-
-	rules = invocationRules()
-	rules.Exclude = append(rules.Exclude, "notes/[")
-	r = &recorder{}
-	if n := doclint.AssertInvocationsExist(r, invocationFixture(t), rules); n != 0 {
-		t.Errorf("read %d invocations under a malformed exclusion; want none", n)
-	}
-	if !r.reports(`exclusion "notes/[" is not a valid pattern`) {
-		t.Errorf("a malformed exclusion was not reported: %v", r.msgs)
 	}
 }
 
@@ -670,22 +637,29 @@ func TestAssertInvocationsExist_MissingRootIsReported(t *testing.T) {
 }
 
 // In a work tree only tracked Markdown is read, and a tracked file the gate
-// cannot read is reported, never skipped.
+// cannot read is reported, never skipped. No directory is exempt, testdata
+// included.
 //
 // Not parallel: it builds its own repository (isolateFromEnclosingRepository).
 func TestAssertInvocationsExist_ReadsTheTrackedMarkdown(t *testing.T) {
 	isolateFromEnclosingRepository(t)
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"tracked.md":   "`yammm check --tracked`\n",
-		"gone.md":      "`yammm check`\n",
-		"untracked.md": "`yammm check --untracked`\n",
+		"tracked.md":          "`yammm check --tracked`\n",
+		"testdata/fixture.md": "`yammm check --fixture`\n",
+		"notes/note.md":       "`yammm check --note`\n",
+		"gone.md":             "`yammm check`\n",
+		"untracked.md":        "`yammm check --untracked`\n",
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, args := range [][]string{{"init", "-q"}, {"add", "tracked.md", "gone.md"}} {
+	for _, args := range [][]string{{"init", "-q"}, {"add", "tracked.md", "testdata/fixture.md", "notes/note.md", "gone.md"}} {
 		cmd := exec.CommandContext(t.Context(), "git", args...)
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -695,11 +669,9 @@ func TestAssertInvocationsExist_ReadsTheTrackedMarkdown(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "gone.md")); err != nil {
 		t.Fatal(err)
 	}
-	rules := invocationRules()
-	rules.Exclude = nil
 	r := &recorder{}
-	n := doclint.AssertInvocationsExist(r, dir, rules)
-	for _, want := range []string{"tracked.md:1: `yammm check --tracked` passes --tracked", "reading gone.md"} {
+	n := doclint.AssertInvocationsExist(r, dir, invocationRules())
+	for _, want := range []string{"tracked.md:1: `yammm check --tracked` passes --tracked", "testdata/fixture.md:1: `yammm check --fixture` passes --fixture", "notes/note.md:1: `yammm check --note` passes --note", "reading gone.md"} {
 		if !r.reports(want) {
 			t.Errorf("no report %q; got %v", want, r.msgs)
 		}
@@ -707,7 +679,7 @@ func TestAssertInvocationsExist_ReadsTheTrackedMarkdown(t *testing.T) {
 	if r.reports("--untracked") {
 		t.Errorf("an untracked file was read: %v", r.msgs)
 	}
-	if n != 1 {
-		t.Errorf("read %d invocations, want 1", n)
+	if n != 3 {
+		t.Errorf("read %d invocations, want 3", n)
 	}
 }

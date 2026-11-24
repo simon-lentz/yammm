@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -17,7 +19,9 @@ func TestDecode_OneMalformationOneDiagnostic(t *testing.T) {
 	s, _ := attWireFixture(t)
 	bad := []byte(`{"types":[],"instances":[],"diagnostics":{"duplicates":[],"unresolved":[]}}`)
 
-	_, res := snapshot.Load(t.Context(), bad, s, snapshot.WithIntegrityCheck(false))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), bad, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	n := 0
 	for range res.Issues() {
 		n++
@@ -47,7 +51,9 @@ func TestDecode_UnresolvedDuplicateRowDoesNotNameRowZero(t *testing.T) {
 		t.Skipf("fixture carries no empty duplicates array: %s", data)
 	}
 
-	_, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	for iss := range res.Issues() {
 		if iss.Code() != diag.E_SNAPSHOT_EDGES_ON_DUPLICATE {
 			continue
@@ -59,6 +65,44 @@ func TestDecode_UnresolvedDuplicateRowDoesNotNameRowZero(t *testing.T) {
 			if d.Key == diag.DetailKeyTypeName {
 				t.Errorf("an unresolved row still carried a type detail: %q", d.Value)
 			}
+		}
+	}
+}
+
+// TestDecode_ARepeatedUnknownRowIsUnknownOnce pins that a repeated types row
+// is judged once: the repeat is malformed, and the identity no schema declares
+// draws one E_SNAPSHOT_UNKNOWN_TYPE, not one per row.
+func TestDecode_ARepeatedUnknownRowIsUnknownOnce(t *testing.T) {
+	t.Parallel()
+	s, data := attWireFixture(t)
+	const row = `{"schema":"attwire","name":"Thing"}`
+	gone := `{"schema":"attwire","name":"Gone"}`
+	edited := strings.Replace(string(data), row, row+","+gone+","+gone, 1)
+	if edited == string(data) {
+		t.Fatalf("fixture carries no %s row: %s", row, data)
+	}
+
+	for _, read := range []struct {
+		name string
+		res  diag.Result
+	}{
+		{"Load", func() diag.Result {
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
+			return res
+		}()},
+		{"Verify", diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+		})},
+	} {
+		counts := map[diag.Code]int{}
+		for iss := range read.res.Issues() {
+			counts[iss.Code()]++
+		}
+		if counts[diag.E_SNAPSHOT_MALFORMED] != 1 || counts[diag.E_SNAPSHOT_UNKNOWN_TYPE] != 1 {
+			t.Errorf("%s: a repeated unknown row drew %v, want one E_SNAPSHOT_MALFORMED and one E_SNAPSHOT_UNKNOWN_TYPE:\n%s",
+				read.name, counts, read.res.String())
 		}
 	}
 }

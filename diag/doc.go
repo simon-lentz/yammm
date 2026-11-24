@@ -2,26 +2,25 @@
 //
 // This package provides the single diagnostic infrastructure used across schema
 // loading, parsing, compilation, and instance validation. It depends only on
-// [github.com/simon-lentz/yammm/location], golang.org/x/text/width and the
-// standard library.
+// [github.com/simon-lentz/yammm/location], internal/termtext,
+// golang.org/x/text/width and the standard library.
 //
 // # Design Principles
 //
 // The diag package follows several key design principles:
 //
 //   - Structured data, string-last presentation: Location is stored as data
-//     ([location.Span], instance path strings), never embedded in message strings.
+//     ([location.Span], instance path strings), and a message can name a path or a line too.
 //   - Immutable results: [Result] stores issues in unexported fields and exposes
 //     them only through iterators ([Result.Issues], [Result.Errors],
 //     [Result.BySeverity]); callers wanting a mutable slice take an explicit copy
 //     via slices.Collect. The [Issue] accessors that return reference types
 //     ([Issue.Related], [Issue.Details]) return defensive copies.
 //   - Stable error codes: [Code] values are stable identifiers that tools can
-//     match on, even when message text changes. The code set is open: adapters
-//     and consumers register codes through [NewCode], and [AllCodes] lists
-//     every code registered.
+//     match on, even when message text changes. The code set is open: the Neo4j
+//     mapping and consumers register codes through [NewCode].
 //   - Deterministic ordering: [Collector.Result] sorts issues by location, a span
-//     in [location.Compare] order, then by code, so output is stable across runs.
+//     in [location.Span.Compare] order, then by code, so output is stable across runs.
 //   - Builder pattern: [IssueBuilder] is the only valid construction path for
 //     [Issue] values, eliminating common construction mistakes.
 //   - Precomputed counts: [Collector] maintains O(1) severity queries via
@@ -29,20 +28,37 @@
 //
 // # Entry Point Pattern
 //
-// A YAMMM operation that produces a value and diagnostics returns (T, [Result]),
-// and one that produces diagnostics alone returns a [Result]; graph.BatchAssembler,
-// whose methods return an error, carries its diagnostics in a [*ContextualError].
-// A Result reads:
+// A YAMMM operation that produces a value returns (T, error), and one that
+// produces none returns an error. A failure is one *[ResultError] holding the
+// Fatal and Error issues the call drew, and the call returns the zero T beside
+// it unless its doc states a partial value. A call that can draw an issue below
+// failure severity takes a WithWarnings option in its package's Option type: the
+// callback receives each such issue on the calling goroutine, before the call
+// returns, in the order found, and with no callback the issues are discarded.
+// snapshot.ScanDir yields each file's failure as its entry's Err.
+// schema.ModuleRootIssue returns a bare [Issue].
 //
-//   - [Result.HasFatal]: an unrecoverable condition — an I/O failure, a
-//     cancellation, an internal fault, or input a reader cannot go past, such
-//     as a schema header that does not parse
-//   - [Result.HasErrors]: semantic failure represented as structured issues
-//   - [Result.OK]: success (may still include warnings/info/hints)
+//	s, err := schema.Load(ctx, path, schema.WithWarnings(func(i diag.Issue) {
+//	    log.Print(i)
+//	}))
+//	if re, ok := errors.AsType[*diag.ResultError](err); ok {
+//	    for issue := range re.Result.Issues() { ... }
+//	}
+//	if errors.Is(err, diag.E_IMPORT_CYCLE) { ... }
 //
-// A serializer that reports issues returns ([]byte, [Result]), as
-// snapshot.Marshal does. An operation that can only succeed or fail returns
-// (T, error).
+// A [Result] reads its list:
+//
+//   - [Result.HasFatal]: any Fatal issue, such as an I/O failure, a cancellation,
+//     an internal fault (E_INTERNAL, which every producer raises at Fatal), input
+//     a reader cannot go past (a schema header that does not parse), an argument
+//     or option value a loader refuses, or a finding that snapshot.WithRevalidation
+//     raises at Fatal
+//   - [Result.SeverityCounts] and [Result.CodeCounts]: every issue seen, stored
+//     or dropped
+//   - [Result.Issues], [Result.Errors] and [Result.BySeverity]: the stored issues
+//
+// An operation that can fail and reports no issues returns an error, alone or
+// after its value, or false as its last value where the caller needs no reason.
 //
 // # Severity Semantics
 //
@@ -53,8 +69,9 @@
 //   - [Error]: Validation failure but collection can continue
 //   - [Warning], [Info], [Hint]: Non-blocking diagnostics
 //
-// The [Severity.IsFailure] method returns true for Fatal and Error severities,
-// matching the [Result.Err] != nil check.
+// A Fatal or Error issue is a failure, the issues a [ResultError] holds. The
+// zero Severity names no severity. Only the zero [Issue] carries it, and a
+// [Collector] refuses that Issue.
 //
 // # Issue Construction
 //
@@ -63,36 +80,45 @@
 //	issue := diag.NewIssue(diag.Error, diag.E_DUPLICATE_TYPE, `type "Person" already defined`).
 //	    WithSpan(span).
 //	    WithHint("rename one of the types").
-//	    WithRelated(location.RelatedInfo{Span: previousSpan, Message: "previous definition here"}).
+//	    WithRelated(diag.RelatedInfo{Span: previousSpan, Message: "previous definition here"}).
 //	    Build()
 //
-// Direct struct literal construction bypasses validity checks and will cause
-// panics when the issue is collected.
+// An Issue's fields are unexported, so diag.Issue{} is the one literal another
+// package can write, and a zero Issue panics when collected.
 //
 // # Collection and Results
 //
 // One [Collector] serves both shapes. For the terminal case — one or more
-// already-built issues to return as a Result — collect into an unlimited one
-// and take its Result immediately:
+// already-built issues to return as a failure — collect into an unlimited one
+// and build its error immediately:
 //
 //	c := diag.NewCollector(0)
 //	c.Collect(issue)
-//	return nil, c.Result()
+//	return nil, c.Err()
 //
 // For incremental or concurrent accumulation during validation, hold the
-// [Collector] across the operation:
+// [Collector] across the operation and build the failure at its end:
 //
 //	collector := diag.NewCollector(100) // limit of 100 issues
 //	collector.Collect(issue)
-//	result := collector.Result()
-//
-//	if err := result.Err(); err != nil {
-//	    // handle semantic failures
+//	if err := collector.Err(); err != nil {
+//	    return fmt.Errorf("validate: %w", err)
 //	}
 //
 // [Collector] is thread-safe and provides O(1) severity queries via
 // [Collector.HasErrors] and [Collector.ErrorCount]; the full query surface
 // lives on [Result]. Both paths produce the same deterministic issue ordering.
+//
+// [Collector.Err] builds a failure as one error value: nil when the collector
+// has counted no Fatal or Error issue, dropped ones included, else a
+// *[ResultError] whose Result holds the failures alone. A caller reads it with errors.AsType[*diag.ResultError] and
+// tests it by code with errors.Is(err, code): a [Code] is the target of
+// errors.Is, and no call returns a Code as an error. A collector given a route
+// by [Collector.RouteWarnings] hands each issue below failure severity to the
+// route as it arrives and stores and counts failures alone. Only the collector
+// a warning reaches last may cap it, so a routed merge panics on a Result that
+// dropped an issue the merge would hand the route: one below failure severity
+// after [Collector.MergeRetag]'s retag, of a code the merge keeps.
 //
 // # Rendering
 //
@@ -100,6 +126,15 @@
 //
 //   - Text output with optional source excerpts and ANSI colors
 //   - JSON output with stable wire format
+//
+// Text output, and [Result.String], write a C0 control other than a tab, DEL,
+// a C1 control or a bidirectional control in any text (a location, a code, a
+// message, a hint, a note or an excerpt) as a visible glyph: a C0 control as
+// its Control Pictures glyph, DEL as U+2421, the rest as U+FFFD. A byte that is
+// not valid UTF-8 shows as U+FFFD. A tab is kept. So schema or document text
+// cannot forge a second diagnostic line or act on the terminal.
+// [Issue.Message] keeps the text's own bytes, and so does the JSON output, but
+// encoding/json writes a byte that is not valid UTF-8 as U+FFFD.
 //
 // Example:
 //
@@ -109,61 +144,40 @@
 //	)
 //	output := renderer.FormatResult(result)
 //
-// # Contextual Diagnostic Wrap
+// # Logging a Failure
 //
-// At an error boundary, tag a [Result] with a human-readable context label
-// via [Result.WithContext], which returns an error directly — nil when the
-// result is OK, a [*ContextualError] otherwise:
+// A *[ResultError] implements [slog.LogValuer], so a failure is handed
+// directly to structured logging, through any fmt.Errorf tag:
 //
-//	if err := result.WithContext("schema_load"); err != nil {
-//	    return fmt.Errorf("pipeline startup: %w", err)
+//	if re, ok := errors.AsType[*diag.ResultError](err); ok {
+//	    logger.Error("schema load failed", slog.Any("diagnostic", re))
 //	}
 //
-// A [*ContextualError] participates in Go error chains — callers doing
-// errors.As(err, &re) where re is *[ResultError] continue to work unchanged
-// because [ContextualError.Unwrap] returns the underlying [*ResultError]. It
-// also implements [slog.LogValuer], so the tagged diagnostic is handed
-// directly to structured logging:
-//
-//	logger.Error("operation failed", slog.Any("diagnostic", err))
-//
-// The resulting group carries: "context" (the tag), an optional "code"
-// (the first error-severity issue's code), "counts" (errors and warnings),
-// "limit_reached" and "dropped" when the result hit its issue limit, and
-// "issues" (a slice of per-issue objects matching [Issue.LogValue]'s shape).
-// See [ContextualError.LogValue] for the full attribute tree.
-//
-// At the receiving end, [AsContextualError] recovers a [*ContextualError]
-// from an arbitrarily-wrapped error. If the chain carries a
-// [*ContextualError], the original tag survives; if it carries only a bare
-// [*ResultError] (from [Result.Err] without a tag), a caller-supplied
-// fallbackTag is synthesized. This unifies error handlers that receive both
-// shapes.
+// The group carries an optional "code" (the first failure's code), "counts"
+// (errors, and warnings, 0 for an error a Collector builds), "limit_reached" and "dropped" when the failure hit its
+// issue limit, and "issues" (a slice of per-issue objects matching
+// [Issue.LogValue]'s shape). See [ResultError.LogValue].
 //
 // # Dependencies
 //
-//	diag  ──imports──▶  location, golang.org/x/text/width
+//	diag  ──imports──▶  location, internal/termtext, golang.org/x/text/width
 //
-// It must not import schema, instance, graph, or adapter.
+// It must not import schema, instance, graph, schema/cypher, or neo4j.
 //
-// # v0.3.0 Diagnostic Code Additions
+// # Snapshot I/O Code
 //
-// v0.3.0 adds three stable diagnostic codes under [CategorySnapshot],
-// raised by the snapshot package's scan and metadata primitives. The W_
-// prefix names a code whose severity is fixed at Warning; a code raised at
-// more than one severity, such as E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM, keeps
-// E_. Severity lives on the Issue, so the prefix is a convention and not a
-// guarantee: W_SNAPSHOT_UNRESOLVED_REQUIRED is raised at whatever severity
+// E_SNAPSHOT_IO is the stable code for an I/O failure reading a snapshot; the
+// table below names its emitters. Severity lives on the Issue, so a code's
+// prefix is a convention and not a guarantee: W_ marks a code raised at Warning, and E_ every other code, one raised at
+// more than one severity such as E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM among
+// them, save W_SNAPSHOT_UNRESOLVED_REQUIRED, raised at whatever severity
 // snapshot.WithRevalidation was given.
 //
 //	Code                              Severity  Emitted by
 //	--------------------------------  --------  -----------------------------------------------------
-//	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (a file that fails to open, on ScanEntry.Result)
-//	                                            snapshot.ScanDirSlice (a directory that fails to read)
-//	                                            snapshot.HeaderOnlyRead (a reader that fails, not a truncation)
-//	E_UPDATE_METADATA_BODY_OFFSET     Fatal     snapshot.UpdateMetadata (body-offset tracker cannot resolve)
-//	W_UPDATE_METADATA_FALLBACK        Warning   snapshot.UpdateMetadataOrReMarshal (fallback to Load+Marshal)
+//	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (a file that fails to open, on ScanEntry.Err)
+//	                                            snapshot.ReadHeader (a reader that fails, not a truncation)
+//	                                            yammm snapshot info --dir (a directory that fails to read)
 //
-// See the Godoc on each individual [Code] for the failure-mode
-// contract, detail-field conventions, and consumer recovery guidance.
+// The Godoc on each code states its failure mode.
 package diag

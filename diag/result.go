@@ -4,9 +4,12 @@ import (
 	"cmp"
 	"fmt"
 	"iter"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/simon-lentz/yammm/internal/termtext"
 )
 
 // SeverityCounts provides counts by severity level without map allocation.
@@ -18,11 +21,7 @@ type SeverityCounts struct {
 	Hints    int
 }
 
-// add increments the counter for sev. It is the single Severity-to-counter
-// mapping in the package — [Collector.collectLocked] (the live collection path)
-// and [newResult] (recompute from a slice) both route through it, so the two
-// cannot disagree on how a severity is counted and a new Severity is handled in
-// exactly one switch.
+// add increments the counter for sev.
 func (c *SeverityCounts) add(sev Severity) {
 	c.addN(sev, 1)
 }
@@ -47,7 +46,7 @@ func (c *SeverityCounts) addN(sev Severity, n int) {
 // sub decrements the counter for sev, the inverse of [SeverityCounts.add]. Only
 // the collector's STORED tally shrinks (an evicted issue leaves storage but is
 // still an issue the collector saw), so this must never be applied to the
-// seen-severity counts that OK/HasErrors/ErrorCount read.
+// seen-severity counts that [Collector.Err] and [Collector.ErrorCount] read.
 func (c *SeverityCounts) sub(sev Severity) {
 	//exhaustive:enforce
 	switch sev {
@@ -99,8 +98,8 @@ func (c *SeverityCounts) addCounts(o SeverityCounts) {
 // Result is an immutable snapshot of diagnostic issues with precomputed counts.
 //
 // Result provides O(1) severity queries and iterator-based access to issues.
-// Results are obtained via [Collector.Result] or the [OK] function for empty
-// success results.
+// A Result is obtained from [Collector.Result], and a failure carries one as
+// [ResultError.Result].
 //
 // Result satisfies [fmt.Stringer]; its [Result.String] method returns "OK" when
 // there are no issues at all, or a summary line followed by one line per
@@ -131,11 +130,8 @@ type Result struct {
 }
 
 // inArrivalOrder returns r's issues as they were collected, for a merge to
-// store. A Result carrying no index keeps the sorted order.
+// store.
 func (r Result) inArrivalOrder() []Issue {
-	if len(r.arrival) != len(r.issues) {
-		return r.issues
-	}
 	order := make([]int, len(r.issues))
 	for i := range order {
 		order[i] = i
@@ -186,6 +182,20 @@ func (c *codeCounts) addCounts(o codeCounts) {
 	}
 }
 
+// failures returns a deep copy of c's Fatal and Error counts alone.
+func (c codeCounts) failures() codeCounts {
+	var out codeCounts
+	for sev, m := range c {
+		if !sev.isFailure() {
+			continue
+		}
+		for code, n := range m {
+			out.addN(sev, code, n)
+		}
+	}
+	return out
+}
+
 // clone deep-copies c, so a Result never shares a map with its Collector.
 func (c codeCounts) clone() codeCounts {
 	if c == nil {
@@ -198,74 +208,28 @@ func (c codeCounts) clone() codeCounts {
 	return out
 }
 
-// newResult creates a Result, computing the severity counts from issues.
-//
-// The issues slice is owned by the Result and must not be modified after
-// this call. Callers must pass a fresh slice (not shared with other code).
-//
-// Use [newResultWithCounts] directly when the counts must reflect issues that
-// are not in the slice (e.g. a [Collector] carrying issues dropped past its
-// limit, which must still count toward OK/HasErrors).
-func newResult(issues []Issue, limitReached bool, droppedCount int) Result {
-	var counts SeverityCounts
-	var codes codeCounts
-	for _, issue := range issues {
-		counts.add(issue.Severity())
-		codes.add(issue.Severity(), issue.Code())
-	}
-	return newResultWithCounts(issues, limitReached, droppedCount, counts, codes)
-}
-
-// newResultWithCounts builds a Result from explicit precomputed severity counts.
-// It is the single point that constructs the Result struct; newResultWithArrival
-// sets the arrival order on the struct it returns. The issues slice is owned by
-// the Result (see [newResult]'s contract).
-func newResultWithCounts(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts) Result {
+// newResult is the one constructor of a non-zero Result. The counts are the
+// collector's, so they include issues dropped past its limit; arrival is the
+// collection order that sorting issues discarded. The Result owns issues, so
+// the caller passes a slice no other code holds.
+func newResult(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts, arrival []uint64) Result {
 	return Result{
 		issues:       issues,
 		limitReached: limitReached,
 		droppedCount: droppedCount,
 		counts:       counts,
 		codeCounts:   codes,
+		arrival:      arrival,
 	}
 }
 
-// newResultWithArrival is [newResultWithCounts] plus the arrival order sorting
-// discarded, which only a [Collector] knows.
-func newResultWithArrival(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts, arrival []uint64) Result {
-	r := newResultWithCounts(issues, limitReached, droppedCount, counts, codes)
-	r.arrival = arrival
-	return r
-}
-
-// OK returns a Result representing success (no issues).
-//
-// This is the canonical way to construct a success Result in return statements.
-// The returned Result has:
-//   - OK() == true
-//   - HasErrors() == false
-//   - Len() == 0
-//   - LimitReached() == false
-func OK() Result {
-	return newResult(nil, false, 0)
-}
-
-// OK reports whether no Fatal or Error issues are present.
-func (r Result) OK() bool {
-	return r.counts.Fatal == 0 && r.counts.Errors == 0
-}
-
-// HasFatal reports whether any Fatal issue is present.
+// HasFatal reports whether the result saw a Fatal issue, stored or dropped.
 func (r Result) HasFatal() bool {
 	return r.counts.Fatal > 0
 }
 
-// HasErrors reports whether any Fatal or Error issue is present.
-func (r Result) HasErrors() bool {
-	return r.counts.Fatal > 0 || r.counts.Errors > 0
-}
-
-// HasWarnings reports whether any Warning issue is present.
+// HasWarnings reports whether the result saw a Warning issue, stored or
+// dropped.
 func (r Result) HasWarnings() bool {
 	return r.counts.Warnings > 0
 }
@@ -274,7 +238,7 @@ func (r Result) HasWarnings() bool {
 // severity. Like [Result.Issues] and [Result.Len], it reflects the issues the
 // result can enumerate: when the issue limit was reached ([Result.LimitReached]),
 // a code present only among the dropped issues reads false here. Use the
-// seen-based queries — [Result.CodeCounts] for a code, [Result.HasErrors] and
+// seen-based queries — [Result.CodeCounts] for a code, [Result.HasFatal] and
 // [Result.SeverityCounts] for a severity — for gating that must stay truthful
 // under truncation, and [Result.DroppedCount] to detect that the enumerable
 // set is incomplete.
@@ -339,20 +303,14 @@ func (r Result) CodeCounts(sev Severity) map[Code]int {
 // The yielded issues must not be mutated. Collect a mutable copy with
 // slices.Collect(r.Issues()) if needed.
 func (r Result) Issues() iter.Seq[Issue] {
-	return func(yield func(Issue) bool) {
-		for _, issue := range r.issues {
-			if !yield(issue) {
-				return
-			}
-		}
-	}
+	return slices.Values(r.issues)
 }
 
 // Errors returns an iterator over Fatal and Error issues.
 func (r Result) Errors() iter.Seq[Issue] {
 	return func(yield func(Issue) bool) {
 		for _, issue := range r.issues {
-			if issue.Severity().IsFailure() {
+			if issue.Severity().isFailure() {
 				if !yield(issue) {
 					return
 				}
@@ -374,19 +332,10 @@ func (r Result) BySeverity(severity Severity) iter.Seq[Issue] {
 	}
 }
 
-// ResultError is an error wrapping a failed [Result].
-//
-// ResultError is returned by [Result.Err] when the result contains Fatal or
-// Error issues. Use [errors.As] to extract the underlying Result for structured
-// access to diagnostic issues:
-//
-//	var re *diag.ResultError
-//	if errors.As(err, &re) {
-//	    for issue := range re.Result.Issues() { ... }
-//	}
-//
-// This follows the pattern of [context.Context.Err] and [sql.Rows.Err]:
-// nil means success, non-nil means failure with structured details available.
+// ResultError is a failure: the Fatal and Error issues a call drew, as one
+// error value. [Collector.Err] builds it, and its Result holds failures alone.
+// A caller reads it with errors.AsType[*diag.ResultError](err) and tests it by
+// code with errors.Is(err, code).
 type ResultError struct {
 	// Result contains the diagnostic issues that caused the failure.
 	Result Result
@@ -400,24 +349,77 @@ func (e *ResultError) Error() string {
 	return e.Result.String()
 }
 
-// Err returns nil if the result is OK, or a *[ResultError] if it contains
-// Fatal or Error issues.
-//
-// This provides idiomatic error conversion for use in error-returning functions:
-//
-//	s, result := schema.Load(ctx, path)
-//	if err := result.Err(); err != nil {
-//	    return nil, fmt.Errorf("load schema: %w", err)
-//	}
-//	return s, nil
-//
-// The returned error supports [errors.As] with *[ResultError] for access to
-// the full [Result].
-func (r Result) Err() error {
-	if r.OK() {
-		return nil
+// Is reports whether target is a [Code] of a Fatal or Error issue the failure
+// saw, stored or dropped, so errors.Is(err, code) reads a failure by code. A
+// Result built by hand reads by its failures too, never by a warning it holds.
+func (e *ResultError) Is(target error) bool {
+	code, ok := target.(Code)
+	if !ok || code.IsZero() {
+		return false
 	}
-	return &ResultError{Result: r}
+	for sev, byCode := range e.Result.codeCounts {
+		if sev.isFailure() && byCode[code] > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// LogValue implements [slog.LogValuer]. The group holds "code", the first
+// failure's code when it has one; "counts", a group of "errors" (Fatal and
+// Error) and "warnings", which is 0 for an error a [Collector] builds, since
+// that holds failures alone; "limit_reached" and "dropped" when the Result was
+// truncated; and "issues", one map per issue in [Issue.LogValue]'s shape. A
+// release that changes the shape names the change, and a nil receiver returns
+// an empty group.
+func (e *ResultError) LogValue() slog.Value {
+	if e == nil {
+		return slog.GroupValue()
+	}
+	return slog.GroupValue(resultLogAttrs(e.Result)...)
+}
+
+// resultLogAttrs returns the attributes of r's log record, as
+// [ResultError.LogValue] documents them. The issues are maps, not slog values,
+// because a handler does not resolve a [slog.LogValuer] inside a slice and
+// [slog.JSONHandler] then writes each map as a JSON object.
+func resultLogAttrs(r Result) []slog.Attr {
+	attrs := make([]slog.Attr, 0, 5)
+	if code, ok := primaryErrorCode(r); ok {
+		attrs = append(attrs, slog.String("code", code))
+	}
+
+	counts := r.SeverityCounts()
+	attrs = append(attrs, slog.Group(
+		"counts",
+		slog.Int("errors", counts.Fatal+counts.Errors),
+		slog.Int("warnings", counts.Warnings),
+	))
+
+	if r.LimitReached() {
+		attrs = append(attrs,
+			slog.Bool("limit_reached", true),
+			slog.Int("dropped", r.DroppedCount()),
+		)
+	}
+
+	issues := slices.Collect(r.Issues())
+	issueMaps := make([]map[string]any, len(issues))
+	for i, iss := range issues {
+		issueMaps[i] = issueLogMap(iss)
+	}
+	return append(attrs, slog.Any("issues", issueMaps))
+}
+
+// primaryErrorCode returns the first failure's code string, or ("", false) when
+// r holds no failure with a non-zero code.
+func primaryErrorCode(r Result) (string, bool) {
+	for issue := range r.Errors() {
+		if !issue.Code().IsZero() {
+			return issue.Code().String(), true
+		}
+	}
+	return "", false
 }
 
 // String returns a minimal multi-line representation suitable for quick debugging.
@@ -425,8 +427,9 @@ func (r Result) Err() error {
 // String returns "OK" only when the result holds no issue at all. Otherwise it
 // returns a summary line — "OK" or the error count, then the warning, info and
 // hint counts where non-zero, then the truncation note — followed by one line
-// per retained issue at every severity (code and message, no excerpts). For
-// formatted output with excerpts, use [Renderer.FormatResult].
+// per retained issue at every severity (code and message, no excerpts). A control
+// character other than a tab in a code or message is written as a visible glyph, as
+// [Renderer.FormatResult] writes it, so each issue keeps its one line.
 func (r Result) String() string {
 	if len(r.issues) == 0 && !r.limitReached {
 		return "OK"
@@ -436,10 +439,10 @@ func (r Result) String() string {
 	counts := r.SeverityCounts()
 
 	// Summary line
-	if r.OK() {
+	if failures := counts.Fatal + counts.Errors; failures == 0 {
 		sb.WriteString("OK")
 	} else {
-		fmt.Fprintf(&sb, "%d error(s)", counts.Fatal+counts.Errors)
+		fmt.Fprintf(&sb, "%d error(s)", failures)
 	}
 	if counts.Warnings > 0 {
 		fmt.Fprintf(&sb, ", %d warning(s)", counts.Warnings)
@@ -454,7 +457,7 @@ func (r Result) String() string {
 		fmt.Fprintf(&sb, " [limit reached, %d dropped]", r.droppedCount)
 	}
 	for _, issue := range r.issues {
-		fmt.Fprintf(&sb, "\n  %s: %s", issue.Code(), issue.Message())
+		fmt.Fprintf(&sb, "\n  %s: %s", termtext.String(issue.Code().String()), termtext.String(issue.Message()))
 	}
 
 	return sb.String()

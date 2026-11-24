@@ -1,12 +1,16 @@
 package schema_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -48,15 +52,17 @@ func wantCounts(t *testing.T, res diag.Result, want map[diag.Code]int) {
 }
 
 // loadSourcesErr loads in-memory sources with main.yammm as the entry and
-// requires failure: a nil schema with error diagnostics. Returns the result
+// requires failure: a zero schema with error diagnostics. Returns the result
 // for code-count assertions.
 func loadSourcesErr(t *testing.T, sources map[string][]byte) diag.Result {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", t.TempDir())
-	if s != nil {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+	})
+	if !s.IsZero() {
 		t.Fatalf("load should fail, got schema %q", s.Name())
 	}
-	if !res.HasErrors() {
+	if diagtest.Err(res) == nil {
 		t.Fatal("load should produce error diagnostics")
 	}
 	return res
@@ -72,11 +78,13 @@ func loadSourcesErr(t *testing.T, sources map[string][]byte) diag.Result {
 // boundary, not an oversight.
 func loadStringErr(t *testing.T, source string) diag.Result {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), source, "main.yammm")
-	if s != nil {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), source, "main.yammm", schema.WithWarnings(warn))
+	})
+	if !s.IsZero() {
 		t.Fatalf("load should fail, got schema %q", s.Name())
 	}
-	if !res.HasErrors() {
+	if diagtest.Err(res) == nil {
 		t.Fatal("load should produce error diagnostics")
 	}
 	return res
@@ -548,31 +556,39 @@ func TestLoad_IssueLimit_TruncationObservable(t *testing.T) {
 	}
 }
 
-// TestLoad_DroppedErrorStillFailsLoad pins that the all-or-nothing contract
-// survives truncation. The per-schema error gates compare Collector.ErrorCount
-// deltas; if a real error is dropped at the cap without moving that count, the
-// gate passes and a broken schema is sealed and returned non-nil with
-// OK()==true — silently violating "any error ⇒ nil Schema". Here a single
-// Integer[-_, N] property emits a parse Warning that fills a limit of 1, so the
-// concrete type's E_NO_PRIMARY_KEY is dropped: it must still nil the schema.
-func TestLoad_DroppedErrorStillFailsLoad(t *testing.T) {
+// TestLoad_WarningsTakeNoFailureSlot pins that a flood of warnings cannot crowd
+// a failure out of the load's error: a hundred Integer[-_, N] properties each
+// draw a parse Warning, and the concrete type's one E_NO_PRIMARY_KEY still
+// fails the load, held in an error that dropped nothing. Every warning reaches
+// the callback, past the hundred failures the error holds.
+func TestLoad_WarningsTakeNoFailureSlot(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "main"
-type Orphan {
-	n Integer[-_, 5]
-}`, "main.yammm", schema.WithIssueLimit(1))
+	var src strings.Builder
+	src.WriteString("schema \"main\"\ntype Orphan {\n")
+	for i := range 101 {
+		fmt.Fprintf(&src, "\tn%d Integer[-_, 5]\n", i)
+	}
+	src.WriteString("}")
+	warnings := 0
+	s, err := schema.LoadString(t.Context(), src.String(), "main.yammm",
+		schema.WithWarnings(func(issue diag.Issue) {
+			if issue.Code() == diag.E_INVALID_CONSTRAINT {
+				warnings++
+			}
+		}))
 
-	if s != nil {
-		t.Fatalf("a schema whose only error was dropped at the cap must still fail load, got schema %q", s.Name())
+	if !s.IsZero() {
+		t.Fatalf("a schema with an error must fail its load, got schema %q", s.Name())
 	}
-	if res.OK() {
-		t.Error("result.OK() = true; want false — the dropped E_NO_PRIMARY_KEY is still an error")
+	re, ok := errors.AsType[*diag.ResultError](err)
+	if !ok {
+		t.Fatalf("err = %v; want a *diag.ResultError", err)
 	}
-	if !res.HasErrors() {
-		t.Error("result.HasErrors() = false; want true")
+	if !errors.Is(err, diag.E_NO_PRIMARY_KEY) || re.Result.Len() != 1 || re.Result.LimitReached() {
+		t.Errorf("the error = %v; want the one E_NO_PRIMARY_KEY, nothing dropped", re.Result)
 	}
-	if !res.LimitReached() {
-		t.Error("result.LimitReached() = false; want true (the warning filled the 1-issue cap)")
+	if warnings != 101 {
+		t.Errorf("the callback received %d E_INVALID_CONSTRAINT warnings; want 101", warnings)
 	}
 }
 
@@ -634,7 +650,7 @@ type TypeB { id String primary }`),
 // TestLoad_InheritedRejectedPrimaryKey_ReportedOnce pins that a parent's
 // type-rejected primary key (Integer is not a valid key type) is reported
 // exactly once — at the declaring parent — not re-reported at every descendant
-// whose merged property set carries the same inherited *Property. The "each
+// whose merged property set carries the same inherited Property. The "each
 // independent error exactly once" contract must hold across inheritance, not
 // just for the E_NO_PRIMARY_KEY flavor that hasDeclaredPrimary suppresses.
 func TestLoad_InheritedRejectedPrimaryKey_ReportedOnce(t *testing.T) {
@@ -684,7 +700,7 @@ type A {
 }
 type B { id String primary }
 type NoKey { name String }`,
-			want: map[diag.Code]int{diag.E_LIST_ON_EDGE: 1, diag.E_NO_PRIMARY_KEY: 1},
+			want: map[diag.Code]int{diag.E_INVALID_EDGE_PROPERTY_TYPE: 1, diag.E_NO_PRIMARY_KEY: 1},
 		},
 		"rejected primary type and missing primary key": {
 			// The rejected primary draws exactly one diagnostic; the
@@ -722,28 +738,22 @@ type V {
 	}
 }
 
-// TestBuild_AliasCycleAndMissingPrimaryKey_BothReported pins cross-phase
-// accumulation through the alias-resolution phase, on the Builder path: a
-// datatype cycle through List elements must not suppress an unrelated type's
-// missing-primary-key finding from a later phase. The cycle is reported once
-// at each datatype on it.
-func TestBuild_AliasCycleAndMissingPrimaryKey_BothReported(t *testing.T) {
+// TestLoad_AliasCycleAndMissingPrimaryKey_BothReported pins cross-phase
+// accumulation through the alias-resolution phase: a datatype cycle through List
+// elements must not suppress an unrelated type's missing-primary-key finding
+// from a later phase. The cycle is reported once at each datatype on it.
+func TestLoad_AliasCycleAndMissingPrimaryKey_BothReported(t *testing.T) {
 	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("main").
-		AddDataType("A", schema.NewListConstraint(schema.NewAliasConstraint("B", nil))).
-		AddDataType("B", schema.NewListConstraint(schema.NewAliasConstraint("A", nil))).
-		AddType("NoKey").
-		WithProperty("name", schema.NewStringConstraint()).
-		Done().
-		Build()
-	if s != nil {
-		t.Fatalf("build should fail, got schema %q", s.Name())
-	}
-	if !res.HasErrors() {
-		t.Fatal("build should produce error diagnostics")
-	}
+	res := loadStringErr(t, `schema "main"
 
+type A = List<B>
+
+type B = List<A>
+
+type NoKey {
+	name String required
+}
+`)
 	wantCounts(t, res, map[diag.Code]int{
 		diag.E_INVALID_CONSTRAINT: 2,
 		diag.E_NO_PRIMARY_KEY:     1,
@@ -864,7 +874,7 @@ type Thing {
 // in a resolved import loads cleanly.
 func TestLoad_ImportedDatatype_Resolves(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"main.yammm": []byte(`schema "main"
 import "./other" as other
 type Thing {
@@ -873,23 +883,13 @@ type Thing {
 }`),
 		"other.yammm": []byte(`schema "other"
 type Code = String[2,2]`),
-	}, "main.yammm", t.TempDir())
-	if res.HasErrors() {
-		t.Fatalf("a resolvable imported datatype must load cleanly: %v", res)
+	}, "main.yammm", schema.WithModuleRoot(t.TempDir()))
+	if err != nil {
+		t.Fatalf("a resolvable imported datatype must load cleanly: %v", err)
 	}
-	if s == nil {
-		t.Fatal("expected a non-nil schema")
+	if s.IsZero() {
+		t.Fatal("expected a non-zero schema")
 	}
-}
-
-// requireBuildFailed asserts a Builder produced no schema — the all-or-nothing
-// contract (any error ⇒ nil schema) on the programmatic front door.
-func requireBuildFailed(t *testing.T, s *schema.Schema) {
-	t.Helper()
-	if s == nil {
-		return
-	}
-	t.Fatalf("build should fail, got schema %q", s.Name())
 }
 
 // TestLoad_RepeatedCollidingAlias_ReportedAsDuplicate pins that a repeated
@@ -917,82 +917,70 @@ type Thing { id String primary }`),
 	})
 }
 
-// TestBuild_RegistryQualifiedExtends_UndeclaredImport_Errors pins that a Builder
-// schema with a registry but zero imports rejects a qualified extends naming an
-// undeclared import: with a registry present, a nil resolution map can only mean
-// a zero-import schema, so the qualifier names no import and can never resolve —
-// a genuine E_UNKNOWN_TYPE that nils the schema, not a silent deferral. The
-// regression dropped the supertype and loaded clean.
-func TestBuild_RegistryQualifiedExtends_UndeclaredImport_Errors(t *testing.T) {
+// TestLoad_QualifiedExtendsNamingNoImport_Errors pins that a schema with zero
+// imports rejects a qualified extends: the qualifier names no import and can
+// never resolve, so it is a genuine E_UNKNOWN_TYPE that nils the schema, not a
+// silent deferral.
+func TestLoad_QualifiedExtendsNamingNoImport_Errors(t *testing.T) {
 	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("d").
-		WithRegistry(schema.NewRegistry()).
-		AddType("Person").
-		WithPrimaryKey("name", schema.NewStringConstraint()).
-		Extends(schema.NewTypeRef("bogus", "Base", location.Span{})).
-		Done().
-		Build()
-	requireBuildFailed(t, s)
+	res := loadStringErr(t, `schema "d"
+
+type Person extends bogus.Base {
+	name String primary
+}
+`)
 	wantCounts(t, res, map[diag.Code]int{
 		diag.E_UNKNOWN_TYPE: 1,
 	})
 }
 
-// TestBuild_RegistryQualifiedRelation_UndeclaredImport_Errors pins the same
-// regression on a relation target: a qualified association target naming an
-// undeclared import is reported, not silently dropped.
-func TestBuild_RegistryQualifiedRelation_UndeclaredImport_Errors(t *testing.T) {
+// TestLoad_QualifiedRelationNamingNoImport_Errors pins the same rule on a
+// relation target: a qualified association target naming an undeclared import is
+// reported, not silently dropped.
+func TestLoad_QualifiedRelationNamingNoImport_Errors(t *testing.T) {
 	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("d").
-		WithRegistry(schema.NewRegistry()).
-		AddType("Person").
-		WithPrimaryKey("name", schema.NewStringConstraint()).
-		WithRelation("EMPLOYER", schema.NewTypeRef("bogus", "Organization", location.Span{}), true, false).
-		Done().
-		Build()
-	requireBuildFailed(t, s)
+	res := loadStringErr(t, `schema "d"
+
+type Person {
+	name String primary
+	--> EMPLOYER (_:one) bogus.Organization
+}
+`)
 	wantCounts(t, res, map[diag.Code]int{
 		diag.E_UNKNOWN_TYPE: 1,
 	})
 }
 
-// TestBuild_RegistryQualifiedPropertyDatatype_UndeclaredImport_Errors pins the
-// same regression on a property's datatype reference (the resolveReference
-// path, distinct from the extends/relation resolveTypeRef path).
-func TestBuild_RegistryQualifiedPropertyDatatype_UndeclaredImport_Errors(t *testing.T) {
+// TestLoad_QualifiedPropertyDatatypeNamingNoImport_Errors pins the same rule on a
+// property's datatype reference (the resolveReference path, distinct from the
+// extends and relation resolveTypeRef path).
+func TestLoad_QualifiedPropertyDatatypeNamingNoImport_Errors(t *testing.T) {
 	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("d").
-		WithRegistry(schema.NewRegistry()).
-		AddType("Thing").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("code", schema.NewAliasConstraint("bogus.Code", nil)).
-		Done().
-		Build()
-	requireBuildFailed(t, s)
+	res := loadStringErr(t, `schema "d"
+
+type Thing {
+	id String primary
+	code bogus.Code required
+}
+`)
 	wantCounts(t, res, map[diag.Code]int{
 		diag.E_UNKNOWN_TYPE: 1,
 	})
 }
 
-// TestBuild_RegistryQualifiedPrimaryKey_UndeclaredImport_SingleError pins that a
-// primary key typed through an undeclared import reports exactly one diagnostic:
-// E_UNKNOWN_TYPE from alias resolution. The primary-key type check defers to
-// that report (no E_INVALID_PRIMARY_KEY_TYPE), and absence-blame does not fire
-// (the property IS a declared primary). Without the coordinated primaryKeyType
-// Deferred change, the resolveReference report would be doubled.
-func TestBuild_RegistryQualifiedPrimaryKey_UndeclaredImport_SingleError(t *testing.T) {
+// TestLoad_QualifiedPrimaryKeyNamingNoImport_SingleError pins that a primary key
+// typed through an undeclared import reports exactly one diagnostic:
+// E_UNKNOWN_TYPE from alias resolution. The primary-key type check defers to that
+// report (no E_INVALID_PRIMARY_KEY_TYPE), and absence-blame does not fire (the
+// property IS a declared primary).
+func TestLoad_QualifiedPrimaryKeyNamingNoImport_SingleError(t *testing.T) {
 	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("d").
-		WithRegistry(schema.NewRegistry()).
-		AddType("Thing").
-		WithPrimaryKey("id", schema.NewAliasConstraint("bogus.IdType", nil)).
-		Done().
-		Build()
-	requireBuildFailed(t, s)
+	res := loadStringErr(t, `schema "d"
+
+type Thing {
+	id bogus.IdType primary
+}
+`)
 	wantCounts(t, res, map[diag.Code]int{
 		diag.E_UNKNOWN_TYPE:             1,
 		diag.E_INVALID_PRIMARY_KEY_TYPE: 0,
@@ -1000,62 +988,22 @@ func TestBuild_RegistryQualifiedPrimaryKey_UndeclaredImport_SingleError(t *testi
 	})
 }
 
-// TestBuild_NoRegistryQualifiedExtends_Errors pins that a registry-less Builder
-// rejects a qualified extends the same way the registry-present controls above
-// do: without a registry no link step ever comes, so the dangling supertype can
-// never resolve — deferring it would seal a schema that silently dropped its
-// inheritance.
-func TestBuild_NoRegistryQualifiedExtends_Errors(t *testing.T) {
+// TestLoad_DatatypeAliasChainToUnknown_ReportedOnce pins that a datatype whose
+// List element names an unknown name blames that name exactly once, however many
+// properties reference the datatype: the datatype resolves once, and a reference
+// to one that failed adds no report.
+func TestLoad_DatatypeAliasChainToUnknown_ReportedOnce(t *testing.T) {
 	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("d").
-		AddType("Person").
-		WithPrimaryKey("name", schema.NewStringConstraint()).
-		Extends(schema.NewTypeRef("bogus", "Base", location.Span{})).
-		Done().
-		Build()
-	requireBuildFailed(t, s)
-	wantCounts(t, res, map[diag.Code]int{
-		diag.E_UNKNOWN_TYPE: 1,
-	})
-}
+	res := loadStringErr(t, `schema "main"
 
-// TestBuild_NoRegistryQualifiedPrimaryKey_Errors pins the same rejection on the
-// resolveReference path: a primary key typed by a dangling qualified datatype
-// draws exactly one E_UNKNOWN_TYPE, with the primary-key type check deferring
-// to that report rather than stacking E_INVALID_PRIMARY_KEY_TYPE.
-func TestBuild_NoRegistryQualifiedPrimaryKey_Errors(t *testing.T) {
-	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("d").
-		AddType("Thing").
-		WithPrimaryKey("id", schema.NewAliasConstraint("bogus.IdType", nil)).
-		Done().
-		Build()
-	requireBuildFailed(t, s)
-	wantCounts(t, res, map[diag.Code]int{
-		diag.E_UNKNOWN_TYPE:             1,
-		diag.E_INVALID_PRIMARY_KEY_TYPE: 0,
-		diag.E_NO_PRIMARY_KEY:           0,
-	})
-}
+type X = List<Mystery>
 
-// TestBuild_DatatypeAliasChainToUnknown_ReportedOnce pins that a datatype whose
-// List element names an unknown name blames that name exactly once, however
-// many properties reference the datatype: the datatype resolves once, and a
-// reference to one that failed adds no report.
-func TestBuild_DatatypeAliasChainToUnknown_ReportedOnce(t *testing.T) {
-	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("main").
-		AddDataType("X", schema.NewListConstraint(schema.NewAliasConstraint("Mystery", nil))).
-		AddType("Thing").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("a", schema.NewAliasConstraint("X", nil)).
-		WithProperty("b", schema.NewAliasConstraint("X", nil)).
-		Done().
-		Build()
-	requireBuildFailed(t, s)
+type Thing {
+	id String primary
+	a X required
+	b X required
+}
+`)
 	wantCounts(t, res, map[diag.Code]int{
 		diag.E_UNKNOWN_TYPE: 1,
 	})
@@ -1107,17 +1055,157 @@ type Code = String[2,2]`),
 // and bottoms out in a key-eligible builtin loads cleanly.
 func TestLoad_PrimaryKeyTypedByResolvedImportedDatatype_Resolves(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"main.yammm": []byte(`schema "main"
 import "./other" as other
 type Thing { id other.Code primary }`),
 		"other.yammm": []byte(`schema "other"
 type Code = String[2,2]`),
-	}, "main.yammm", t.TempDir())
-	if res.HasErrors() {
-		t.Fatalf("a primary key typed by a resolved imported datatype must load cleanly: %v", res)
+	}, "main.yammm", schema.WithModuleRoot(t.TempDir()))
+	if err != nil {
+		t.Fatalf("a primary key typed by a resolved imported datatype must load cleanly: %v", err)
 	}
-	if s == nil {
-		t.Fatal("expected a non-nil schema")
+	if s.IsZero() {
+		t.Fatal("expected a non-zero schema")
+	}
+}
+
+// TestLoad_TypeCollidingAlias_ReferencesDefer pins that a reference through an
+// alias colliding with a local type name defers to the collision, in each
+// position a reference stands, though the import resolved and lacks the member.
+func TestLoad_TypeCollidingAlias_ReferencesDefer(t *testing.T) {
+	t.Parallel()
+	rows := map[string]string{
+		"extends":  "type T extends T.Nope { id String primary }",
+		"property": "type T { id String primary\n x T.Nope\n}",
+		"relation": "type T { id String primary\n --> R (one) T.Nope\n}",
+	}
+	for name, body := range rows {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			res := loadSourcesErr(t, map[string][]byte{
+				"main.yammm": []byte("schema \"m\"\nimport \"./a\" as T\n" + body + "\n"),
+				"a.yammm":    []byte("schema \"a\"\ntype A { id String primary }\n"),
+			})
+			wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_ALIAS_COLLISION: 1})
+		})
+	}
+}
+
+// TestLoad_UnnamedRefusedImport_LeavesLocalReferencesJudged pins that a refused
+// import with no alias binds the empty alias without deferring an unqualified
+// reference: both unknown local names are still reported.
+func TestLoad_UnnamedRefusedImport_LeavesLocalReferencesJudged(t *testing.T) {
+	t.Parallel()
+	res := loadSourcesErr(t, map[string][]byte{
+		"main.yammm": []byte("schema \"m\"\nimport \"\xff\"\ntype T extends Nope { id String primary\n --> R (one) Nope2\n}\n"),
+	})
+	wantCounts(t, res, map[diag.Code]int{diag.E_SYNTAX: 1, diag.E_UNKNOWN_TYPE: 2})
+}
+
+// TestLoad_InheritCycle_ThroughARepeatedSupertypeIsOneIssue pins that naming one
+// supertype twice is one edge of the cycle.
+func TestLoad_InheritCycle_ThroughARepeatedSupertypeIsOneIssue(t *testing.T) {
+	t.Parallel()
+	for _, source := range []string{
+		"schema \"m\"\ntype A extends A, A { id String primary }\n",
+		"schema \"m\"\ntype A extends B { id String primary }\ntype B extends A, A { id String primary }\n",
+		"schema \"m\"\ntype B extends A { id String primary }\ntype A extends B, B { id String primary }\n",
+	} {
+		wantCounts(t, loadStringErr(t, source), map[diag.Code]int{diag.E_INHERIT_CYCLE: 1})
+	}
+}
+
+// TestLoad_RepeatedSupertypeIsOneEdge pins that a type declares one reference per
+// supertype named, so every reader of the clause sees one edge.
+func TestLoad_RepeatedSupertypeIsOneEdge(t *testing.T) {
+	t.Parallel()
+	res := loadStringErr(t, "schema \"m\"\ntype A extends Nope, Nope { id String primary }\n")
+	wantCounts(t, res, map[diag.Code]int{diag.E_UNKNOWN_TYPE: 1})
+
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype A extends B, B { }\n", "m.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
+		t.Fatalf("load: %s", res)
+	}
+	a, ok := s.Type("A")
+	if !ok {
+		t.Fatal("no type A")
+	}
+	if n := len(slices.Collect(a.Inherits())); n != 1 {
+		t.Errorf("Inherits holds %d references, want 1", n)
+	}
+}
+
+// TestLoad_InheritCycle_ReportedFromTheFirstDeclaration pins that a cycle's
+// message and span do not depend on map order: the walk starts at the type
+// declared first.
+func TestLoad_InheritCycle_ReportedFromTheFirstDeclaration(t *testing.T) {
+	t.Parallel()
+	const source = "schema \"m\"\ntype W extends U { id String primary }\ntype U extends W { id String primary }\n"
+	for range 64 {
+		res := loadStringErr(t, source)
+		wantCounts(t, res, map[diag.Code]int{diag.E_INHERIT_CYCLE: 1})
+		for issue := range res.Issues() {
+			if want := "inheritance cycle detected: W -> U -> W"; issue.Message() != want {
+				t.Fatalf("message = %q, want %q", issue.Message(), want)
+			}
+			if line := issue.Span().Start.Line; line != 2 {
+				t.Fatalf("span starts at line %d, want W's declaration on line 2", line)
+			}
+		}
+	}
+}
+
+// TestLoad_ACancellationJoinsTheFailuresPastTheLimit pins that a load cancelled
+// after it collected failures returns at most 100 of them, every one counted,
+// and one Fatal E_CONTEXT_CANCELLED that joins them past that number.
+func TestLoad_ACancellationJoinsTheFailuresPastTheLimit(t *testing.T) {
+	t.Parallel()
+	var a strings.Builder
+	a.WriteString("schema \"a\"\n")
+	for i := range 150 {
+		fmt.Fprintf(&a, "type NoKey%03d { name String }\n", i)
+	}
+	sources := map[string][]byte{
+		"main.yammm": []byte("schema \"main\"\nimport \"./a\" as a\nimport \"./b\" as b\ntype T { id String primary }\n"),
+		"a.yammm":    []byte(a.String()),
+		"b.yammm":    []byte("schema \"b\"\ntype U { id String primary }\n"),
+	}
+	load := func(ctx context.Context) error {
+		_, err := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", schema.WithSyntheticRoot("embedded://p"))
+		return err
+	}
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { _ = load(ctx) })
+	afterFailures, pastLimit := 0, 0
+	for n := range total {
+		err := load(yammmtest.NewCheckContext(t.Context(), n+1))
+		if !errors.Is(err, diag.E_CONTEXT_CANCELLED) {
+			t.Fatalf("check %d: %v, want a cancellation", n+1, err)
+		}
+		res := diagtest.Failures(t, err)
+		counts := res.SeverityCounts()
+		if counts.Errors == 0 {
+			continue
+		}
+		afterFailures++
+		kept := min(counts.Errors, 100)
+		if counts.Errors > 100 {
+			pastLimit++
+		}
+		if counts.Fatal != 1 || res.Len() != kept+1 || res.DroppedCount() != counts.Errors-kept {
+			t.Errorf("check %d: %d stored, %d dropped, counts %+v; want %d stored, the Fatal past %d Errors, and %d dropped", n+1, res.Len(), res.DroppedCount(), counts, kept+1, kept, counts.Errors-kept)
+		}
+		stored := false
+		for issue := range res.Issues() {
+			stored = stored || issue.Code() == diag.E_CONTEXT_CANCELLED
+		}
+		if !stored {
+			t.Errorf("check %d: the cancellation was not kept among %d stored failures", n+1, res.Len())
+		}
+	}
+	if afterFailures == 0 || pastLimit == 0 {
+		t.Fatalf("%d cancellations came after a failure and %d past the limit: the fixture is vacuous", afterFailures, pastLimit)
 	}
 }

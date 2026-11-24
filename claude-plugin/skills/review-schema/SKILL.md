@@ -58,7 +58,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 - `Vector` takes a single positive integer dimension.
 - `List` uses angle brackets for element type and optional square brackets for length bounds.
 - `List` and `Vector` cannot appear in relationship property blocks.
-- `Pattern` accepts 1 or 2 regex strings (max 2, conjunction semantics).
+- `Pattern` takes exactly one regex; a second rule on the value is an invariant. A match is a search, so anchor with `^` and `$` to match the whole value.
 
 ### 5. Multiplicity
 
@@ -70,7 +70,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 ### 6. Invariants
 
 - Syntax is `! "error_id" expression` -- the error ID is a quoted string.
-- Built-in function names are capitalized: `Len`, `All`, `Any`, `AllOrNone`, `Count`, `Filter`, `Map`, `Reduce`, `Contains`, `StartsWith`, `EndsWith`, `Upper`, `Lower`, `Trim`, `Sum`, `Min`, `Max`, `Abs`, `Floor`, `Ceil`, `Round`, `Default`, `Coalesce`, `TypeOf`, `IsNil`.
+- A built-in function name is matched exactly, capital first: `Len`, `All`, `Any`, `AllOrNone`, `Count`, `Filter`, `Map`, `Reduce`, `Contains`, `StartsWith`, `EndsWith`, `Upper`, `Lower`, `Trim`, `Sum`, `Min`, `Max`, `Abs`, `Floor`, `Ceil`, `Round`, `Default`, `Coalesce`, `TypeOf`, `IsNil`.
 - Pipeline syntax uses `->`: `ITEMS -> All |$item| { $item.quantity > 0 }`.
 - Lambda parameters are prefixed with `$`: `|$x| { ... }`, `|$acc, $x| { ... }`.
 - Nil checks use `== nil` or `!= nil`, or `val -> IsNil`.
@@ -95,7 +95,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 
 ### 9. Inheritance
 
-- The target of `extends` must be an `abstract type`.
+- A supertype is an `abstract type` or of the subtype's own kind; an abstract type extends abstract types alone (`E_INVALID_SUPERTYPE`).
 - A child type can narrow parent constraint bounds but never widen them.
 - A child type can add new fields and relationships not present on the parent.
 - A child type does not redeclare the same field without narrowing the constraint.

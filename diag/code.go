@@ -2,75 +2,16 @@ package diag
 
 import "sync"
 
-// CodeCategory represents the semantic domain of an error code.
-//
-// Categories represent the semantic domain of an error, not necessarily the
-// API layer that emits it. Most codes are emitted exclusively by their
-// category's layer, but some codes represent cross-cutting concerns.
-type CodeCategory uint8
-
-const (
-	// CategorySentinel is for sentinel codes like E_INTERNAL and E_CONTEXT_CANCELLED.
-	CategorySentinel CodeCategory = iota
-
-	// CategorySchema is for schema compilation errors.
-	CategorySchema
-
-	// CategorySyntax is for parse/lexer errors.
-	CategorySyntax
-
-	// CategoryImport is for import resolution errors.
-	CategoryImport
-
-	// CategoryInstance is for instance validation errors.
-	CategoryInstance
-
-	// CategoryGraph is for graph-layer errors.
-	CategoryGraph
-
-	// CategoryAdapter is for format adapter parsing errors.
-	CategoryAdapter
-
-	// CategorySnapshot is for snapshot persistence errors.
-	CategorySnapshot
-)
-
-// String returns a human-readable label for the category.
-func (c CodeCategory) String() string {
-	switch c {
-	case CategorySentinel:
-		return "sentinel"
-	case CategorySchema:
-		return "schema"
-	case CategorySyntax:
-		return "syntax"
-	case CategoryImport:
-		return "import"
-	case CategoryInstance:
-		return "instance"
-	case CategoryGraph:
-		return "graph"
-	case CategoryAdapter:
-		return "adapter"
-	case CategorySnapshot:
-		return "snapshot"
-	default:
-		return "unknown"
-	}
-}
-
 // Code is a stable programmatic identifier for an Issue.
 //
 // Error codes are stable identifiers that tools can match on, even when
 // message text changes. Codes are created and registered via NewCode().
-// Built-in codes are defined in this package; adapter and consumer
+// Built-in codes are defined in this package; the Neo4j mapping and consumer
 // packages define their own domain-specific codes using the same function.
 //
 // Code.String() values are globally unique across all registered codes.
-// The CodeCategory is informational metadata for filtering and grouping.
 type Code struct {
 	value string
-	cat   CodeCategory
 }
 
 // String returns the code's string representation (e.g., "E_CASE_COLLISION").
@@ -78,9 +19,11 @@ func (c Code) String() string {
 	return c.value
 }
 
-// Category returns the programmatic category for this code.
-func (c Code) Category() CodeCategory {
-	return c.cat
+// Error returns the code's name, as [Code.String] does, so %v and %s print the
+// name. A Code is the target of errors.Is, which reads a [ResultError] by the
+// codes it saw; no call returns a Code as an error.
+func (c Code) Error() string {
+	return c.value
 }
 
 // IsZero reports whether the code is unset.
@@ -90,547 +33,453 @@ func (c Code) IsZero() bool {
 
 var (
 	mu       sync.Mutex
-	registry []Code
-	seen     = make(map[string]bool)
+	registry = make(map[string]Code)
 )
 
 // NewCode creates and registers a new diagnostic Code with the given
-// identifier and category. Registered codes appear in [AllCodes] and
-// [CodesByCategory].
+// identifier.
 //
 // Panics on an empty value, which no issue can carry ([Code.IsZero] reports it
-// unset) and which [AllCodes] would still list, and on an identifier already
-// registered. Use a package-scoped prefix to avoid collisions (e.g., "E_NEO4J_*").
+// unset), and on an identifier already registered. Use a package-scoped prefix to avoid collisions (e.g., "E_NEO4J_*").
 //
 // Codes should be defined as package-level variables so that
 // registration happens at program startup:
 //
-//	var E_MY_ERROR = diag.NewCode("E_MY_ERROR", diag.CategoryAdapter)
-func NewCode(value string, cat CodeCategory) Code {
+//	var E_MY_ERROR = diag.NewCode("E_MY_ERROR")
+func NewCode(value string) Code {
 	if value == "" {
 		panic("diag.NewCode: empty code value")
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if seen[value] {
+	if _, dup := registry[value]; dup {
 		panic("diag: duplicate code " + value)
 	}
-	seen[value] = true
-	c := Code{value: value, cat: cat}
-	registry = append(registry, c)
+	c := Code{value: value}
+	registry[value] = c
 	return c
 }
 
 // Sentinel codes.
 var (
-	// E_INTERNAL indicates an unexpected invariant failure (internal bug indicator).
-	// Use for conditions that should never occur in correct code.
-	E_INTERNAL = NewCode("E_INTERNAL", CategorySentinel)
+	// E_INTERNAL indicates a broken invariant, which marks a library defect.
+	E_INTERNAL = NewCode("E_INTERNAL")
 
 	// E_COMMAND_FAILED carries a command-line failure that is not itself a
 	// diagnostic — a bad flag, an unreadable path, a lost connection — into a
-	// --format json document, so a machine consumer reads it by code rather
+	// --json document, so a machine consumer reads it by code rather
 	// than as prose beside the document. Its exit_code detail is the code the
 	// process exits with.
-	E_COMMAND_FAILED = NewCode("E_COMMAND_FAILED", CategorySentinel)
+	E_COMMAND_FAILED = NewCode("E_COMMAND_FAILED")
 
 	// E_CONTEXT_CANCELLED indicates the operation was cancelled via context.
-	// An operation that checks its context and reports through a [Result], or
-	// through a [ContextualError] that holds one, raises it when ctx.Err()
-	// returns a non-nil error; one that returns another Go error returns
-	// ctx.Err() or wraps it instead.
-	E_CONTEXT_CANCELLED = NewCode("E_CONTEXT_CANCELLED", CategorySentinel)
+	// An operation that checks its context and reports through a [Result]
+	// raises it when ctx.Err() returns a non-nil error; one that returns another
+	// Go error returns ctx.Err() or wraps it instead.
+	E_CONTEXT_CANCELLED = NewCode("E_CONTEXT_CANCELLED")
 )
 
 // Schema codes.
 var (
 	// E_INHERIT_CYCLE indicates an inheritance chain contains a cycle.
-	E_INHERIT_CYCLE = NewCode("E_INHERIT_CYCLE", CategorySchema)
+	E_INHERIT_CYCLE = NewCode("E_INHERIT_CYCLE")
 
 	// E_UNKNOWN_PROPERTY indicates a referenced property cannot be found on its type.
-	E_UNKNOWN_PROPERTY = NewCode("E_UNKNOWN_PROPERTY", CategorySchema)
+	E_UNKNOWN_PROPERTY = NewCode("E_UNKNOWN_PROPERTY")
 
-	// E_DUPLICATE_PROPERTY indicates a property is defined more than once on a type.
-	E_DUPLICATE_PROPERTY = NewCode("E_DUPLICATE_PROPERTY", CategorySchema)
+	// E_DUPLICATE_PROPERTY indicates a property is defined more than once on a
+	// type, or an edge property more than once on one relation.
+	E_DUPLICATE_PROPERTY = NewCode("E_DUPLICATE_PROPERTY")
 
 	// E_DUPLICATE_RELATION indicates a relation is defined more than once on a type.
-	E_DUPLICATE_RELATION = NewCode("E_DUPLICATE_RELATION", CategorySchema)
+	E_DUPLICATE_RELATION = NewCode("E_DUPLICATE_RELATION")
 
-	// E_CASE_COLLISION indicates property/relation names differ only by case.
-	E_CASE_COLLISION = NewCode("E_CASE_COLLISION", CategorySchema)
+	// E_CASE_COLLISION indicates two property names of a type, or two edge property
+	// names of an association, differ only by case.
+	E_CASE_COLLISION = NewCode("E_CASE_COLLISION")
 
-	// E_PROPERTY_RELATION_COLLISION indicates a property and relation have the same name.
-	E_PROPERTY_RELATION_COLLISION = NewCode("E_PROPERTY_RELATION_COLLISION", CategorySchema)
+	// E_PROPERTY_RELATION_COLLISION indicates a property name and a relation's
+	// field name that share one lower-case spelling, such as owner and OWNER.
+	E_PROPERTY_RELATION_COLLISION = NewCode("E_PROPERTY_RELATION_COLLISION")
 
-	// E_RESERVED_PREFIX indicates a name uses a reserved prefix.
-	E_RESERVED_PREFIX = NewCode("E_RESERVED_PREFIX", CategorySchema)
-
-	// E_INVALID_ASSOCIATION_TARGET indicates an association targets an invalid type.
-	E_INVALID_ASSOCIATION_TARGET = NewCode("E_INVALID_ASSOCIATION_TARGET", CategorySchema)
+	// E_INVALID_ASSOCIATION_TARGET indicates an association targets an invalid type,
+	// or a part type declares or inherits an association.
+	E_INVALID_ASSOCIATION_TARGET = NewCode("E_INVALID_ASSOCIATION_TARGET")
 
 	// E_INVALID_COMPOSITION_TARGET indicates a composition targets an invalid type.
-	E_INVALID_COMPOSITION_TARGET = NewCode("E_INVALID_COMPOSITION_TARGET", CategorySchema)
+	E_INVALID_COMPOSITION_TARGET = NewCode("E_INVALID_COMPOSITION_TARGET")
 
-	// E_INVALID_CONSTRAINT indicates a constraint definition is invalid.
-	E_INVALID_CONSTRAINT = NewCode("E_INVALID_CONSTRAINT", CategorySchema)
+	// E_COMPOSITION_CYCLE indicates a cycle whose every composition is
+	// required, so no instance on it is finite.
+	E_COMPOSITION_CYCLE = NewCode("E_COMPOSITION_CYCLE")
+
+	// E_INVALID_SUPERTYPE indicates an extends clause names a type of a kind the
+	// subtype may not extend: a supertype is abstract or of the subtype's own
+	// kind, so an abstract type extends abstract types alone.
+	E_INVALID_SUPERTYPE = NewCode("E_INVALID_SUPERTYPE")
+
+	// E_INVALID_CONSTRAINT indicates a constraint definition the load refuses, or,
+	// at Warning, a minus sign before the unbounded marker, which has no effect.
+	E_INVALID_CONSTRAINT = NewCode("E_INVALID_CONSTRAINT")
 
 	// E_INVALID_INVARIANT indicates an invariant's expression or message is invalid.
-	E_INVALID_INVARIANT = NewCode("E_INVALID_INVARIANT", CategorySchema)
+	E_INVALID_INVARIANT = NewCode("E_INVALID_INVARIANT")
 
 	// E_DUPLICATE_INVARIANT indicates a type declares one invariant message twice.
-	E_DUPLICATE_INVARIANT = NewCode("E_DUPLICATE_INVARIANT", CategorySchema)
+	E_DUPLICATE_INVARIANT = NewCode("E_DUPLICATE_INVARIANT")
 
 	// E_INVARIANT_CONFLICT indicates a type inherits two definitions of one
-	// invariant message with different expressions.
-	E_INVARIANT_CONFLICT = NewCode("E_INVARIANT_CONFLICT", CategorySchema)
+	// invariant message with different expressions. A literal with no value
+	// matches any literal of its kind.
+	E_INVARIANT_CONFLICT = NewCode("E_INVARIANT_CONFLICT")
 
-	// E_REVERSE_CLAUSE_REMOVED indicates a schema still carries the
-	// reverse clause ("/ name (mult)") the language removed in v0.15.0.
-	E_REVERSE_CLAUSE_REMOVED = NewCode("E_REVERSE_CLAUSE_REMOVED", CategorySchema)
-
-	// E_INVALID_NAME indicates a name the schema refuses: its format, a
-	// reserved spelling, one the Builder takes that the DSL cannot state, or an
-	// invariant's read of a relation in a casing other than its two spellings.
-	E_INVALID_NAME = NewCode("E_INVALID_NAME", CategorySchema)
+	// E_INVALID_NAME indicates a name the schema refuses: its format, a reserved
+	// spelling, or an invariant's read of a relation in a casing other than its
+	// declared name.
+	E_INVALID_NAME = NewCode("E_INVALID_NAME")
 
 	// E_UPSTREAM_FAIL indicates an imported schema failed to compile.
-	E_UPSTREAM_FAIL = NewCode("E_UPSTREAM_FAIL", CategorySchema)
+	E_UPSTREAM_FAIL = NewCode("E_UPSTREAM_FAIL")
 
 	// E_PROPERTY_CONFLICT indicates conflicting property definitions from inheritance.
-	E_PROPERTY_CONFLICT = NewCode("E_PROPERTY_CONFLICT", CategorySchema)
+	E_PROPERTY_CONFLICT = NewCode("E_PROPERTY_CONFLICT")
 
 	// E_UNKNOWN_TYPE indicates a referenced type cannot be found.
-	E_UNKNOWN_TYPE = NewCode("E_UNKNOWN_TYPE", CategorySchema)
+	E_UNKNOWN_TYPE = NewCode("E_UNKNOWN_TYPE")
 
-	// E_DUPLICATE_TYPE indicates a type name is defined multiple times.
-	E_DUPLICATE_TYPE = NewCode("E_DUPLICATE_TYPE", CategorySchema)
+	// E_DUPLICATE_TYPE indicates a schema declares one name more than once. A
+	// schema's types and datatypes share one namespace.
+	E_DUPLICATE_TYPE = NewCode("E_DUPLICATE_TYPE")
 
-	// E_DUPLICATE_SCHEMA indicates two schemas in one registry, or in one
-	// import closure, declare one name.
-	E_DUPLICATE_SCHEMA = NewCode("E_DUPLICATE_SCHEMA", CategorySchema)
+	// E_DUPLICATE_SCHEMA indicates two schemas of one load that declare one name.
+	// Only a schema whose own compile drew no error is judged, because a schema
+	// that failed takes no name.
+	E_DUPLICATE_SCHEMA = NewCode("E_DUPLICATE_SCHEMA")
 
 	// E_RELATION_COLLISION indicates a type carries conflicting relation
-	// definitions under one name: inherited definitions that differ, or an
-	// association and a composition sharing a name.
-	E_RELATION_COLLISION = NewCode("E_RELATION_COLLISION", CategorySchema)
+	// definitions under one name: an inherited definition that differs from the
+	// type's own or from another inherited one, or an association and a
+	// composition sharing a name.
+	E_RELATION_COLLISION = NewCode("E_RELATION_COLLISION")
 
-	// E_MISSING_SOURCE_ID indicates a required SourceID is missing.
-	E_MISSING_SOURCE_ID = NewCode("E_MISSING_SOURCE_ID", CategorySchema)
-
-	// E_INVALID_SYNTHETIC_ID indicates a synthetic SourceID has an invalid format.
-	E_INVALID_SYNTHETIC_ID = NewCode("E_INVALID_SYNTHETIC_ID", CategorySchema)
-
-	// E_LIST_ON_EDGE indicates a List type was used in a relationship property.
-	E_LIST_ON_EDGE = NewCode("E_LIST_ON_EDGE", CategorySchema)
+	// E_INVALID_EDGE_PROPERTY_TYPE indicates a relationship property of a type
+	// an edge does not hold: a List or a Vector, written or through a datatype.
+	E_INVALID_EDGE_PROPERTY_TYPE = NewCode("E_INVALID_EDGE_PROPERTY_TYPE")
 
 	// E_INVALID_PRIMARY_KEY_TYPE indicates a type not allowed as a primary key.
 	// Only String, UUID, Date, and Timestamp are permitted as primary key types.
-	E_INVALID_PRIMARY_KEY_TYPE = NewCode("E_INVALID_PRIMARY_KEY_TYPE", CategorySchema)
+	E_INVALID_PRIMARY_KEY_TYPE = NewCode("E_INVALID_PRIMARY_KEY_TYPE")
 
 	// E_NO_PRIMARY_KEY indicates a concrete (non-abstract, non-part) type that
 	// declares or inherits no primary key. A node needs identity to be added to a
 	// graph or referenced by an association, so such a type is rejected at load
 	// rather than at graph-construction time.
-	E_NO_PRIMARY_KEY = NewCode("E_NO_PRIMARY_KEY", CategorySchema)
+	E_NO_PRIMARY_KEY = NewCode("E_NO_PRIMARY_KEY")
 
-	// E_LOAD_IO_FAILURE indicates an I/O error during schema loading.
-	// Covers file read failures, path resolution errors, and other filesystem issues.
-	E_LOAD_IO_FAILURE = NewCode("E_LOAD_IO_FAILURE", CategorySchema)
+	// E_LOAD_IO_FAILURE indicates an I/O error during schema loading, or a load
+	// whose arguments or option values the loader refuses. It covers file read
+	// failures, path resolution errors and other filesystem issues. An option
+	// a load does not take is refused with an error that carries no code.
+	E_LOAD_IO_FAILURE = NewCode("E_LOAD_IO_FAILURE")
 
 	// E_LOAD_MODULE_ROOT_MALFORMED indicates a yammm.mod module-root marker
-	// whose content violates the marker rule: it must be empty or hold only
+	// that is not a regular file, is larger than the marker bound, or holds
+	// content that violates the marker rule: it must be empty or hold only
 	// comment lines. Error severity: the marker is user content like a schema,
 	// and the load reports it as it reports an invalid schema.
-	E_LOAD_MODULE_ROOT_MALFORMED = NewCode("E_LOAD_MODULE_ROOT_MALFORMED", CategorySchema)
+	E_LOAD_MODULE_ROOT_MALFORMED = NewCode("E_LOAD_MODULE_ROOT_MALFORMED")
 
-	// E_LOAD_SOURCE_CHANGED indicates a source a shared Registry holds with
-	// content that differs from what a load holds for it: a source re-registered
-	// after its bytes changed, an import beneath an unchanged entry that did, or
-	// an import whose registered compile was made from other bytes than the
-	// load's own for that source, reported at the import. A shared registry
-	// assumes its files do not change while it lives.
-	E_LOAD_SOURCE_CHANGED = NewCode("E_LOAD_SOURCE_CHANGED", CategorySchema)
-
-	// E_UNKNOWN_ANNOTATION indicates an annotation name absent from the built-in
-	// registry for its placement (@name on a property, @@name on a type).
-	E_UNKNOWN_ANNOTATION = NewCode("E_UNKNOWN_ANNOTATION", CategorySchema)
+	// E_UNKNOWN_ANNOTATION indicates an annotation name the built-in registry holds
+	// at neither placement (@name on a property, @@name on a type). A name registered
+	// at the other placement draws E_INVALID_ANNOTATION.
+	E_UNKNOWN_ANNOTATION = NewCode("E_UNKNOWN_ANNOTATION")
 
 	// E_UNKNOWN_ANNOTATION_TARGET indicates a property-reference argument of an
 	// annotation (such as a @@index member) that names no property of the type.
 	// It shares a failure class with E_UNKNOWN_PROPERTY on a different construct.
-	E_UNKNOWN_ANNOTATION_TARGET = NewCode("E_UNKNOWN_ANNOTATION_TARGET", CategorySchema)
+	E_UNKNOWN_ANNOTATION_TARGET = NewCode("E_UNKNOWN_ANNOTATION_TARGET")
 
 	// E_INVALID_ANNOTATION indicates a structural annotation violation: wrong
-	// placement, wrong arity, a bad argument kind or keyword, or a duplicate.
-	E_INVALID_ANNOTATION = NewCode("E_INVALID_ANNOTATION", CategorySchema)
+	// placement, wrong arity, a bad argument kind or keyword, a duplicate, a
+	// property annotation that begins a line, or two supertypes whose
+	// annotations on one inherited property disagree.
+	E_INVALID_ANNOTATION = NewCode("E_INVALID_ANNOTATION")
 
 	// E_INVALID_ANNOTATION_TARGET indicates an annotation attached to an
 	// ineligible property — e.g. @index on a non-scalar or sole primary key,
 	// @vector on a non-Vector, or @writeOnce on a primary-key member.
-	E_INVALID_ANNOTATION_TARGET = NewCode("E_INVALID_ANNOTATION_TARGET", CategorySchema)
+	E_INVALID_ANNOTATION_TARGET = NewCode("E_INVALID_ANNOTATION_TARGET")
 
 	// W_ANNOTATION_SHADOWED indicates that a type's own property re-declaration
 	// (identical or narrowing) shadows an inherited property carrying
 	// annotations without re-stating them, so those annotations silently drop
 	// from the re-declaring type. Warning severity: it surfaces the resulting
-	// write-shape / index-shape regression without blocking the load. One
-	// warning is emitted per shadowed ancestor.
-	W_ANNOTATION_SHADOWED = NewCode("W_ANNOTATION_SHADOWED", CategorySchema)
-
-	// W_TIMESTAMP_LOSSY_FORMAT indicates that a Timestamp["layout"] declares a
-	// Go layout that cannot reproduce an instant. Values of the kind are
-	// stored as text rendered through the declared layout, so a layout
-	// carrying no zone, no fractional second, or neither drops that part of
-	// every value written under it — and a reader parsing the text back gets a
-	// different instant. Warning severity: a wall-clock layout is a legitimate
-	// domain choice, so the declaration is accepted and the author is told
-	// once, at the point of declaration, rather than silently. The warning
-	// anchors on the format literal.
-	W_TIMESTAMP_LOSSY_FORMAT = NewCode("W_TIMESTAMP_LOSSY_FORMAT", CategorySchema)
+	// write-shape / index-shape regression without blocking the load. A
+	// re-declaration draws at most one warning per direct supertype, and the
+	// warning names that supertype.
+	W_ANNOTATION_SHADOWED = NewCode("W_ANNOTATION_SHADOWED")
 )
 
 // Syntax codes.
 var (
-	// E_SYNTAX indicates a syntax error in the schema source, or a Builder
-	// documentation string no doc comment can carry.
-	E_SYNTAX = NewCode("E_SYNTAX", CategorySyntax)
+	// E_SYNTAX indicates a syntax error in the schema source.
+	E_SYNTAX = NewCode("E_SYNTAX")
 )
 
 // Import codes.
 var (
 	// E_IMPORT_RESOLVE indicates an import path could not be resolved.
-	E_IMPORT_RESOLVE = NewCode("E_IMPORT_RESOLVE", CategoryImport)
+	E_IMPORT_RESOLVE = NewCode("E_IMPORT_RESOLVE")
 
 	// E_IMPORT_CYCLE indicates a cycle exists in the import dependency graph.
-	E_IMPORT_CYCLE = NewCode("E_IMPORT_CYCLE", CategoryImport)
+	E_IMPORT_CYCLE = NewCode("E_IMPORT_CYCLE")
 
-	// E_INVALID_ALIAS indicates an import alias is not a valid identifier.
-	E_INVALID_ALIAS = NewCode("E_INVALID_ALIAS", CategoryImport)
+	// E_INVALID_ALIAS indicates an import with no as clause whose path derives a
+	// reserved keyword as its alias. A written reserved alias is E_SYNTAX.
+	E_INVALID_ALIAS = NewCode("E_INVALID_ALIAS")
 
 	// E_PATH_ESCAPE indicates an import path escapes the allowed directory.
-	E_PATH_ESCAPE = NewCode("E_PATH_ESCAPE", CategoryImport)
+	E_PATH_ESCAPE = NewCode("E_PATH_ESCAPE")
 
 	// E_IMPORT_NOT_ALLOWED indicates imports are not allowed in this context.
-	E_IMPORT_NOT_ALLOWED = NewCode("E_IMPORT_NOT_ALLOWED", CategoryImport)
+	E_IMPORT_NOT_ALLOWED = NewCode("E_IMPORT_NOT_ALLOWED")
 
 	// E_DUPLICATE_IMPORT indicates the same schema imported more than once, or
 	// two imports that share one alias.
-	E_DUPLICATE_IMPORT = NewCode("E_DUPLICATE_IMPORT", CategoryImport)
+	E_DUPLICATE_IMPORT = NewCode("E_DUPLICATE_IMPORT")
 
 	// E_IMPORT_ALIAS_COLLISION indicates an import alias collides with a local
-	// type name.
-	E_IMPORT_ALIAS_COLLISION = NewCode("E_IMPORT_ALIAS_COLLISION", CategoryImport)
+	// type or datatype name.
+	E_IMPORT_ALIAS_COLLISION = NewCode("E_IMPORT_ALIAS_COLLISION")
 )
 
 // Instance validation codes.
 var (
 	// E_INSTANCE_TYPE_NOT_FOUND indicates a type referenced in instance data cannot be found.
-	E_INSTANCE_TYPE_NOT_FOUND = NewCode("E_INSTANCE_TYPE_NOT_FOUND", CategoryInstance)
+	E_INSTANCE_TYPE_NOT_FOUND = NewCode("E_INSTANCE_TYPE_NOT_FOUND")
 
 	// E_ABSTRACT_TYPE indicates an attempt to instantiate an abstract type,
 	// an empty batch under its name included.
-	E_ABSTRACT_TYPE = NewCode("E_ABSTRACT_TYPE", CategoryInstance)
+	E_ABSTRACT_TYPE = NewCode("E_ABSTRACT_TYPE")
 
 	// E_PART_TYPE_DIRECT indicates an attempt to directly instantiate a part
 	// type, an empty batch under its name included.
-	E_PART_TYPE_DIRECT = NewCode("E_PART_TYPE_DIRECT", CategoryInstance)
+	E_PART_TYPE_DIRECT = NewCode("E_PART_TYPE_DIRECT")
 
 	// E_TYPE_MISMATCH indicates a value has the wrong type.
-	E_TYPE_MISMATCH = NewCode("E_TYPE_MISMATCH", CategoryInstance)
+	E_TYPE_MISMATCH = NewCode("E_TYPE_MISMATCH")
 
 	// E_MISSING_REQUIRED indicates a required property is missing.
-	E_MISSING_REQUIRED = NewCode("E_MISSING_REQUIRED", CategoryInstance)
+	E_MISSING_REQUIRED = NewCode("E_MISSING_REQUIRED")
 
 	// E_UNKNOWN_FIELD indicates an unexpected field in instance data.
-	E_UNKNOWN_FIELD = NewCode("E_UNKNOWN_FIELD", CategoryInstance)
+	E_UNKNOWN_FIELD = NewCode("E_UNKNOWN_FIELD")
 
 	// E_CONSTRAINT_FAIL indicates a constraint check failed.
-	E_CONSTRAINT_FAIL = NewCode("E_CONSTRAINT_FAIL", CategoryInstance)
+	E_CONSTRAINT_FAIL = NewCode("E_CONSTRAINT_FAIL")
 
 	// E_INVARIANT_FAIL indicates an invariant check failed.
-	E_INVARIANT_FAIL = NewCode("E_INVARIANT_FAIL", CategoryInstance)
+	E_INVARIANT_FAIL = NewCode("E_INVARIANT_FAIL")
 
 	// E_EVAL_ERROR indicates an error during expression evaluation.
-	E_EVAL_ERROR = NewCode("E_EVAL_ERROR", CategoryInstance)
+	E_EVAL_ERROR = NewCode("E_EVAL_ERROR")
 
-	// E_MISSING_FK_TARGET indicates a foreign key target is missing.
-	E_MISSING_FK_TARGET = NewCode("E_MISSING_FK_TARGET", CategoryInstance)
+	// E_MISSING_FK_TARGET indicates an edge object that holds none of its
+	// target's `_target_` foreign-key fields.
+	E_MISSING_FK_TARGET = NewCode("E_MISSING_FK_TARGET")
 
 	// E_PARTIAL_COMPOSITE_FK indicates a partial composite foreign key.
-	E_PARTIAL_COMPOSITE_FK = NewCode("E_PARTIAL_COMPOSITE_FK", CategoryInstance)
+	E_PARTIAL_COMPOSITE_FK = NewCode("E_PARTIAL_COMPOSITE_FK")
 
 	// E_UNKNOWN_EDGE_FIELD indicates an unknown field in edge data.
-	E_UNKNOWN_EDGE_FIELD = NewCode("E_UNKNOWN_EDGE_FIELD", CategoryInstance)
+	E_UNKNOWN_EDGE_FIELD = NewCode("E_UNKNOWN_EDGE_FIELD")
 
-	// E_EDGE_SHAPE_MISMATCH indicates an edge has the wrong shape.
-	E_EDGE_SHAPE_MISMATCH = NewCode("E_EDGE_SHAPE_MISMATCH", CategoryInstance)
+	// E_EDGE_SHAPE_MISMATCH indicates an edge's or a composition's value has a
+	// shape its relation does not take.
+	E_EDGE_SHAPE_MISMATCH = NewCode("E_EDGE_SHAPE_MISMATCH")
 
 	// E_UNRESOLVED_REQUIRED_COMPOSITION indicates a required composition is unresolved.
-	E_UNRESOLVED_REQUIRED_COMPOSITION = NewCode("E_UNRESOLVED_REQUIRED_COMPOSITION", CategoryInstance)
-
-	// E_COMPOSITION_NOT_FOUND indicates a referenced composition cannot be found.
-	E_COMPOSITION_NOT_FOUND = NewCode("E_COMPOSITION_NOT_FOUND", CategoryInstance)
+	E_UNRESOLVED_REQUIRED_COMPOSITION = NewCode("E_UNRESOLVED_REQUIRED_COMPOSITION")
 
 	// E_COMPOSITION_DEPTH_EXCEEDED indicates composed nesting deeper than
 	// [github.com/simon-lentz/yammm/instance.MaxComposedDepth], the bound the
-	// .ys wire enforces; the validator refuses it first so a validated
-	// instance is always one a snapshot can carry.
-	E_COMPOSITION_DEPTH_EXCEEDED = NewCode("E_COMPOSITION_DEPTH_EXCEEDED", CategoryInstance)
+	// .ys wire enforces. The validator refuses it first, so no validated instance
+	// is nested past that bound.
+	E_COMPOSITION_DEPTH_EXCEEDED = NewCode("E_COMPOSITION_DEPTH_EXCEEDED")
 
 	// E_INVALID_TYPE_TAG indicates a type tag that is not a type name by the
-	// grammar's rule: a JSON document's top-level key or a CSV type-column value.
-	E_INVALID_TYPE_TAG = NewCode("E_INVALID_TYPE_TAG", CategoryInstance)
+	// grammar's rule: a JSON document's top-level key.
+	E_INVALID_TYPE_TAG = NewCode("E_INVALID_TYPE_TAG")
 
-	// E_CASE_FOLD_COLLISION indicates multiple input fields collide after case-folding.
-	// This occurs when non-strict mode is enabled and two or more field names fold
-	// to one schema property that none of them matches exactly (schema "NAME",
-	// input "Name" and "name"). An exact match is claimed first and never collides.
-	E_CASE_FOLD_COLLISION = NewCode("E_CASE_FOLD_COLLISION", CategoryInstance)
-)
-
-// Adapter codes.
-var (
-	// E_ADAPTER_PARSE indicates a format-specific parsing error.
-	E_ADAPTER_PARSE = NewCode("E_ADAPTER_PARSE", CategoryAdapter)
-
-	// E_ADAPTER_IO indicates an adapter's input failed to arrive: the
-	// io.Reader a parse reads from returned an error that is neither the
-	// input's end nor a fault in its content. Raised at Fatal, since the run
-	// did not finish; what was read before the failure is kept. It is the
-	// per-category I/O code for CategoryAdapter, as E_LOAD_IO_FAILURE is for
-	// CategorySchema and E_SNAPSHOT_IO for CategorySnapshot.
-	E_ADAPTER_IO = NewCode("E_ADAPTER_IO", CategoryAdapter)
+	// E_DATA_PARSE indicates an instance document that is not well formed, is
+	// not one object, holds a type name whose value is not an array of objects,
+	// states one member name twice in one object, holds a string that is not
+	// valid UTF-8 or a \u escape that is half of no surrogate pair, or nests
+	// deeper than the decoder's 10,000-level limit.
+	E_DATA_PARSE = NewCode("E_DATA_PARSE")
 )
 
 // Graph codes.
 var (
 	// E_DUPLICATE_PK indicates a primary key stated twice for one type: by two
-	// instances added to a graph, by two root instances in a snapshot that a graph
-	// imports under another schema or snapshot.Load, Verify or Info reads, or by
-	// two root instances a yammm data command reads from its data files and
-	// --into file, one of them refused.
-	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK", CategoryGraph)
+	// instances added to a graph, by two root instances whose stored keys the key
+	// rule both accepts, in a snapshot that snapshot.Stat reads or, of a type that
+	// can hold one, that snapshot.Unmarshal or Verify reads, or by two root instances a yammm data command reads from its
+	// data files and --into file, one of them refused.
+	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK")
 
 	// E_DUPLICATE_COMPOSED_PK indicates a composition slot that cannot hold a
 	// child: two children of one (many) slot share a primary key, or a (one)
-	// slot is given several. The validator and graph assembly raise it, and
-	// snapshot.Load and Verify raise it for a (one) slot a document fills more
-	// than once. Info reads without a schema, which the check needs to know a
-	// relation's cardinality, so it makes no such claim.
-	E_DUPLICATE_COMPOSED_PK = NewCode("E_DUPLICATE_COMPOSED_PK", CategoryGraph)
+	// slot is given several. The validator raises it. snapshot.Unmarshal
+	// and Verify raise it for a (one) slot a document fills more than once and
+	// for two children of a keyed (many) slot at one key, compared as written.
+	// Stat reads without a schema, which the checks need, so it makes no such claim.
+	E_DUPLICATE_COMPOSED_PK = NewCode("E_DUPLICATE_COMPOSED_PK")
+
+	// E_DUPLICATE_EDGE indicates a (many) association that names one target
+	// twice for one source: a graph holds one edge per source, association and
+	// target. The validator raises it for a target key one listing repeats where
+	// no other check refused either listing. snapshot.Unmarshal and Verify refuse such
+	// a document with E_SNAPSHOT_MALFORMED where no other check refused the
+	// repeating listing, one sound root (of a type that can hold a root, its stored key admitted by
+	// the key rule) holds the source's address alone, and an edge's target's,
+	// and no root stands at a record's target and no refused unit states it.
+	// Elsewhere the issue at the listing, the source or the target stands for
+	// the repeat.
+	E_DUPLICATE_EDGE = NewCode("E_DUPLICATE_EDGE")
 
 	// E_UNRESOLVED_REQUIRED indicates a required association is unresolved.
-	E_UNRESOLVED_REQUIRED = NewCode("E_UNRESOLVED_REQUIRED", CategoryGraph)
-
-	// E_GRAPH_TYPE_NOT_FOUND indicates a type referenced in graph operations cannot be found.
-	E_GRAPH_TYPE_NOT_FOUND = NewCode("E_GRAPH_TYPE_NOT_FOUND", CategoryGraph)
-
-	// E_GRAPH_PARENT_NOT_FOUND indicates a parent node cannot be found.
-	E_GRAPH_PARENT_NOT_FOUND = NewCode("E_GRAPH_PARENT_NOT_FOUND", CategoryGraph)
+	E_UNRESOLVED_REQUIRED = NewCode("E_UNRESOLVED_REQUIRED")
 
 	// E_GRAPH_INVALID_COMPOSITION indicates an invalid composition in graph operations.
-	E_GRAPH_INVALID_COMPOSITION = NewCode("E_GRAPH_INVALID_COMPOSITION", CategoryGraph)
+	E_GRAPH_INVALID_COMPOSITION = NewCode("E_GRAPH_INVALID_COMPOSITION")
 
-	// E_GRAPH_MISSING_PK indicates a root whose type declares no primary key.
-	// An instance whose own key is empty or absent draws E_GRAPH_INVALID_PK.
-	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK", CategoryGraph)
+	// E_GRAPH_MISSING_PK indicates an instance added at a root whose type
+	// declares no primary key.
+	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK")
 
 	// E_GRAPH_CARDINALITY indicates a (one) association holding more than one
-	// record: several targets at graph.Graph.Add, a merge at
-	// graph.Graph.AddOrMerge that would add a second target, or several edges
-	// and unresolved records together in a snapshot or a .ys document.
-	E_GRAPH_CARDINALITY = NewCode("E_GRAPH_CARDINALITY", CategoryGraph)
+	// record: a merge at graph.Graph.AddOrMerge that would add a second target,
+	// or several edges and unresolved records no check refused, together in a
+	// .ys document.
+	E_GRAPH_CARDINALITY = NewCode("E_GRAPH_CARDINALITY")
 
-	// E_GRAPH_UNKNOWN_RELATION indicates instance data or an association
-	// record under a relation name the type does not declare in that slot, or
-	// an association record naming a target other than the association's
-	// declared one. Every constructor of a snapshot reports it at Error, and
-	// the .ys reader reports an undeclared association name with it.
-	E_GRAPH_UNKNOWN_RELATION = NewCode("E_GRAPH_UNKNOWN_RELATION", CategoryGraph)
-
-	// E_GRAPH_ABSTRACT_TYPE indicates a root of an abstract type: an instance
-	// a bypass constructor built, since the validator rejects one, or a
-	// snapshot imported under a schema that makes its type abstract.
-	E_GRAPH_ABSTRACT_TYPE = NewCode("E_GRAPH_ABSTRACT_TYPE", CategoryGraph)
-
-	// E_GRAPH_INVALID_PK indicates a primary key that is empty, has the wrong
-	// arity, holds a component graph.ParseKey cannot read back, has a key
-	// property that is absent or null, or disagrees with the instance's own key properties;
-	// or an association target key of the wrong arity or with such a component.
-	E_GRAPH_INVALID_PK = NewCode("E_GRAPH_INVALID_PK", CategoryGraph)
+	// E_GRAPH_UNKNOWN_RELATION indicates an association record, or an empty
+	// edge list, under a relation name the type does not declare as an
+	// association. The .ys reader reports it.
+	E_GRAPH_UNKNOWN_RELATION = NewCode("E_GRAPH_UNKNOWN_RELATION")
 )
 
 // Snapshot persistence codes.
 var (
-	// E_SNAPSHOT_MALFORMED indicates the .ys file is not valid JSON, has the
-	// wrong top-level structure (e.g., missing yammm_snapshot header as first
-	// key), or states content a structural rule refuses: an undeclared name, a
-	// stored key its key properties contradict, a key or target key component
-	// graph.ParseKey cannot read back, a target key of the wrong arity, an
-	// undocumented reason, a record contradicting itself, records graph.Add
-	// would not derive, a duplicate with no conflict. snapshot.Marshal raises it
-	// for input that would write such a file: an indent that is not whitespace,
-	// or a property value the wire cannot carry.
-	E_SNAPSHOT_MALFORMED = NewCode("E_SNAPSHOT_MALFORMED", CategorySnapshot)
+	// E_SNAPSHOT_MALFORMED indicates the .ys file is not valid JSON, has a
+	// header past snapshot.MaxHeaderSize where only the header is read, has the
+	// wrong outer shape (the four top-level keys, in order, each once and none
+	// null, with nothing after them, and no object repeating a member name or
+	// spelling a declared one in another case), or states content a structural
+	// rule refuses, such as an undeclared name, a stored key its key properties
+	// contradict, a key or target key component graph.ParseKey cannot read back,
+	// a target key of the wrong arity, an undocumented reason, a record
+	// contradicting itself, records graph.Add would not derive, a duplicate with
+	// no conflict or another one, a duplicate stating a parent or a relation, a
+	// string holding invalid UTF-8 or half a surrogate pair, which encoding/json
+	// would silently read as U+FFFD, or a created_at that is not an RFC 3339
+	// time or that states a leap second or the zero instant.
+	// snapshot.Marshal raises it for input it refuses to write: an indent that is
+	// not JSON whitespace, a created_at time with no RFC 3339 form, or a metadata
+	// key or value, a source name or a path that is not valid UTF-8;
+	// snapshot.UpdateMetadata raises it for such metadata too.
+	E_SNAPSHOT_MALFORMED = NewCode("E_SNAPSHOT_MALFORMED")
 
 	// E_SNAPSHOT_UNSUPPORTED_VERSION indicates the format version is not recognized.
-	E_SNAPSHOT_UNSUPPORTED_VERSION = NewCode("E_SNAPSHOT_UNSUPPORTED_VERSION", CategorySnapshot)
+	E_SNAPSHOT_UNSUPPORTED_VERSION = NewCode("E_SNAPSHOT_UNSUPPORTED_VERSION")
 
 	// E_SNAPSHOT_UNSUPPORTED_FEATURE indicates an unrecognized feature flag in the header.
 	// One diagnostic is emitted per unrecognized feature.
-	E_SNAPSHOT_UNSUPPORTED_FEATURE = NewCode("E_SNAPSHOT_UNSUPPORTED_FEATURE", CategorySnapshot)
+	E_SNAPSHOT_UNSUPPORTED_FEATURE = NewCode("E_SNAPSHOT_UNSUPPORTED_FEATURE")
 
 	// E_SNAPSHOT_INCOMPATIBLE_SCHEMA indicates the schema structural hash does not
 	// match between the .ys file and the provided schema.
-	E_SNAPSHOT_INCOMPATIBLE_SCHEMA = NewCode("E_SNAPSHOT_INCOMPATIBLE_SCHEMA", CategorySnapshot)
+	E_SNAPSHOT_INCOMPATIBLE_SCHEMA = NewCode("E_SNAPSHOT_INCOMPATIBLE_SCHEMA")
 
 	// E_SNAPSHOT_UNKNOWN_TYPE indicates a type name in the .ys file does not exist
 	// in the provided schema.
-	E_SNAPSHOT_UNKNOWN_TYPE = NewCode("E_SNAPSHOT_UNKNOWN_TYPE", CategorySnapshot)
-
-	// E_SNAPSHOT_UNNAMEABLE_TYPE indicates an instances group or a root
-	// duplicate record names a type the entry schema cannot name: the import
-	// closure declares it, but the schema reaches it only through an
-	// intermediate import. adapter/json and adapter/csv key their output by the
-	// name the entry schema gives each denoted type, so such a document
-	// describes a snapshot they cannot render. The hint names the remedy, which
-	// is to import the declaring schema directly.
-	E_SNAPSHOT_UNNAMEABLE_TYPE = NewCode("E_SNAPSHOT_UNNAMEABLE_TYPE", CategorySnapshot)
+	E_SNAPSHOT_UNKNOWN_TYPE = NewCode("E_SNAPSHOT_UNKNOWN_TYPE")
 
 	// E_SNAPSHOT_TYPE_MISMATCH indicates a type row that contradicts its
 	// position: a root's row that is not its group's, a duplicate instance's
-	// that is not its record's, a composed child's or an association record's
-	// target row that is not the relation's declared target, or a composed
-	// duplicate's row that is not its composition's declared target.
-	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH", CategorySnapshot)
+	// that is not its record's, or a composed child's or an association record's
+	// target row that is not the relation's declared target.
+	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH")
 
-	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target or duplicate conflict
-	// references an instance that does not exist in the snapshot.
-	E_SNAPSHOT_DANGLING_REFERENCE = NewCode("E_SNAPSHOT_DANGLING_REFERENCE", CategorySnapshot)
+	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target, a duplicate's
+	// conflict, or an unresolved record's source names no root instance.
+	E_SNAPSHOT_DANGLING_REFERENCE = NewCode("E_SNAPSHOT_DANGLING_REFERENCE")
 
 	// E_SNAPSHOT_INVALID_COMPOSED indicates a composed child instance carries edges,
 	// which violates the composed children invariant (edges are only on root
-	// instances), or composed children under a name the type does not declare
-	// as a composition.
-	E_SNAPSHOT_INVALID_COMPOSED = NewCode("E_SNAPSHOT_INVALID_COMPOSED", CategorySnapshot)
-
-	// W_SNAPSHOT_VALUE_DROPPED (Warning) indicates a write path held a value
-	// the wire cannot carry at that position and did not write it, so the
-	// document produced is well-formed and the warning names what is missing.
-	//
-	// It marks one site: a metadata update that re-marshals the document and
-	// cannot carry a created_at the input header states in a form other than
-	// RFC 3339.
-	//
-	// Two drops are DELIBERATE and are NOT marked: a duplicate record's
-	// Diagnostic, which the wire has no field for, and an instance provenance's
-	// SPAN, which the reader rebuilds as zero. A consumer cannot gate loss
-	// detection on this code alone and be right.
-	W_SNAPSHOT_VALUE_DROPPED = NewCode("W_SNAPSHOT_VALUE_DROPPED", CategorySnapshot)
+	// instances), or composed children under a name the parent's type does not
+	// declare as a composition.
+	E_SNAPSHOT_INVALID_COMPOSED = NewCode("E_SNAPSHOT_INVALID_COMPOSED")
 
 	// E_SNAPSHOT_INVALID_ROOT indicates an instances group, empty or not, or a
-	// root duplicate record names a type that cannot hold a root instance: an
-	// abstract type, a part type, or one declaring no primary key. Nameability is a denoted type's rule and draws
-	// [E_SNAPSHOT_UNNAMEABLE_TYPE]. The graph layer refuses all three at
+	// duplicate record names a type that cannot hold a root instance: an
+	// abstract type, a part type, or one declaring no primary key. No instance of
+	// any of the three installs at
 	// [github.com/simon-lentz/yammm/graph.Graph.Add], so a document stating one
 	// describes a graph that cannot be built. The message names which rule the
-	// type fails.
-	E_SNAPSHOT_INVALID_ROOT = NewCode("E_SNAPSHOT_INVALID_ROOT", CategorySnapshot)
+	// type fails. One type draws one issue, however many positions name it.
+	E_SNAPSHOT_INVALID_ROOT = NewCode("E_SNAPSHOT_INVALID_ROOT")
 
 	// E_SNAPSHOT_COMPOSED_ON_DUPLICATE indicates a duplicate record's instance contains
 	// composed children, violating the duplicate structural constraint.
-	E_SNAPSHOT_COMPOSED_ON_DUPLICATE = NewCode("E_SNAPSHOT_COMPOSED_ON_DUPLICATE", CategorySnapshot)
+	E_SNAPSHOT_COMPOSED_ON_DUPLICATE = NewCode("E_SNAPSHOT_COMPOSED_ON_DUPLICATE")
 
 	// E_SNAPSHOT_EDGES_ON_DUPLICATE indicates a duplicate record's instance contains
 	// edges, violating the duplicate structural constraint.
-	E_SNAPSHOT_EDGES_ON_DUPLICATE = NewCode("E_SNAPSHOT_EDGES_ON_DUPLICATE", CategorySnapshot)
+	E_SNAPSHOT_EDGES_ON_DUPLICATE = NewCode("E_SNAPSHOT_EDGES_ON_DUPLICATE")
 
 	// E_SNAPSHOT_DEPTH_EXCEEDED indicates composed nesting deeper than
 	// [github.com/simon-lentz/yammm/instance.MaxComposedDepth].
-	E_SNAPSHOT_DEPTH_EXCEEDED = NewCode("E_SNAPSHOT_DEPTH_EXCEEDED", CategorySnapshot)
+	E_SNAPSHOT_DEPTH_EXCEEDED = NewCode("E_SNAPSHOT_DEPTH_EXCEEDED")
 
 	// E_SNAPSHOT_INTEGRITY_MISMATCH indicates the integrity hash does not match the
-	// document content. The file may be corrupted, truncated, or modified.
-	E_SNAPSHOT_INTEGRITY_MISMATCH = NewCode("E_SNAPSHOT_INTEGRITY_MISMATCH", CategorySnapshot)
+	// document content, or the header holds none: an empty, null or absent
+	// integrity_hash. The file may be corrupted, truncated, or modified.
+	E_SNAPSHOT_INTEGRITY_MISMATCH = NewCode("E_SNAPSHOT_INTEGRITY_MISMATCH")
 
 	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM indicates a schema hash
 	// algorithm version this library does not implement. Error on the
-	// body-reading surfaces (Load, Verify, Info, UpdateMetadata); Warning
-	// on the header-only surfaces, which stay classifiable for dispatch.
-	E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM = NewCode("E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM", CategorySnapshot)
+	// body-reading surfaces (Unmarshal, Verify, Stat, UpdateMetadata).
+	// ReadHeader and ScanDir accept such a header and draw nothing, so a
+	// document stays classifiable for dispatch; the CLI reports it as a Warning,
+	// save beside another header failure, which returns no header to read.
+	E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM = NewCode("E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM")
 
-	// W_SNAPSHOT_PATH_FALLBACK (Warning) indicates a provenance path string could
-	// not be parsed and fell back to the root path. The original path string is
-	// preserved for round-trip fidelity via Provenance.RawPath().
-	W_SNAPSHOT_PATH_FALLBACK = NewCode("W_SNAPSHOT_PATH_FALLBACK", CategorySnapshot)
-
-	// --- v0.3.0 additions ---
-
-	// E_SNAPSHOT_IO indicates an I/O failure reading a snapshot: a directory
-	// that fails to read (os.ReadDir, reported by snapshot.ScanDirSlice), a
-	// file that fails to open (os.Open, on ScanDir's per-file path), or a
-	// reader that fails inside snapshot.HeaderOnlyRead with an error that is
-	// not and does not wrap io.EOF or io.ErrUnexpectedEOF. A header that ends
-	// early is HeaderOnlyRead's Error-severity E_SNAPSHOT_MALFORMED, never
-	// this code.
-	// Per-file emissions land on ScanEntry.Result so the iterator
-	// continues to the next file rather than aborting; dir-level
-	// emissions surface on the outer Result returned by ScanDirSlice.
+	// E_SNAPSHOT_IO indicates an I/O failure reading a snapshot: a file that
+	// fails to open (os.Open, on snapshot.ScanDir's per-file path), a reader
+	// that fails inside snapshot.ReadHeader with an error that is not and does
+	// not wrap io.EOF or io.ErrUnexpectedEOF, or, at yammm snapshot info --dir,
+	// a directory that fails to read. A header that ends early is ReadHeader's
+	// Error-severity E_SNAPSHOT_MALFORMED, never this code.
+	// Per-file emissions land on ScanEntry.Err so the iterator
+	// continues to the next file rather than aborting.
 	// The underlying os error is preserved as a detail entry so the
 	// operator can recover the concrete cause. Named E_SNAPSHOT_IO, not a
-	// bare I/O name, to match the E_SNAPSHOT_* convention under CategorySnapshot;
-	// the precedent for a per-category I/O code is E_LOAD_IO_FAILURE
-	// under CategorySchema. No new CategoryIO constant is introduced.
-	E_SNAPSHOT_IO = NewCode("E_SNAPSHOT_IO", CategorySnapshot)
-
-	// E_UPDATE_METADATA_BODY_OFFSET indicates the header parsed cleanly
-	// but snapshot.UpdateMetadata's body-boundary offset tracker could
-	// not resolve a valid byte range for the reused body. The input does
-	// not match the shape snapshot.Marshal produces; byte-identical
-	// recovery via UpdateMetadata is not possible. Consumers using the
-	// primitive UpdateMetadata directly fall back to Load + Marshal;
-	// consumers using snapshot.UpdateMetadataOrReMarshal get that
-	// fallback automatically with a paired W_UPDATE_METADATA_FALLBACK
-	// warning on the returned Result.
-	E_UPDATE_METADATA_BODY_OFFSET = NewCode("E_UPDATE_METADATA_BODY_OFFSET", CategorySnapshot)
-
-	// W_UPDATE_METADATA_FALLBACK (Warning) indicates that
-	// snapshot.UpdateMetadataOrReMarshal fell back from the UpdateMetadata
-	// fast path to Load + Marshal because the fast path reported an Error or
-	// Fatal issue other than a cancellation: E_SNAPSHOT_MALFORMED at Error,
-	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output carries the
-	// input's indentation and created_at, so it differs from a direct Marshal
-	// only where the input did; the warning surfaces the
-	// path transition so operators can observe fallback frequency and triage
-	// persistent cases. Details include a "triggering_codes" entry listing the
-	// distinct Error and Fatal codes that caused the fallback.
-	//
-	// Uses the W_ prefix, the convention for a code whose severity is fixed at
-	// Warning. E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM keeps E_ because it is
-	// raised at both severities; severity lives on the Issue, so the prefix is
-	// a naming convention rather than a type-enforced property, and
-	// W_SNAPSHOT_UNRESOLVED_REQUIRED is raised at whatever severity
-	// snapshot.WithRevalidation was given.
-	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK", CategorySnapshot)
-
-	// W_SNAPSHOT_VALUE_NONCONFORMING indicates that a stored property value
-	// does not conform to the schema constraint its property declares.
-	// Reported only when the caller passes snapshot.WithValueConformance, and
-	// only for the kinds that have a canonical stored form — Timestamp, Date
-	// and UUID. It is not re-validation: bounds, enums, patterns and
-	// invariants are not checked, so silence is not a proof of validity.
-	// Warning severity, so Load still returns the snapshot.
-	W_SNAPSHOT_VALUE_NONCONFORMING = NewCode("W_SNAPSHOT_VALUE_NONCONFORMING", CategorySnapshot)
+	// bare I/O name, to match the E_SNAPSHOT_* convention, as E_LOAD_IO_FAILURE
+	// names the schema load's I/O failure.
+	E_SNAPSHOT_IO = NewCode("E_SNAPSHOT_IO")
 
 	// W_SNAPSHOT_UNRESOLVED_REQUIRED indicates a loaded document carries an
 	// unresolved record for an association the schema declares required, which
-	// is read from the schema, never from the record. Reported only when the
+	// is read from the schema, never from the record. A record a structural
+	// check refused draws that check's issue instead. Reported only when the
 	// caller passes snapshot.WithRevalidation, at that option's severity —
-	// the walk that finds the record runs on every Load and Verify, but a
+	// the walk that finds the record runs on every Unmarshal and Verify, but a
 	// document holding the record is well-formed, so without the option the
 	// record stays data (the snapshot's unresolved records) rather than a
 	// diagnostic.
-	W_SNAPSHOT_UNRESOLVED_REQUIRED = NewCode("W_SNAPSHOT_UNRESOLVED_REQUIRED", CategorySnapshot)
+	W_SNAPSHOT_UNRESOLVED_REQUIRED = NewCode("W_SNAPSHOT_UNRESOLVED_REQUIRED")
 
 	// W_SNAPSHOT_PATH_EXTENSION indicates a snapshot was written to a path
 	// that does not end in .ys. The document is correct and the write
@@ -638,76 +487,5 @@ var (
 	// snapshots by extension — a directory scan among them — will not find
 	// this one. Warning severity: the caller named the path deliberately, and
 	// refusing it would make a documented workflow fail rather than work.
-	W_SNAPSHOT_PATH_EXTENSION = NewCode("W_SNAPSHOT_PATH_EXTENSION", CategorySnapshot)
+	W_SNAPSHOT_PATH_EXTENSION = NewCode("W_SNAPSHOT_PATH_EXTENSION")
 )
-
-// AllCodes returns all registered diagnostic codes in registration order.
-// Built-in codes appear first (registered during diag package initialization),
-// followed by consumer-defined codes in package initialization order.
-//
-// This function is useful for tooling and testing. The returned slice is a
-// copy; modifications do not affect the original.
-func AllCodes() []Code {
-	mu.Lock()
-	defer mu.Unlock()
-	result := make([]Code, len(registry))
-	copy(result, registry)
-	return result
-}
-
-// CodesByCategory returns registered codes in the given category.
-//
-// The returned slice is a new allocation; modifications do not affect
-// internal state.
-func CodesByCategory(cat CodeCategory) []Code {
-	mu.Lock()
-	defer mu.Unlock()
-	var result []Code
-	for _, c := range registry {
-		if c.cat == cat {
-			result = append(result, c)
-		}
-	}
-	return result
-}
-
-// IsImportDeclarationCode reports whether code (a diagnostic code's String())
-// names an import-DECLARATION diagnostic — a rejected, duplicated, colliding, or
-// invalid import alias — as distinct from an import-RESOLUTION diagnostic
-// (E_IMPORT_RESOLVE / E_IMPORT_CYCLE / E_PATH_ESCAPE). Both families share
-// [CategoryImport], which is too coarse to tell them apart, so this is the
-// canonical declaration subset — co-located with the code definitions so a new
-// declaration code is added here too.
-//
-// The LSP markdown surface downgrades the declaration family to Hint in code
-// blocks (imports are categorically not processed there); the resolution family
-// keeps its severity. Keyed by the code's String() so callers holding only the
-// rendered code string can consult the list.
-func IsImportDeclarationCode(code string) bool {
-	switch code {
-	case E_IMPORT_NOT_ALLOWED.String(), E_DUPLICATE_IMPORT.String(),
-		E_IMPORT_ALIAS_COLLISION.String(), E_INVALID_ALIAS.String():
-		return true
-	default:
-		return false
-	}
-}
-
-// IsImportResolutionCode reports whether code (a diagnostic code's String())
-// names an import-RESOLUTION diagnostic — a path that does not resolve, a
-// cycle, or a path that escapes the module root — the complement of
-// [IsImportDeclarationCode] within [CategoryImport].
-//
-// The two predicates partition the category's built-in codes, so a new built-in
-// import code belongs in exactly one of them; a code another package registers
-// under [CategoryImport] satisfies neither. This one is the enumeration a family-wide change keys
-// on: every issue in the resolution family carries the module root and its
-// origin as details, and every one is built by a single builder per code.
-func IsImportResolutionCode(code string) bool {
-	switch code {
-	case E_IMPORT_RESOLVE.String(), E_IMPORT_CYCLE.String(), E_PATH_ESCAPE.String():
-		return true
-	default:
-		return false
-	}
-}

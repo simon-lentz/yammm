@@ -1,19 +1,20 @@
 package graph
 
 import (
-	"github.com/simon-lentz/yammm/diag"
+	"fmt"
+
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Duplicate records a duplicate primary key detected during graph construction.
+// Duplicate records a root the graph rejected for a primary key that already
+// exists for its type.
 //
-// When [Graph.Add] meets a primary key that already exists for the same type, a
-// Duplicate is created to track both the new instance (which is rejected) and
-// the existing instance (which remains in the graph). [Graph.AddOrMerge]
-// creates one only for an incoming instance carrying composed children; a merge
-// creates none. Its fields are read
-// through methods, so no caller can write through a snapshot.
+// When [Graph.Add] meets such a key, a Duplicate is created to track both the
+// new instance (which is rejected) and the existing instance (which remains in
+// the graph). [Graph.AddOrMerge] creates one only for an incoming instance
+// carrying composed children; a merge creates none. Its fields are read
+// through methods, so no caller can set one.
 //
 // # Composed Children Not Included
 //
@@ -21,122 +22,99 @@ import (
 // [Graph.Add] builds the whole tree before it meets the duplicate, and records
 // a childless copy of the rejected root: a duplicate installs nothing. If you need
 // to inspect composed children from duplicate data, access them from the original
-// [instance.ValidInstance] passed to [Graph.Add].
+// [instance.ValidInstance] passed to [Graph.Add] or [Graph.AddOrMerge].
 //
 // Duplicates are accessed via [Snapshot.Duplicates].
-type Duplicate struct {
-	instance   *Instance
-	conflict   *Instance
-	parent     *Instance
-	relation   string
-	diagnostic diag.Issue
+type Duplicate struct{ *duplicateState }
+
+// IsZero reports whether the handle names no record.
+func (d Duplicate) IsZero() bool { return d.duplicateState == nil }
+
+// duplicateState is the record a [Duplicate] names.
+type duplicateState struct {
+	instance Instance
+	conflict Instance
 }
 
-// Instance returns the instance that was rejected due to a duplicate primary
-// key: the instance passed to Add that was not added to the graph.
-func (d *Duplicate) Instance() *Instance {
-	if d == nil {
-		return nil
+// Instance returns a childless copy of the rejected instance: one that an add
+// did not install, or a duplicate record a document held.
+func (d Duplicate) Instance() Instance {
+	if d.IsZero() {
+		return Instance{}
 	}
 	return d.instance
 }
 
-// Conflict returns the instance in the graph the rejected one collided with,
-// which remains in the graph: the root at the rejected instance's type and key,
-// or the occupant of the parent's slot at its key, or a (one) slot's sole
-// occupant.
-func (d *Duplicate) Conflict() *Instance {
-	if d == nil {
-		return nil
+// Conflict returns the root the rejected instance collided with, which remains
+// in the graph: the root at the rejected instance's type and key.
+func (d Duplicate) Conflict() Instance {
+	if d.IsZero() {
+		return Instance{}
 	}
 	return d.conflict
 }
 
-// Parent returns the composing parent for a composed-child duplicate, and nil
-// for a root duplicate. With [Duplicate.Relation] it locates a conflict no
-// index holds.
-func (d *Duplicate) Parent() *Instance {
-	if d == nil {
-		return nil
-	}
-	return d.parent
-}
-
-// Relation returns the composing relation name for a composed-child duplicate,
-// and "" for a root duplicate.
-func (d *Duplicate) Relation() string {
-	if d == nil {
-		return ""
-	}
-	return d.relation
-}
-
-// Diagnostic returns the E_DUPLICATE_PK or E_DUPLICATE_COMPOSED_PK issue that
-// reported the conflict.
-//
-// For snapshots loaded from persisted .ys files the issue is zero-valued,
-// because construction diagnostics are transient and not persisted. Code that
-// runs on both constructed and loaded snapshots guards on [diag.Issue.IsZero].
-func (d *Duplicate) Diagnostic() diag.Issue {
-	if d == nil {
-		return diag.Issue{}
-	}
-	return d.diagnostic
-}
-
-// UnresolvedEdge records an association edge whose target was not found in the graph.
+// UnresolvedEdge records an association edge the graph could not resolve: one
+// whose target it holds no root for, or a required one the data left absent or
+// empty.
 //
 // Unresolved edges occur when:
-//   - The target instance was not added yet (Reason: "target_missing")
-//   - A required association field is absent from the data (Reason: "absent")
-//   - A required association array is empty (Reason: "empty")
+//   - The target instance was not added yet ([ReasonTargetMissing])
+//   - A required association field is absent from the data ([ReasonAbsent])
+//   - A required association array is empty ([ReasonEmpty])
 //
 // For required associations ([UnresolvedEdge.Required]), unresolved edges cause
 // [Graph.Check] to report E_UNRESOLVED_REQUIRED diagnostics. Optional
 // associations may remain unresolved without error. Its fields are read through
-// methods, so no caller can write through a snapshot.
+// methods, so no caller can set one.
 //
 // Unresolved edges are accessed via [Snapshot.Unresolved].
-type UnresolvedEdge struct {
-	source     *Instance
+type UnresolvedEdge struct{ *unresolvedEdgeState }
+
+// IsZero reports whether the handle names no record.
+func (u UnresolvedEdge) IsZero() bool { return u.unresolvedEdgeState == nil }
+
+// unresolvedEdgeState is the record a [UnresolvedEdge] names.
+type unresolvedEdgeState struct {
+	source     Instance
 	relation   string
 	targetType schema.TypeID
 	targetKey  string
 	required   bool
-	reason     string
-	// properties is empty for the "absent" and "empty" reasons, which never
+	reason     UnresolvedReason
+	// properties is empty for the absent and empty reasons, which never
 	// had a target to attach properties to.
 	properties immutable.Properties
 }
 
 // Source returns the instance that declares the unresolved reference.
-func (u *UnresolvedEdge) Source() *Instance {
-	if u == nil {
-		return nil
+func (u UnresolvedEdge) Source() Instance {
+	if u.IsZero() {
+		return Instance{}
 	}
 	return u.source
 }
 
 // Relation returns the DSL relation name (e.g., "OWNER").
-func (u *UnresolvedEdge) Relation() string {
-	if u == nil {
+func (u UnresolvedEdge) Relation() string {
+	if u.IsZero() {
 		return ""
 	}
 	return u.relation
 }
 
 // TargetType returns the association's declared target type.
-func (u *UnresolvedEdge) TargetType() schema.TypeID {
-	if u == nil {
+func (u UnresolvedEdge) TargetType() schema.TypeID {
+	if u.IsZero() {
 		return schema.TypeID{}
 	}
 	return u.targetType
 }
 
-// TargetKey returns the foreign key in [FormatKey] form, and "" for the
-// "absent" and "empty" reasons, which name no target.
-func (u *UnresolvedEdge) TargetKey() string {
-	if u == nil {
+// TargetKey returns the foreign key in [FormatKey] form, and "" for
+// [ReasonAbsent] and [ReasonEmpty], which name no target.
+func (u UnresolvedEdge) TargetKey() string {
+	if u.IsZero() {
 		return ""
 	}
 	return u.targetKey
@@ -145,32 +123,69 @@ func (u *UnresolvedEdge) TargetKey() string {
 // Required reports whether the association is required by the schema the
 // snapshot is bound to. Every constructor derives it from the relation and
 // none takes it from its input; when true, [Graph.Check] reports E_UNRESOLVED_REQUIRED.
-func (u *UnresolvedEdge) Required() bool {
-	if u == nil {
+func (u UnresolvedEdge) Required() bool {
+	if u.IsZero() {
 		return false
 	}
 	return u.required
 }
 
-// Reason explains why the edge is unresolved:
-//   - "target_missing": the target instance is not in the graph
-//   - "absent": the association field is missing from the instance data
-//   - "empty": the association array is present but empty
-func (u *UnresolvedEdge) Reason() string {
-	if u == nil {
-		return ""
+// Reason explains why the edge is unresolved, and is zero for a zero receiver.
+func (u UnresolvedEdge) Reason() UnresolvedReason {
+	if u.IsZero() {
+		return 0
 	}
 	return u.reason
 }
 
+// UnresolvedReason says why an association edge is unresolved. The zero
+// UnresolvedReason names no reason.
+type UnresolvedReason uint8
+
+const (
+	// ReasonTargetMissing: the target instance is not in the graph.
+	ReasonTargetMissing UnresolvedReason = iota + 1
+	// ReasonAbsent: the instance data leaves the association field out or
+	// holds no value there, such as null.
+	ReasonAbsent
+	// ReasonEmpty: the association array is present but empty.
+	ReasonEmpty
+)
+
+// String returns the reason's text in a .ys document: "target_missing",
+// "absent" or "empty".
+func (r UnresolvedReason) String() string {
+	switch r {
+	case ReasonTargetMissing:
+		return "target_missing"
+	case ReasonAbsent:
+		return "absent"
+	case ReasonEmpty:
+		return "empty"
+	default:
+		return fmt.Sprintf("UnresolvedReason(%d)", uint8(r))
+	}
+}
+
+// unresolvedReason reads a reason from its text in a .ys document, and returns
+// zero for a text that names none.
+func unresolvedReason(text string) UnresolvedReason {
+	for r := ReasonTargetMissing; r <= ReasonEmpty; r++ {
+		if r.String() == text {
+			return r
+		}
+	}
+	return 0
+}
+
 // Property returns the value for the given edge property name and true if it exists.
-// Returns (zero Value, false) if the property does not exist or the receiver is nil.
+// Returns (zero Value, false) if the property does not exist or the receiver is zero.
 //
-// Edge properties on unresolved edges are declared on the forward reference
-// via the yammm DSL; they survive Marshal/Load in every readable .ys wire
+// Edge properties on unresolved edges are declared on the association in the
+// yammm DSL; they survive Marshal/Unmarshal in every readable .ys wire
 // format. Symmetric with [Edge.Property] for resolved edges.
-func (u *UnresolvedEdge) Property(name string) (immutable.Value, bool) {
-	if u == nil {
+func (u UnresolvedEdge) Property(name string) (immutable.Value, bool) {
+	if u.IsZero() {
 		return immutable.Value{}, false
 	}
 	return u.properties.Get(name)
@@ -178,31 +193,26 @@ func (u *UnresolvedEdge) Property(name string) (immutable.Value, bool) {
 
 // Properties returns all edge property values.
 //
-// Returns an empty Properties if the edge has no properties or the receiver
-// is nil. The returned Properties is immutable. Symmetric with [Edge.Properties]
-// for resolved edges.
-func (u *UnresolvedEdge) Properties() immutable.Properties {
-	if u == nil {
+// An edge with no property, or a zero receiver, holds the zero Properties, so
+// [immutable.Properties.Clone] answers nil for it. The returned Properties is immutable.
+func (u UnresolvedEdge) Properties() immutable.Properties {
+	if u.IsZero() {
 		return immutable.Properties{}
 	}
 	return u.properties
 }
 
-// newDuplicate creates a Duplicate record. parent and relation are the
-// composing coordinates, zero for a root duplicate.
-func newDuplicate(instance, conflict, parent *Instance, relation string, diagnostic diag.Issue) *Duplicate {
-	return &Duplicate{
-		instance:   instance,
-		conflict:   conflict,
-		parent:     parent,
-		relation:   relation,
-		diagnostic: diagnostic,
-	}
+// newDuplicate creates a Duplicate record.
+func newDuplicate(instance, conflict Instance) Duplicate {
+	return Duplicate{&duplicateState{
+		instance: instance,
+		conflict: conflict,
+	}}
 }
 
 // newUnresolvedEdge creates an UnresolvedEdge record.
-func newUnresolvedEdge(source *Instance, relation string, targetType schema.TypeID, targetKey string, required bool, reason string, properties immutable.Properties) *UnresolvedEdge {
-	return &UnresolvedEdge{
+func newUnresolvedEdge(source Instance, relation string, targetType schema.TypeID, targetKey string, required bool, reason UnresolvedReason, properties immutable.Properties) UnresolvedEdge {
+	return UnresolvedEdge{&unresolvedEdgeState{
 		source:     source,
 		relation:   relation,
 		targetType: targetType,
@@ -210,5 +220,5 @@ func newUnresolvedEdge(source *Instance, relation string, targetType schema.Type
 		required:   required,
 		reason:     reason,
 		properties: properties,
-	}
+	}}
 }

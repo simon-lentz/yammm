@@ -19,6 +19,11 @@ func TestLex_FirstMatchOrdering(t *testing.T) {
 			want: []Token{{Kind: "FLOAT", Value: "2.5e10", Start: 0, End: 6}},
 		},
 		{
+			name: "a caret is no operator",
+			src:  "^",
+			want: []Token{{Kind: "ANY_OTHER", Value: "^", Start: 0, End: 1}},
+		},
+		{
 			name: "a float with trailing junk falls through to the malformed rule",
 			src:  "1.5e5x",
 			want: []Token{{Kind: "INVALID_NUMBER", Value: "1.5e5x", Start: 0, End: 6}},
@@ -86,6 +91,20 @@ func TestLex_FirstMatchOrdering(t *testing.T) {
 				{Kind: "VARIABLE", Value: "$a", Start: 0, End: 2},
 				{Kind: "WS", Value: " ", Start: 2, End: 3},
 				{Kind: "DOLLAR", Value: "$", Start: 3, End: 4},
+			},
+		},
+		{
+			name: "a variable names a relation by its upper-case name",
+			src:  "$WORKS_AT",
+			want: []Token{{Kind: "VARIABLE", Value: "$WORKS_AT", Start: 0, End: 9}},
+		},
+		{
+			name: "a variable begins with a letter or a digit",
+			src:  "$_x",
+			want: []Token{
+				{Kind: "DOLLAR", Value: "$", Start: 0, End: 1},
+				{Kind: "USCORE", Value: "_", Start: 1, End: 2},
+				{Kind: "LC_WORD", Value: "x", Start: 2, End: 3},
 			},
 		},
 		{

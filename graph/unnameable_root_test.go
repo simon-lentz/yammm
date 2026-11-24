@@ -2,22 +2,22 @@ package graph_test
 
 import (
 	"context"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// The root type the entry schema cannot name.
-//
-// A root is keyed by name in every output document, and a type reached only
-// through an intermediate import has no name form. Both constructors refuse one
-// so no writer has to check for a rendered-name collision: two types the entry
-// schema can name never render alike.
+// A type the entry schema cannot name: one reached only through an
+// intermediate import. A graph holds it by identity, as a root and as a
+// composed child, apart from the entry's own type of the same name.
 
 const unnameableEntry = `schema "entry"
 
@@ -59,22 +59,22 @@ type Beacon {
 
 // unnameableFixture loads the three-schema closure and returns the entry
 // schema with the transitively imported Beacon's identity.
-func unnameableFixture(t *testing.T) (*schema.Schema, schema.TypeID) {
+func unnameableFixture(t *testing.T) (schema.Schema, schema.TypeID) {
 	t.Helper()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(unnameableEntry),
 		"base.yammm":  []byte(unnameableBase),
 		"deep.yammm":  []byte(unnameableDeep),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load fixture: %s", result)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load fixture: %s", err)
 	}
 	base, ok := s.ImportByAlias("base")
-	if !ok || base.Schema() == nil {
+	if !ok || base.Schema().IsZero() {
 		t.Fatal("import alias base did not resolve")
 	}
 	deep, ok := base.Schema().ImportByAlias("deep")
-	if !ok || deep.Schema() == nil {
+	if !ok || deep.Schema().IsZero() {
 		t.Fatal("import alias deep did not resolve")
 	}
 	typ, ok := deep.Schema().Type("Beacon")
@@ -87,100 +87,9 @@ func unnameableFixture(t *testing.T) (*schema.Schema, schema.TypeID) {
 	return s, typ.ID()
 }
 
-func beaconParts(id schema.TypeID, key string) graph.InstanceParts {
-	return graph.InstanceParts{
-		TypeID:     id,
-		PrimaryKey: immutable.WrapKey([]any{key}),
-		Properties: immutable.WrapProperties(map[string]any{"id": key, "power": float64(1)}),
-	}
-}
-
-// TestRebuildSnapshot_UnnameableRootRefused pins the constructor refusal the
-// writers rely on. This is the path a persisted document takes, and it is the
-// only way a snapshot could otherwise come to hold such a root.
-//
-// Mutation: dropping the schema.Addressable arm from validatePartsRootTypes
-// turns this red.
-func TestRebuildSnapshot_UnnameableRootRefused(t *testing.T) {
-	t.Parallel()
-	s, deepBeacon := unnameableFixture(t)
-
-	_, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{deepBeacon},
-		Instances: []graph.InstanceParts{
-			beaconParts(deepBeacon, "d1"),
-		},
-	})
-	if !result.HasErrors() {
-		t.Fatal("a root the entry schema cannot name was accepted")
-	}
-	if !resultHasCode(result, diag.E_INTERNAL) {
-		t.Errorf("refusal reported %s, want %s", result, diag.E_INTERNAL)
-	}
-	if msg := result.String(); !strings.Contains(msg, "intermediate import") {
-		t.Errorf("refusal %q does not say why the type has no name", msg)
-	}
-}
-
-// TestRebuildSnapshot_UnnameableRootDuplicateRefused covers the other position
-// a root identity occupies. A root duplicate is a rejected root instance, and
-// its conflict is the root at its own type and key; a type the entry schema
-// cannot name holds no root, so the record has no conflict. A COMPOSED
-// duplicate may name a part type and is judged against its slot instead.
-func TestRebuildSnapshot_UnnameableRootDuplicateRefused(t *testing.T) {
-	t.Parallel()
-	s, deepBeacon := unnameableFixture(t)
-
-	// No types entry names the type, so the types-entry rule, which refuses it
-	// too, is not what refuses the record: a root duplicate's conflict is a
-	// root at its own type, and no root of this type can exist.
-	_, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Duplicates: []graph.DuplicateParts{{
-			Instance: beaconParts(deepBeacon, "d1"),
-		}},
-	})
-	if !result.HasErrors() {
-		t.Fatal("a root duplicate the entry schema cannot name was accepted")
-	}
-	if !resultHasCode(result, diag.E_INTERNAL) {
-		t.Errorf("refusal reported %s, want %s", result, diag.E_INTERNAL)
-	}
-	if msg := result.String(); !strings.Contains(msg, "duplicate record 0") || !strings.Contains(msg, "no root is at its own type and key") {
-		t.Errorf("refusal %q does not name the duplicate position", msg)
-	}
-	if msg := result.String(); strings.Contains(msg, "zero type identity") {
-		t.Errorf("the fixture raised an identity error of its own, so the refusal under test is not what failed it: %s", msg)
-	}
-}
-
-// TestRebuildSnapshot_UnnameableDenotedTypeRefused covers the type a snapshot
-// DENOTES without holding an instance of it. Naming it in Types with no instances
-// bypassed the root rule entirely, and every writer still keyed its output by the
-// denoted type's name — so the writers refused a snapshot both constructors had
-// accepted.
-//
-// Mutation: deleting the validatePartsDenotedTypes call turns this red.
-func TestRebuildSnapshot_UnnameableDenotedTypeRefused(t *testing.T) {
-	t.Parallel()
-	s, deepBeacon := unnameableFixture(t)
-
-	_, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{deepBeacon},
-	})
-	if !result.HasErrors() {
-		t.Fatal("a snapshot denoting a type the entry schema cannot name was assembled")
-	}
-	if msg := result.String(); !strings.Contains(msg, "types entry") {
-		t.Errorf("refusal %q does not name the types entry", msg)
-	}
-}
-
-// TestRebuildSnapshot_KeepsAnUnnameableComposedChild is the other half of the
-// rule: a composed child is addressed through its parent, never by name, so any
-// type in the closure stays legal there — a transitively imported part type
-// included. Narrowing the rule to every instance rather than every ROOT would
-// drop this subtree.
-func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
+// TestRebuild_KeepsAnUnnameableComposedChild pins that a rebuilt graph keeps a
+// composed child of a transitively imported part type under its identity.
+func TestRebuild_KeepsAnUnnameableComposedChild(t *testing.T) {
 	t.Parallel()
 	s, _ := unnameableFixture(t)
 
@@ -198,14 +107,14 @@ func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
 		t.Fatal("fixture is vacuous: the entry schema can name deep.Shard")
 	}
 
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{basin},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     basin,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
-				Composed: map[string][]graph.InstanceParts{
+				Composed: map[string][]snapparts.Instance{
 					"PIECES": {{
 						TypeID:     shard.ID(),
 						PrimaryKey: immutable.WrapKey([]any{"s1"}),
@@ -215,14 +124,11 @@ func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
 			},
 		},
 	})
-	if result.HasErrors() {
-		t.Fatalf("a composed child of a transitively imported part type was refused: %s", result)
-	}
-	roots := built.InstancesOf(basin)
+	roots := slices.Collect(built.InstancesOf(basin))
 	if len(roots) != 1 {
 		t.Fatalf("got %d roots, want 1", len(roots))
 	}
-	children := roots[0].Composed("PIECES")
+	children := slices.Collect(roots[0].Composed("PIECES"))
 	if len(children) != 1 {
 		t.Fatalf("got %d composed children, want 1", len(children))
 	}
@@ -231,70 +137,51 @@ func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
 	}
 }
 
-// TestGraphAdd_UnnameableRootRefused pins that Add applies the same rule the
-// constructors do, by the same predicate rather than by its own copy, and that
-// the refusal carries the transitive-import hint and the declaring schema under
-// any spelling of the name: the identity decides, not a dot in the caller's
-// string.
-//
-// The BEHAVIOUR here predates the shared predicate — TestIntegration_ComplexMultiSchema
-// already drove Add's refusal — so what this adds is the diagnostic code at a
-// named site, not new coverage.
-func TestGraphAdd_UnnameableRootRefused(t *testing.T) {
+// TestGraphAdd_KeepsAnUnnameableRootApartFromItsNamesake pins that Add takes a
+// root of a type the entry schema cannot name, under either schema's spelling,
+// and holds it apart from the entry's Beacon of the same name and key.
+func TestGraphAdd_KeepsAnUnnameableRootApartFromItsNamesake(t *testing.T) {
 	t.Parallel()
 	s, deepBeacon := unnameableFixture(t)
-
+	entryBeacon, ok := s.Type("Beacon")
+	if !ok {
+		t.Fatal("entry Beacon not found")
+	}
 	base, _ := s.ImportByAlias("base")
 	deep, _ := base.Schema().ImportByAlias("deep")
-	typ, _ := deep.Schema().Type("Beacon")
 
-	for _, spelling := range []string{schema.TagForm(s, typ.ID()), "Beacon"} {
-		valid := instance.NewValidInstance(spelling, typ.ID(),
-			immutable.WrapKey([]any{"d1"}),
-			immutable.WrapProperties(map[string]any{"id": "d1", "power": float64(1)}),
-			nil, nil, nil)
-
-		addResult := graph.New(s).Add(context.Background(), valid)
-		if !addResult.HasErrors() {
-			t.Fatalf("Add accepted a root the entry schema cannot name, spelled %q", spelling)
-		}
-		var sawHint, sawSchema bool
-		for issue := range addResult.Issues() {
-			if issue.Code() != diag.E_GRAPH_TYPE_NOT_FOUND {
-				continue
-			}
-			sawHint = strings.Contains(issue.Hint(), "transitively imported schema")
-			for _, d := range issue.Details() {
-				if d.Key == diag.DetailKeyTypeSchema && d.Value == typ.ID().SchemaPath().String() {
-					sawSchema = true
-				}
+	for _, c := range []struct {
+		over     schema.Schema
+		spelling string
+	}{{base.Schema(), "deep.Beacon"}, {deep.Schema(), "Beacon"}} {
+		g := graph.New(s)
+		props := map[string]any{"id": "d1", "power": float64(1)}
+		for _, valid := range []instance.ValidInstance{
+			instancetest.Valid(t, s, "Beacon", props),
+			instancetest.Valid(t, c.over, c.spelling, props),
+		} {
+			if err := g.Add(context.Background(), valid); err != nil {
+				t.Fatalf("spelled %q: Add refused %s: %s", c.spelling, valid.TypeName(), err)
 			}
 		}
-		if !resultHasCode(addResult, diag.E_GRAPH_TYPE_NOT_FOUND) || !sawHint || !sawSchema {
-			t.Errorf("spelled %q: Add reported %s, want %s with the transitive-import hint and type_schema", spelling, addResult, diag.E_GRAPH_TYPE_NOT_FOUND)
+		snap := g.Snapshot()
+		if got := snap.Types(); len(got) != 2 || !slices.Contains(got, deepBeacon) || !slices.Contains(got, entryBeacon.ID()) {
+			t.Errorf("spelled %q: Types() = %v, want both Beacons", c.spelling, got)
+		}
+		for _, id := range []schema.TypeID{deepBeacon, entryBeacon.ID()} {
+			if n := len(slices.Collect(snap.InstancesOf(id))); n != 1 {
+				t.Errorf("spelled %q: %d instances of %s, want 1", c.spelling, n, id)
+			}
 		}
 	}
-	if got := deepBeacon; got != typ.ID() {
-		t.Errorf("the fixture and the resolved type disagree: %s, %s", got, typ.ID())
-	}
-}
-
-// resultHasCode reports whether the result carries an issue with the code.
-func resultHasCode(result diag.Result, code diag.Code) bool {
-	for issue := range result.Issues() {
-		if issue.Code() == code {
-			return true
-		}
-	}
-	return false
 }
 
 // mustImportedType resolves a directly imported type, reporting rather than
 // failing so a caller can skip the rest of its assertions.
-func mustImportedType(t *testing.T, s *schema.Schema, alias, name string) (schema.TypeID, bool) {
+func mustImportedType(t *testing.T, s schema.Schema, alias, name string) (schema.TypeID, bool) {
 	t.Helper()
 	imp, ok := s.ImportByAlias(alias)
-	if !ok || imp.Schema() == nil {
+	if !ok || imp.Schema().IsZero() {
 		t.Errorf("import alias %q did not resolve", alias)
 		return schema.TypeID{}, false
 	}
@@ -304,4 +191,135 @@ func mustImportedType(t *testing.T, s *schema.Schema, alias, name string) (schem
 		return schema.TypeID{}, false
 	}
 	return typ.ID(), true
+}
+
+// TestGraphAdd_NamesAnUnnameableRootApartFromItsNamesake pins that a root of a
+// type the entry schema cannot name carries its declaring schema's name, so a
+// duplicate of it and a duplicate of the entry's Beacon at one key draw two
+// E_DUPLICATE_PK issues that name two types.
+func TestGraphAdd_NamesAnUnnameableRootApartFromItsNamesake(t *testing.T) {
+	t.Parallel()
+	s, deepBeacon := unnameableFixture(t)
+	base, _ := s.ImportByAlias("base")
+	deep, _ := base.Schema().ImportByAlias("deep")
+
+	g := graph.New(s)
+	props := map[string]any{"id": "d1", "power": float64(1)}
+	var named []string
+	for range 2 {
+		for _, valid := range []instance.ValidInstance{
+			instancetest.Valid(t, s, "Beacon", props),
+			instancetest.Valid(t, deep.Schema(), "Beacon", props),
+		} {
+			for issue := range diagtest.Failures(t, g.Add(context.Background(), valid)).Issues() {
+				if issue.Code() != diag.E_DUPLICATE_PK {
+					t.Fatalf("Add raised %s, want only E_DUPLICATE_PK", issue.Code())
+				}
+				for _, d := range issue.Details() {
+					if d.Key == diag.DetailKeyTypeName {
+						named = append(named, d.Value)
+					}
+				}
+			}
+		}
+	}
+	slices.Sort(named)
+	if want := []string{"Beacon", "deep#Beacon"}; !slices.Equal(named, want) {
+		t.Errorf("the duplicates name %v, want %v", named, want)
+	}
+	for inst := range g.Snapshot().InstancesOf(deepBeacon) {
+		if got := inst.TypeName(); got != "deep#Beacon" {
+			t.Errorf("the deep root's TypeName = %q, want %q", got, "deep#Beacon")
+		}
+	}
+}
+
+// TestGraphAdd_NamesARefusedTypeAsTheGraphRendersIt pins that Add's refusals of
+// a composed child read out as a root, and of a duplicate root, name the type by
+// the graph's rendering, not by the validating schema's own name.
+func TestGraphAdd_NamesARefusedTypeAsTheGraphRendersIt(t *testing.T) {
+	t.Parallel()
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"entry.yammm": []byte(`schema "entry"
+
+import "base.yammm" as base
+`),
+		"base.yammm": []byte(`schema "base"
+
+import "deep.yammm" as deep
+
+type Basin {
+	id String primary
+	*-> MARKS (many) deep.Mark
+	*-> PIECES (many) deep.Shard
+}
+`),
+		"deep.yammm": []byte(`schema "deep"
+
+part type Mark {
+	note String
+}
+
+part type Shard {
+	name String primary
+}
+`),
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load fixture: %s", err)
+	}
+	base, _ := s.ImportByAlias("base")
+	basin := instancetest.Valid(t, base.Schema(), "Basin", map[string]any{
+		"id":     "b1",
+		"marks":  []any{map[string]any{"note": "n"}},
+		"pieces": []any{map[string]any{"name": "s1"}},
+	})
+
+	children := map[string]instance.ValidInstance{}
+	for _, rel := range []string{"MARKS", "PIECES"} {
+		for child := range basin.Composed(rel) {
+			children[rel] = child
+			break
+		}
+	}
+	for rel, want := range map[string]struct {
+		code diag.Code
+		name string
+	}{
+		"MARKS":  {diag.E_GRAPH_MISSING_PK, "deep#Mark"},
+		"PIECES": {diag.E_GRAPH_INVALID_COMPOSITION, "deep#Shard"},
+	} {
+		res := diagtest.Failures(t, graph.New(s).Add(context.Background(), children[rel]))
+		if !res.HasCode(want.code) {
+			t.Fatalf("%s: Add drew %s, want %s", rel, res, want.code)
+		}
+		if got := refusedTypeNames(res); !slices.Equal(got, []string{want.name}) {
+			t.Errorf("%s: the refusal names %q, want [%q]", rel, got, want.name)
+		}
+	}
+
+	g := graph.New(s)
+	if err := g.Add(context.Background(), basin); err != nil {
+		t.Fatalf("first Add: %s", err)
+	}
+	res := diagtest.Failures(t, g.Add(context.Background(), basin))
+	if !res.HasCode(diag.E_DUPLICATE_PK) {
+		t.Fatalf("a duplicate Add drew %s, want %s", res, diag.E_DUPLICATE_PK)
+	}
+	if got := refusedTypeNames(res); !slices.Equal(got, []string{"base.Basin"}) {
+		t.Errorf("the duplicate names %q, want [%q]", got, "base.Basin")
+	}
+}
+
+// refusedTypeNames returns the type_name detail of each issue in res.
+func refusedTypeNames(res diag.Result) []string {
+	var names []string
+	for issue := range res.Issues() {
+		for _, d := range issue.Details() {
+			if d.Key == diag.DetailKeyTypeName {
+				names = append(names, d.Value)
+			}
+		}
+	}
+	return names
 }

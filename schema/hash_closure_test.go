@@ -8,15 +8,15 @@ import (
 
 // loadClosure loads entry from an in-memory source set and fails the test on
 // any load error.
-func loadClosure(t *testing.T, sources map[string]string, entry string) *schema.Schema {
+func loadClosure(t *testing.T, sources map[string]string, entry string) schema.Schema {
 	t.Helper()
 	bytesBy := make(map[string][]byte, len(sources))
 	for k, v := range sources {
 		bytesBy[k] = []byte(v)
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), bytesBy, entry, ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load %s: %v", entry, result.Err())
+	s, err := schema.LoadSourcesWithEntry(t.Context(), bytesBy, entry, schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load %s: %v", entry, err)
 	}
 	return s
 }
@@ -71,6 +71,27 @@ func TestStructuralHash_CoversTransitiveImports(t *testing.T) {
 	if schema.StructuralHash(before) == schema.StructuralHash(after) {
 		t.Fatal("a required property added two imports away must move the entry schema's hash")
 	}
+}
+
+const (
+	baseDecl = "type Base {\n\tid String primary\n\tx String\n}\n"
+	codeDecl = "type Code = String[3, 3]\n"
+)
+
+// withEntry adds an entry schema importing a and b, with the given declarations.
+func withEntry(members map[string]string, decls string) map[string]string {
+	members["entry.yammm"] = "schema \"entry\"\n\nimport \"a.yammm\" as a\nimport \"b.yammm\" as b\n\n" + decls
+	return members
+}
+
+// twoBases is a closure whose members a and b each declare Base alike.
+func twoBases(decls string) map[string]string {
+	return withEntry(map[string]string{"a.yammm": "schema \"a\"\n\n" + baseDecl, "b.yammm": "schema \"b\"\n\n" + baseDecl}, decls)
+}
+
+// twoCodes is a closure whose members a and b each declare Code alike.
+func twoCodes(decls string) map[string]string {
+	return withEntry(map[string]string{"a.yammm": "schema \"a\"\n\n" + codeDecl, "b.yammm": "schema \"b\"\n\n" + codeDecl}, decls)
 }
 
 // TestStructuralHash_ClosureCoverage is the closure-level coverage statement:
@@ -134,6 +155,42 @@ func TestStructuralHash_ClosureCoverage(t *testing.T) {
 			wantSame: true,
 		},
 		{
+			name: "the entry's direct import set is excluded",
+			a: map[string]string{
+				"entry.yammm": "schema \"entry\"\n\nimport \"la.yammm\" as la\nimport \"lb.yammm\" as lb\n\ntype Root {\n\tid String primary\n}\n",
+				"la.yammm":    "schema \"la\"\n\ntype U {\n\tid String primary\n}\n",
+				"lb.yammm":    "schema \"lb\"\n\ntype T {\n\tid String primary\n}\n",
+			},
+			b: map[string]string{
+				"entry.yammm": "schema \"entry\"\n\nimport \"la.yammm\" as la\n\ntype Root {\n\tid String primary\n}\n",
+				"la.yammm":    "schema \"la\"\n\nimport \"lb.yammm\" as lb\n\ntype U {\n\tid String primary\n}\n",
+				"lb.yammm":    "schema \"lb\"\n\ntype T {\n\tid String primary\n}\n",
+			},
+			entry:    "entry.yammm",
+			wantSame: true,
+		},
+		{
+			name:     "the member that owns a supertype declared alike is excluded",
+			a:        twoBases("type K extends a.Base {\n\tlabel String\n}\n"),
+			b:        twoBases("type K extends b.Base {\n\tlabel String\n}\n"),
+			entry:    "entry.yammm",
+			wantSame: true,
+		},
+		{
+			name:     "the member that owns a data type declared alike is excluded",
+			a:        twoCodes("type K {\n\tid String primary\n\tc a.Code\n}\n"),
+			b:        twoCodes("type K {\n\tid String primary\n\tc b.Code\n}\n"),
+			entry:    "entry.yammm",
+			wantSame: true,
+		},
+		{
+			name:     "the data type a property names is excluded",
+			a:        twoCodes("type K {\n\tid String primary\n\tc a.Code\n}\n"),
+			b:        twoCodes("type K {\n\tid String primary\n\tc String[3, 3]\n}\n"),
+			entry:    "entry.yammm",
+			wantSame: true,
+		},
+		{
 			name:     "closure membership is hashed even for a member with no types",
 			a:        map[string]string{"entry.yammm": "schema \"entry\"\n\nimport \"empty.yammm\" as e\n\ntype Root {\n\tid String primary\n}\n", "empty.yammm": "schema \"empty\"\n"},
 			b:        map[string]string{"entry.yammm": "schema \"entry\"\n\ntype Root {\n\tid String primary\n}\n"},
@@ -162,5 +219,20 @@ func TestStructuralHash_NoImportHashMovedFromAlgorithm2(t *testing.T) {
 	const v2Minimal = "sha256:e295ab45c0118bcfa0a910c2a071d83fff13fc1a60d0d863a444d15ecd87845e"
 	if got := schema.StructuralHash(buildVectorSchemaMinimal()); got == v2Minimal {
 		t.Fatal("a schema with no imports still hashes as algorithm 2 did")
+	}
+}
+
+// A type's rendered record holds its inherited invariants as well as its own. The
+// parent renders the invariant too, so only the digest tells the two forms apart;
+// it moves when the hash algorithm does.
+func TestStructuralHash_ATypeHoldsItsInheritedInvariants(t *testing.T) {
+	t.Parallel()
+	s, err := schema.LoadString(t.Context(), "schema \"h\"\n\nabstract type P {\n\tid String primary\n\t! \"p\" id != \"\"\n}\n\ntype K extends P {\n\t! \"k\" id != \"x\"\n}\n", "h.yammm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "sha256:b8d311ed99f90e73f7c1ac815bd42674f3cfd68391f050354d1d7757b49587af"
+	if got := schema.StructuralHash(s); got != want {
+		t.Errorf("StructuralHash = %s, want %s", got, want)
 	}
 }

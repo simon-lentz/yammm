@@ -1,16 +1,12 @@
 package eval_test
 
 import (
-	"context"
-	"log/slog"
 	"regexp"
 	"testing"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/internal/trace"
-	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -169,8 +165,9 @@ func TestEvaluator_LogicalErrors(t *testing.T) {
 		e       expr.Expression
 		wantErr string
 	}{
-		{"and_first_eval_error", sx("&&", sx("$", lit("undefined")), lit(true)), "undefined variable"},
-		{"or_first_eval_error", sx("||", sx("$", lit("undefined")), lit(false)), "undefined variable"},
+		{"and_first_eval_error", sx("&&", sx("!", lit(int64(1))), lit(true)), "! expects boolean"},
+		{"or_first_eval_error", sx("||", sx("!", lit(int64(1))), lit(false)), "! expects boolean"},
+		{"and_first_unbound", sx("&&", sx("$", lit("undefined")), lit(true)), "expected boolean in &&, got <nil>"},
 		{"not_nil", sx("!", lit(nil)), "boolean"},
 	}
 
@@ -183,13 +180,13 @@ func TestEvaluator_LogicalErrors(t *testing.T) {
 
 func TestEvaluator_And_ShortCircuit(t *testing.T) {
 	// And short-circuits: if the first arg is false, the second is not
-	// evaluated. The second arg would error (undefined variable) if reached.
-	evalEq(t, sx("&&", lit(false), sx("$", lit("undefined"))), false)
+	// evaluated. The second arg would error if reached.
+	evalEq(t, sx("&&", lit(false), sx("!", lit(int64(1)))), false)
 }
 
 func TestEvaluator_Or_ShortCircuit(t *testing.T) {
 	// Or short-circuits: if the first arg is true, the second is not evaluated.
-	evalEq(t, sx("||", lit(true), sx("$", lit("undefined"))), true)
+	evalEq(t, sx("||", lit(true), sx("!", lit(int64(1)))), true)
 }
 
 func TestEvaluator_Ternary(t *testing.T) {
@@ -207,7 +204,7 @@ func TestEvaluator_TernaryErrors(t *testing.T) {
 	})
 
 	t.Run("condition_eval_error", func(t *testing.T) {
-		evalErr(t, sx("?", sx("$", lit("undefined")), lit("yes"), lit("no")), "undefined variable")
+		evalErr(t, sx("?", sx("!", lit(int64(1))), lit("yes"), lit("no")), "! expects boolean")
 	})
 
 	t.Run("nil_condition", func(t *testing.T) {
@@ -225,8 +222,10 @@ func TestEvaluator_Variables(t *testing.T) {
 		assert.Equal(t, 42, result)
 	})
 
-	t.Run("lookup_undefined", func(t *testing.T) {
-		evalErr(t, sx("$", lit("undefined")), "undefined variable")
+	t.Run("lookup_unbound", func(t *testing.T) {
+		// Load refuses a name nothing binds, so an unbound name at evaluation
+		// is an unset member, and it reads nil as a bare name does.
+		evalEq(t, sx("$", lit("undefined")), nil)
 	})
 
 	t.Run("numeric_var_unset", func(t *testing.T) {
@@ -270,12 +269,6 @@ func TestEvaluator_Properties(t *testing.T) {
 
 	t.Run("lookup_property", func(t *testing.T) {
 		result, err := ev.Evaluate(t.Context(), sx("p", lit("name")), scope)
-		require.NoError(t, err)
-		assert.Equal(t, "Alice", result)
-	})
-
-	t.Run("case_insensitive", func(t *testing.T) {
-		result, err := ev.Evaluate(t.Context(), sx("p", lit("NAME")), scope)
 		require.NoError(t, err)
 		assert.Equal(t, "Alice", result)
 	})
@@ -328,24 +321,38 @@ func TestEvaluator_Match(t *testing.T) {
 	t.Run("not_match", func(t *testing.T) {
 		evalEq(t, sx("!~", lit("goodbye world"), lit(pattern)), true)
 	})
+
+	t.Run("not_match_false", func(t *testing.T) {
+		evalEq(t, sx("!~", lit("hello world"), lit(pattern)), false)
+	})
 }
 
-func TestEvaluator_MatchWithTypeChecker(t *testing.T) {
-	t.Run("match_integer", func(t *testing.T) {
-		evalEq(t, sx("=~", lit(int64(42)), expr.DatatypeLiteral("integer")), true)
-	})
+// A match names its own operator in an error, and names a right operand that
+// is no pattern before a left operand that is no string.
+func TestEvaluator_MatchErrors(t *testing.T) {
+	pattern := regexp.MustCompile(`a`)
+	for _, op := range []string{"=~", "!~"} {
+		evalErrIs(t, sx(op, lit("a"), lit("a")), op+" right operand must be a pattern, got string")
+		evalErrIs(t, sx(op, lit(int64(1)), lit("a")), op+" right operand must be a pattern, got string")
+		evalErrIs(t, sx(op, lit(int64(1)), lit(pattern)), op+" left operand must be string, got int64")
+		evalErrIs(t, sx(op, lit("a")), op+" requires 2 operands")
+		evalErrIs(t, sx(op, lit("a"), lit(pattern), lit("a")), op+" requires 2 operands")
+	}
+}
 
-	t.Run("no_match_integer", func(t *testing.T) {
-		evalEq(t, sx("=~", lit("not-an-int"), expr.DatatypeLiteral("integer")), false)
-	})
+// The evaluator holds no exclusive or: a tree that names one is an unknown
+// function, reported before any operand is evaluated.
+func TestEvaluator_CaretIsNoOperator(t *testing.T) {
+	evalErrIs(t, sx("^", lit(true), lit(false)), "unknown function: ^")
+	evalErrIs(t, sx("^", sx("$", lit("undefined")), lit(true)), "unknown function: ^")
+}
 
-	t.Run("not_match_with_type", func(t *testing.T) {
-		evalEq(t, sx("!~", lit("not-a-number"), expr.DatatypeLiteral("float")), true)
-	})
-
-	t.Run("match_invalid_right_operand", func(t *testing.T) {
-		evalErr(t, sx("=~", lit("test"), lit(int64(42))), "regexp or type checker")
-	})
+// An index node holds a receiver and one index.
+func TestEvaluator_IndexTakesTwoOperands(t *testing.T) {
+	xs := lit([]any{"a", "b"})
+	for _, e := range []expr.Expression{sx("@"), sx("@", xs), sx("@", xs, lit(int64(0)), lit(int64(1)))} {
+		evalErrIs(t, e, "index access requires exactly 2 operands")
+	}
 }
 
 func TestEvaluator_Negate(t *testing.T) {
@@ -396,25 +403,19 @@ func TestEvaluator_SliceConcat(t *testing.T) {
 }
 
 // TestEvaluator_MemberAccess_EdgeCases is the canonical member-access table:
-// nil receiver, exact and case-insensitive map keys, missing keys, and
-// non-map receivers.
+// nil receiver, exact map keys, missing keys, and non-map receivers.
 func TestEvaluator_MemberAccess_EdgeCases(t *testing.T) {
 	t.Run("access_nil_returns_nil", func(t *testing.T) {
 		evalEq(t, sx(".", lit(nil), lit("field")), nil)
 	})
 
 	t.Run("access_map_exact_match", func(t *testing.T) {
-		m := immutable.WrapMap(map[string]any{"name": "Alice", "age": int64(30)})
-		evalEq(t, sx(".", lit(m), lit("name")), "Alice")
-	})
-
-	t.Run("access_map_case_insensitive", func(t *testing.T) {
-		m := immutable.WrapMap(map[string]any{"Name": "Alice"})
+		m := immutable.WrapProperties(map[string]any{"name": "Alice", "age": int64(30)})
 		evalEq(t, sx(".", lit(m), lit("name")), "Alice")
 	})
 
 	t.Run("access_map_missing_key_returns_nil", func(t *testing.T) {
-		m := immutable.WrapMap(map[string]any{"name": "Alice"})
+		m := immutable.WrapProperties(map[string]any{"name": "Alice"})
 		evalEq(t, sx(".", lit(m), lit("nonexistent")), nil)
 	})
 
@@ -528,82 +529,61 @@ func TestEvaluator_IndexBoundsOverflow(t *testing.T) {
 	})
 }
 
-func TestEvaluator_DatatypeLiteral(t *testing.T) {
-	ev := eval.NewEvaluator()
-	scope := eval.EmptyScope()
-
-	// The seven names expr.IsDatatypeCheck admits, in the spelling the
-	// evaluator folds them to; the parser only ever emits the capitalized form.
-	datatypes := []string{"string", "integer", "float", "boolean", "uuid", "timestamp", "date"}
-
-	for _, name := range datatypes {
-		t.Run(name, func(t *testing.T) {
-			result, err := ev.Evaluate(t.Context(), expr.DatatypeLiteral(name), scope)
-			require.NoError(t, err)
-			assert.NotNil(t, result) // result is a TypeChecker function
-		})
-	}
-
-	t.Run("unknown_datatype_errors", func(t *testing.T) {
-		evalErr(t, expr.DatatypeLiteral("unknown"), "unknown datatype")
-	})
-}
-
 // TestEvaluator_BuiltinCall covers the five-element call form the parser
 // emits for every DSL function call — receiver, args literal, params literal,
-// body, with an absent part as an empty literal or nil — through the lower-
-// case name the pipeline reaches the registry by.
+// body, with an absent part as an empty literal or nil — through the name
+// the registry holds.
 func TestEvaluator_BuiltinCall(t *testing.T) {
 	t.Run("len", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit("hello"), "len", nil, nil, nil), int64(5))
+		evalEq(t, makeBuiltinCall(lit("hello"), "Len", nil, nil, nil), int64(5))
 	})
 
 	t.Run("abs", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(int64(-42)), "abs", nil, nil, nil), int64(42))
+		evalEq(t, makeBuiltinCall(lit(int64(-42)), "Abs", nil, nil, nil), int64(42))
 	})
 
 	t.Run("floor", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(3.7), "floor", nil, nil, nil), 3.0)
+		evalEq(t, makeBuiltinCall(lit(3.7), "Floor", nil, nil, nil), 3.0)
 	})
 
 	t.Run("ceil", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(3.2), "ceil", nil, nil, nil), 4.0)
+		evalEq(t, makeBuiltinCall(lit(3.2), "Ceil", nil, nil, nil), 4.0)
 	})
 
 	t.Run("round", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(3.5), "round", nil, nil, nil), 4.0)
+		evalEq(t, makeBuiltinCall(lit(3.5), "Round", nil, nil, nil), 4.0)
 	})
 
 	t.Run("with_params_and_body", func(t *testing.T) {
 		// [1,2,3] -> Map(x => x + 1)
-		e := makeBuiltinCall(list(int64(1), int64(2), int64(3)), "map", nil, []string{"x"},
+		e := makeBuiltinCall(list(int64(1), int64(2), int64(3)), "Map", nil, []string{"x"},
 			sx("+", sx("$", lit("x")), lit(int64(1))))
 		evalEq(t, e, []any{int64(2), int64(3), int64(4)})
 	})
 
 	t.Run("args_eval_error", func(t *testing.T) {
-		e := makeBuiltinCall(list(int64(1)), "min", []expr.Expression{sx("$", lit("undefined"))}, nil, nil)
-		evalErr(t, e, "undefined")
+		e := makeBuiltinCall(list(int64(1)), "Min", []expr.Expression{sx("!", lit(int64(1)))}, nil, nil)
+		evalErr(t, e, "! expects boolean")
 	})
 
 	t.Run("compare_less", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(int64(5)), "compare", []expr.Expression{lit(int64(10))}, nil, nil), int64(-1))
+		evalEq(t, makeBuiltinCall(lit(int64(5)), "Compare", []expr.Expression{lit(int64(10))}, nil, nil), int64(-1))
 	})
 
 	t.Run("compare_equal", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(int64(5)), "compare", []expr.Expression{lit(int64(5))}, nil, nil), int64(0))
+		evalEq(t, makeBuiltinCall(lit(int64(5)), "Compare", []expr.Expression{lit(int64(5))}, nil, nil), int64(0))
 	})
 }
 
 func TestEvaluator_BuiltinErrors(t *testing.T) {
 	t.Run("too_many_args", func(t *testing.T) {
-		e := makeBuiltinCall(lit(int64(5)), "abs", []expr.Expression{lit(int64(1)), lit(int64(2))}, nil, nil)
+		e := makeBuiltinCall(lit(int64(5)), "Abs", []expr.Expression{lit(int64(1)), lit(int64(2))}, nil, nil)
 		evalErr(t, e, "accepts at most")
 	})
 
 	t.Run("too_many_params", func(t *testing.T) {
 		// map only accepts 1 param
-		e := makeBuiltinCall(list(int64(1)), "map", nil, []string{"x", "y", "z"}, lit(int64(1)))
+		e := makeBuiltinCall(list(int64(1)), "Map", nil, []string{"x", "y", "z"}, lit(int64(1)))
 		evalErr(t, e, "accepts at most")
 	})
 }
@@ -614,7 +594,7 @@ func TestEvaluator_BuiltinErrors(t *testing.T) {
 // pipeline is the only call form.
 func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 	t.Run("builtin_name_is_a_plain_member", func(t *testing.T) {
-		evalEq(t, sx(".", lit(immutable.WrapMap(map[string]any{"len": int64(7)})), lit("len")), int64(7))
+		evalEq(t, sx(".", lit(immutable.WrapProperties(map[string]any{"len": int64(7)})), lit("len")), int64(7))
 	})
 
 	t.Run("builtin_name_on_a_list_is_not_a_call", func(t *testing.T) {
@@ -622,7 +602,7 @@ func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 	})
 
 	t.Run("sexpr_member_errors", func(t *testing.T) {
-		evalErr(t, sx(".", lit(immutable.WrapMap(map[string]any{"name": "Alice"})), sx("p", lit("name"))), "must be a string literal")
+		evalErr(t, sx(".", lit(immutable.WrapProperties(map[string]any{"name": "Alice"})), sx("p", lit("name"))), "must be a string literal")
 	})
 
 	t.Run("third_operand_errors", func(t *testing.T) {
@@ -635,35 +615,35 @@ func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 // the unsupported-type error an array now draws with them.
 func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 	t.Run("typed_slice_int", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "len", nil, nil, nil), int64(5))
+		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "Len", nil, nil, nil), int64(5))
 	})
 
 	t.Run("typed_slice_string", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit([]string{"a", "b", "c"}), "len", nil, nil, nil), int64(3))
+		evalEq(t, makeBuiltinCall(lit([]string{"a", "b", "c"}), "Len", nil, nil, nil), int64(3))
 	})
 
 	t.Run("nil_slice_returns_zero", func(t *testing.T) {
 		var nilSlice []int
-		evalEq(t, makeBuiltinCall(lit(nilSlice), "len", nil, nil, nil), int64(0))
+		evalEq(t, makeBuiltinCall(lit(nilSlice), "Len", nil, nil, nil), int64(0))
 	})
 
 	// An array is not a list, so Len refuses one as it refuses a number: the
 	// rule value.ListElems states, now at every reader.
 	t.Run("array_type_is_refused", func(t *testing.T) {
-		evalErr(t, makeBuiltinCall(lit([4]int{1, 2, 3, 4}), "len", nil, nil, nil), "unsupported for type")
+		evalErr(t, makeBuiltinCall(lit([4]int{1, 2, 3, 4}), "Len", nil, nil, nil), "unsupported for type")
 	})
 
 	t.Run("map_type", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(map[string]int{"a": 1, "b": 2}), "len", nil, nil, nil), int64(2))
+		evalEq(t, makeBuiltinCall(lit(map[string]int{"a": 1, "b": 2}), "Len", nil, nil, nil), int64(2))
 	})
 
 	t.Run("nil_map_returns_zero", func(t *testing.T) {
 		var nilMap map[string]int
-		evalEq(t, makeBuiltinCall(lit(nilMap), "len", nil, nil, nil), int64(0))
+		evalEq(t, makeBuiltinCall(lit(nilMap), "Len", nil, nil, nil), int64(0))
 	})
 
 	t.Run("unsupported_type_errors", func(t *testing.T) {
-		evalErr(t, makeBuiltinCall(lit(struct{ X int }{X: 1}), "len", nil, nil, nil), "unsupported")
+		evalErr(t, makeBuiltinCall(lit(struct{ X int }{X: 1}), "Len", nil, nil, nil), "unsupported")
 	})
 }
 
@@ -671,140 +651,14 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 // consume sequences must accept typed slices, not just []any.
 func TestEvaluator_SliceConversion(t *testing.T) {
 	t.Run("sum_typed_slice_int", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "sum", nil, nil, nil), int64(15))
+		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "Sum", nil, nil, nil), int64(15))
 	})
 
 	t.Run("sum_typed_slice_float", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit([]float64{1.5, 2.5, 3.0}), "sum", nil, nil, nil), 7.0)
+		evalEq(t, makeBuiltinCall(lit([]float64{1.5, 2.5, 3.0}), "Sum", nil, nil, nil), 7.0)
 	})
 
 	t.Run("non_slice_errors", func(t *testing.T) {
-		evalErr(t, makeBuiltinCall(lit(int64(42)), "sum", nil, nil, nil), "expects a list")
+		evalErr(t, makeBuiltinCall(lit(int64(42)), "Sum", nil, nil, nil), "expects a list")
 	})
-}
-
-// --- Logging ---
-
-func TestEvaluator_Logging(t *testing.T) {
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-
-	_, err := ev.Evaluate(t.Context(), sx("+", lit(int64(2)), lit(int64(3))), eval.EmptyScope())
-	if err != nil {
-		t.Fatalf("Evaluate failed: %v", err)
-	}
-
-	records := h.Records()
-	if !yammmtest.HasAttr(records, "op", "yammm.eval.expr") {
-		t.Error("expected yammm.eval.expr operation to be logged")
-	}
-	if !yammmtest.HasMessage(records, "evaluating s-expression") {
-		t.Error("expected 'evaluating s-expression' message")
-	}
-}
-
-func TestEvaluator_Logging_SExprOp(t *testing.T) {
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-
-	_, err := ev.Evaluate(t.Context(), sx("*", lit(int64(4)), lit(int64(5))), eval.EmptyScope())
-	if err != nil {
-		t.Fatalf("Evaluate failed: %v", err)
-	}
-
-	if !yammmtest.HasAttr(h.Records(), "op", "*") {
-		t.Error("expected op=* attribute in s-expression log")
-	}
-}
-
-func TestEvaluator_NoLogging_WhenNilLogger(t *testing.T) {
-	// No logger — must not panic.
-	evalEq(t, sx("+", lit(int64(2)), lit(int64(3))), int64(5))
-}
-
-// ctxRecorder keeps the context each record was logged with, which the
-// shared record handler discards.
-type ctxRecorder struct {
-	ctxs []context.Context
-	recs []slog.Record
-}
-
-func (r *ctxRecorder) Enabled(context.Context, slog.Level) bool { return true }
-func (r *ctxRecorder) Handle(ctx context.Context, rec slog.Record) error {
-	r.ctxs = append(r.ctxs, ctx)
-	r.recs = append(r.recs, rec)
-	return nil
-}
-func (r *ctxRecorder) WithAttrs([]slog.Attr) slog.Handler { return r }
-func (r *ctxRecorder) WithGroup(string) slog.Handler      { return r }
-
-// The context passed to Evaluate reaches every trace record the evaluation
-// writes: a request id on it is on the operation's start record and on the
-// per-node records, at the top level and inside a lambda body.
-func TestEvaluate_TraceCarriesTheCallersContext(t *testing.T) {
-	h := &ctxRecorder{}
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-	ctx := trace.WithRequestID(t.Context(), "req-42")
-
-	body := sx(">", sx("$", lit("0")), lit(int64(1)))
-	e := makeBuiltinCall(list(int64(1), int64(2), int64(3)), "all", nil, nil, body)
-	if _, err := ev.EvaluateBool(ctx, e, eval.EmptyScope()); err != nil {
-		t.Fatalf("EvaluateBool: %v", err)
-	}
-
-	if !yammmtest.HasAttr(h.recs, "request_id", "req-42") {
-		t.Error("the operation's start record does not carry the caller's request id")
-	}
-	// Six records: the op's start and end, and one per node reached — the
-	// call, its receiver list, and the body evaluated per element.
-	if len(h.ctxs) < 6 {
-		t.Fatalf("expected the per-node trace, got %d records", len(h.ctxs))
-	}
-	for i, c := range h.ctxs {
-		if id, ok := trace.RequestIDFrom(c); !ok || id != "req-42" {
-			t.Errorf("record %d (%q) was logged without the caller's context", i, h.recs[i].Message)
-		}
-	}
-}
-
-// TestEvaluate_EveryArmCarriesTheCallersContext runs the context assertion
-// over the evaluator's special forms and its builtin arms rather than over
-// one shape. One shape reaches only the nodes it walks, so a context dropped
-// on an arm it never enters is invisible; these shapes between them enter
-// the member, index, list, ternary, boolean, comparison, guard, lambda and
-// nested-call arms, and each asserts every record it produced.
-func TestEvaluate_EveryArmCarriesTheCallersContext(t *testing.T) {
-	nums := func() expr.SExpr { return list(int64(1), int64(2), int64(3)) }
-	shapes := map[string]expr.Expression{
-		"list body":     makeBuiltinCall(nums(), "all", nil, nil, sx(">", sx("$", lit("0")), lit(int64(0)))),
-		"lambda param":  makeBuiltinCall(nums(), "all", nil, []string{"n"}, sx(">", sx("$", lit("n")), lit(int64(0)))),
-		"nested calls":  sx(">", makeBuiltinCall(makeBuiltinCall(nums(), "map", nil, nil, sx("+", sx("$", lit("0")), lit(int64(1)))), "sum", nil, nil, nil), lit(int64(0))),
-		"index":         sx(">", sx("@", nums(), lit(int64(0))), lit(int64(0))),
-		"ternary":       sx("?", sx(">", lit(int64(2)), lit(int64(1))), lit(true), lit(false)),
-		"and":           sx("&&", sx(">", lit(int64(2)), lit(int64(1))), sx("<", lit(int64(1)), lit(int64(2)))),
-		"or":            sx("||", sx("<", lit(int64(2)), lit(int64(1))), sx(">", lit(int64(2)), lit(int64(1)))),
-		"not":           sx("!", sx("<", lit(int64(2)), lit(int64(1)))),
-		"guard":         sx(">", makeBuiltinCall(lit(nil), "default", []expr.Expression{lit(int64(5))}, nil, nil), lit(int64(0))),
-		"arithmetic":    sx(">", sx("-", sx("*", lit(int64(3)), lit(int64(4))), lit(int64(2))), lit(int64(0))),
-		"membership":    sx("in", lit(int64(2)), nums()),
-		"argument call": sx(">", makeBuiltinCall(lit("north"), "compare", []expr.Expression{lit("a")}, nil, nil), lit(int64(0))),
-	}
-	for name, e := range shapes {
-		t.Run(name, func(t *testing.T) {
-			h := &ctxRecorder{}
-			ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-			ctx := trace.WithRequestID(t.Context(), "req-"+name)
-			if _, err := ev.EvaluateBool(ctx, e, eval.EmptyScope()); err != nil {
-				t.Fatalf("EvaluateBool: %v", err)
-			}
-			if len(h.ctxs) < 3 {
-				t.Fatalf("expected a per-node trace, got %d records", len(h.ctxs))
-			}
-			for i, c := range h.ctxs {
-				if id, ok := trace.RequestIDFrom(c); !ok || id != "req-"+name {
-					t.Errorf("record %d (%q) was logged without the caller's context", i, h.recs[i].Message)
-				}
-			}
-		})
-	}
 }

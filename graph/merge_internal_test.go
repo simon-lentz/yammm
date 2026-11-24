@@ -5,30 +5,36 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// indexedInstance builds a bypass instance of typ keyed id, naming each
-// relation's targets by key.
-func indexedInstance(t *testing.T, s *schema.Schema, typ, id string, edges map[string][]string) *instance.ValidInstance {
+// indexedInstance validates an instance of typ keyed id, naming each relation's
+// targets by key.
+func indexedInstance(t *testing.T, s schema.Schema, typ, id string, edges map[string][]string) instance.ValidInstance {
 	t.Helper()
 	tt, ok := s.Type(typ)
 	if !ok {
 		t.Fatalf("no type %s", typ)
 	}
-	data := make(map[string]*instance.ValidEdgeData, len(edges))
-	for rel, keys := range edges {
-		ts := make([]instance.ValidEdgeTarget, len(keys))
-		for i, k := range keys {
-			ts[i] = instance.NewValidEdgeTarget(immutable.WrapKey([]any{k}), immutable.WrapProperties(nil))
+	data := map[string]any{"id": id}
+	for name, keys := range edges {
+		rel, ok := tt.Relation(name)
+		if !ok {
+			t.Fatalf("no relation %s on %s", name, typ)
 		}
-		data[rel] = instance.NewValidEdgeData(ts)
+		targets := make([]any, len(keys))
+		for i, k := range keys {
+			targets[i] = map[string]any{"_target_id": k}
+		}
+		if rel.IsMany() {
+			data[rel.FieldName()] = targets
+		} else {
+			data[rel.FieldName()] = targets[0]
+		}
 	}
-	return instancetest.VI(typ, instancetest.TypeID(tt.ID()), instancetest.PK(id),
-		instancetest.Props(map[string]any{"id": id}), instancetest.Edges(data))
+	return instancetest.Valid(t, s, typ, data)
 }
 
 // assertIndexMatchesARebuild fails unless g.bySource holds exactly what an
@@ -40,6 +46,23 @@ func assertIndexMatchesARebuild(t *testing.T, g *Graph, step string) {
 	}
 	fresh := &Graph{edges: g.edges, pending: g.pending}
 	fresh.sourceIndex()
+	// The rebuild files records through the index's own helpers, so each entry's
+	// key is checked against the record it files.
+	for slot, h := range g.bySource {
+		for k, e := range h.edges {
+			if want := e.Target().PrimaryKey().String(); k != want {
+				t.Errorf("%s: %s: an edge to %s is filed under %s", step, slot.relation, want, k)
+			}
+		}
+		for k, p := range h.pending {
+			if k != p.targetKey || p.reasonDetail != ReasonTargetMissing {
+				t.Errorf("%s: %s: a record naming %s (reason %s) is filed under %s", step, slot.relation, p.targetKey, p.reasonDetail, k)
+			}
+		}
+		if h.reason != nil && h.reason.reasonDetail == ReasonTargetMissing {
+			t.Errorf("%s: %s: a record naming %s is filed as the slot's reason record", step, slot.relation, h.reason.targetKey)
+		}
+	}
 	for slot := range mapsKeys(g.bySource, fresh.bySource) {
 		have, want := g.bySource[slot], fresh.bySource[slot]
 		if !sameElements(have.edgeList(), want.edgeList()) || !sameElements(have.pendingList(), want.pendingList()) {
@@ -50,18 +73,22 @@ func assertIndexMatchesARebuild(t *testing.T, g *Graph, step string) {
 	}
 }
 
-func (h *heldRecords) edgeList() []*Edge {
+func (h *heldRecords) edgeList() []Edge {
 	if h == nil {
 		return nil
 	}
-	return h.edges
+	return slices.Collect(maps.Values(h.edges))
 }
 
 func (h *heldRecords) pendingList() []*pendingEdge {
 	if h == nil {
 		return nil
 	}
-	return h.pending
+	list := slices.Collect(maps.Values(h.pending))
+	if h.reason != nil {
+		list = append(list, h.reason)
+	}
+	return list
 }
 
 func mapsKeys[K comparable, V any](a, b map[K]V) map[K]bool {
@@ -95,7 +122,7 @@ func sameElements[T comparable](a, b []T) bool {
 // resolution once the first merge has built it.
 func TestSourceIndex_MatchesARebuildAfterEveryOperation(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "merge"
+	s, err := schema.LoadString(t.Context(), `schema "merge"
 
 type Issuer {
 	id String primary
@@ -113,14 +140,14 @@ type Issue {
 	--> HOME (one) Page
 }
 `, "merge.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
 	g := New(s)
 	add := func(step, typ, id string, edges map[string][]string) {
 		t.Helper()
-		if r := g.Add(t.Context(), indexedInstance(t, s, typ, id, edges)); r.HasErrors() {
-			t.Fatalf("%s: %s", step, r)
+		if err := g.Add(t.Context(), indexedInstance(t, s, typ, id, edges)); err != nil {
+			t.Fatalf("%s: %s", step, err)
 		}
 		if g.bySource != nil {
 			assertIndexMatchesARebuild(t, g, step)
@@ -128,8 +155,8 @@ type Issue {
 	}
 	merge := func(step, id string, edges map[string][]string) {
 		t.Helper()
-		if merged, r := g.AddOrMerge(t.Context(), indexedInstance(t, s, "Issue", id, edges)); r.HasErrors() || !merged {
-			t.Fatalf("%s: merged %v, %s", step, merged, r)
+		if merged, err := g.AddOrMerge(t.Context(), indexedInstance(t, s, "Issue", id, edges)); err != nil || !merged {
+			t.Fatalf("%s: merged %v, %s", step, merged, err)
 		}
 		assertIndexMatchesARebuild(t, g, step)
 	}

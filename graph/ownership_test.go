@@ -1,21 +1,21 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/instance"
 )
 
 // Ownership Isolation Tests for the graph package
 //
 // These tests verify that the Graph maintains proper ownership semantics
-// for ValidInstance data. Since ValidInstance is immutable by design
-// (via immutable.WrapProperties with WithClone in the validator), these tests verify:
+// for ValidInstance data. ValidInstance is immutable: the validator wraps what
+// it read with immutable.WrapProperties, which copies it. These tests verify:
 //
 // 1. Each Snapshot returns independent, deep-copied instances (isolation)
 // 2. Within a single snapshot, references are consistent
-// 3. Composed children added via AddComposed are correctly accessible
+// 3. Composed children are correctly accessible
 // 4. Instance data is preserved through graph operations
 
 // TestGraph_SnapshotIsolation verifies that each call to Snapshot() returns
@@ -25,28 +25,22 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
-	g.Add(ctx, parent)
-
-	// Add children via AddComposed
-	child1 := mustValidPartInstance(t, s, "Child",
+	child1 := partData(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	child2 := mustValidPartInstance(t, s, "Child",
+	child2 := partData(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
-
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child1)
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child2)
+	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", child1, child2)
+	if err := g.Add(ctx, parent); err != nil {
+		t.Fatalf("Add should succeed: %v", err)
+	}
 
 	// Get multiple snapshots
 	snap1 := g.Snapshot()
 	snap2 := g.Snapshot()
 
 	// Verify both snapshots have the parent
-	parents1 := snap1.InstancesOf(mustTypeID(t, s, "Parent"))
-	parents2 := snap2.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents1 := slices.Collect(snap1.InstancesOf(mustTypeID(t, s, "Parent")))
+	parents2 := slices.Collect(snap2.InstancesOf(mustTypeID(t, s, "Parent")))
 
 	if len(parents1) != 1 || len(parents2) != 1 {
 		t.Fatalf("Expected 1 parent in each snapshot, got %d and %d", len(parents1), len(parents2))
@@ -66,7 +60,7 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	}
 
 	// Within the same snapshot, multiple calls return the same pointer
-	parents1Again := snap1.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents1Again := slices.Collect(snap1.InstancesOf(mustTypeID(t, s, "Parent")))
 	if parents1[0] != parents1Again[0] {
 		t.Error("Same snapshot should return same instance pointer")
 	}
@@ -76,13 +70,13 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	if !ok {
 		t.Fatal("Expected name property on parent")
 	}
-	name, ok := nameVal.String()
+	name, ok := nameVal.AsString()
 	if !ok || name != "Parent 1" {
 		t.Errorf("Expected parent name 'Parent 1', got %q", name)
 	}
 
 	// Verify composed children are accessible
-	children := parents1[0].Composed("CHILDREN")
+	children := slices.Collect(parents1[0].Composed("CHILDREN"))
 	if children == nil {
 		t.Fatal("Expected children composition on parent")
 	}
@@ -92,41 +86,33 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 }
 
 // TestGraph_ComposedChildAccess verifies that composed children added via
-// AddComposed are correctly accessible with their original data preserved.
+// Add are correctly accessible with their original data preserved.
 func TestGraph_ComposedChildAccess(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
-	g.Add(ctx, parent)
-
-	// Add children with specific data
-	child1 := mustValidPartInstance(t, s, "Child",
+	// Children with specific data
+	child1 := partData(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "First Child"})
-	child2 := mustValidPartInstance(t, s, "Child",
+	child2 := partData(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Second Child"})
-	child3 := mustValidPartInstance(t, s, "Child",
+	child3 := partData(t, s, "Child",
 		[]any{"c3"}, map[string]any{"name": "Third Child"})
 
-	for _, child := range []*instance.ValidInstance{child1, child2, child3} {
-		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
-		if err := result.Err(); err != nil {
-			t.Errorf("AddComposed should succeed: %v", err)
-		}
+	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", child1, child2, child3)
+	if err := g.Add(ctx, parent); err != nil {
+		t.Errorf("Add should succeed: %v", err)
 	}
 
 	// Access composed children via snapshot
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
-	children := parents[0].Composed("CHILDREN")
+	children := slices.Collect(parents[0].Composed("CHILDREN"))
 	if children == nil {
 		t.Fatal("Expected children composition")
 	}
@@ -151,7 +137,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 			t.Errorf("Child %s missing name property", pkStr)
 			continue
 		}
-		name, ok := nameVal.String()
+		name, ok := nameVal.AsString()
 		if !ok {
 			t.Errorf("Child %s name is not a string", pkStr)
 			continue
@@ -172,61 +158,6 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 	}
 }
 
-// TestSnapshot_Isolation_FromAddComposed verifies that a snapshot taken before
-// AddComposed is isolated from composed children added afterwards.
-// This is the core immutability guarantee.
-func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
-	s := testSchemaWithComposition(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-	g.Add(ctx, parent)
-
-	// Take snapshot BEFORE adding composed child
-	snap1 := g.Snapshot()
-
-	// Add composed child AFTER snapshot
-	child := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
-
-	// Take second snapshot
-	snap2 := g.Snapshot()
-
-	// snap1 should show ZERO children (immutable snapshot)
-	parents1 := snap1.InstancesOf(mustTypeID(t, s, "Parent"))
-	if len(parents1) != 1 {
-		t.Fatalf("Expected 1 parent in snap1, got %d", len(parents1))
-	}
-	children1 := parents1[0].Composed("CHILDREN")
-	if len(children1) != 0 {
-		t.Errorf("snap1 should have 0 children, got %d (snapshot not isolated!)", len(children1))
-	}
-
-	// snap2 should show ONE child
-	parents2 := snap2.InstancesOf(mustTypeID(t, s, "Parent"))
-	if len(parents2) != 1 {
-		t.Fatalf("Expected 1 parent in snap2, got %d", len(parents2))
-	}
-	children2 := parents2[0].Composed("CHILDREN")
-	if len(children2) != 1 {
-		t.Errorf("snap2 should have 1 child, got %d", len(children2))
-	}
-
-	// Verify the child data in snap2
-	if len(children2) > 0 {
-		nameVal, ok := children2[0].Property("name")
-		if !ok {
-			t.Error("Expected name property on child")
-		} else if name, ok := nameVal.String(); !ok || name != "Child 1" {
-			t.Errorf("Expected child name 'Child 1', got %q", name)
-		}
-	}
-}
-
 // TestGraph_InstanceReferencePreservation verifies that within a single snapshot,
 // the same Instance reference is returned when accessing the same instance multiple times.
 // Different snapshots should return independent copies.
@@ -239,12 +170,14 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 	person := mustValidInstance(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Access the instance multiple times within the SAME snapshot
 	snap := g.Snapshot()
-	instances1 := snap.InstancesOf(mustTypeID(t, s, "Person"))
-	instances2 := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	instances1 := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
+	instances2 := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 
 	if len(instances1) != 1 || len(instances2) != 1 {
 		t.Fatalf("Expected 1 instance each time, got %d and %d", len(instances1), len(instances2))
@@ -257,7 +190,7 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 
 	// Different snapshot should return different reference
 	snap2 := g.Snapshot()
-	instances3 := snap2.InstancesOf(mustTypeID(t, s, "Person"))
+	instances3 := slices.Collect(snap2.InstancesOf(mustTypeID(t, s, "Person")))
 	if instances1[0] == instances3[0] {
 		t.Error("Different snapshots should NOT share instance pointers")
 	}
@@ -272,7 +205,7 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 	if !ok {
 		t.Fatal("Expected name property")
 	}
-	name, ok := nameVal.String()
+	name, ok := nameVal.AsString()
 	if !ok || name != "Alice" {
 		t.Errorf("Expected name 'Alice', got %q", name)
 	}
@@ -288,13 +221,17 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	// Add company
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "ACME Corp"})
-	g.Add(ctx, company)
+	if err := g.Add(ctx, company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Add person with reference to company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"acme"}})
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
 
@@ -309,7 +246,7 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	}
 
 	// Get instances via edges
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if len(edges) != 1 {
 		t.Fatalf("Expected 1 edge, got %d", len(edges))
 	}
@@ -327,7 +264,7 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 
 	// Also verify edges from a different snapshot have different pointers
 	snap2 := g.Snapshot()
-	edges2 := snap2.Edges()
+	edges2 := slices.Collect(snap2.Edges())
 	if len(edges2) != 1 {
 		t.Fatalf("Expected 1 edge in snap2, got %d", len(edges2))
 	}

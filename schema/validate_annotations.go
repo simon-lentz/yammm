@@ -6,15 +6,17 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
 )
 
-// AnnotationPlacement identifies where an annotation may appear.
+// AnnotationPlacement identifies where an annotation may appear. The zero
+// value names no placement.
 type AnnotationPlacement uint8
 
 const (
 	// PlacementProperty is a property-trailing @name annotation.
-	PlacementProperty AnnotationPlacement = iota
+	PlacementProperty AnnotationPlacement = iota + 1
 	// PlacementType is a type-body @@name member.
 	PlacementType
 )
@@ -109,7 +111,7 @@ type annotationKey struct {
 type annotationSpec struct {
 	doc      string
 	argHint  string
-	validate func(c *completer, t *Type, prop *Property, a *Annotation)
+	validate func(c *completer, t Type, prop Property, a Annotation)
 }
 
 // annotationRegistry is the curated built-in set. Adding a kind is one entry;
@@ -184,11 +186,11 @@ func (c *completer) validateAnnotations() {
 // ancestor's annotation is not marked in diagnosedAnnotations for the same
 // reason reportAnnotationDisagreement does not mark — it was not rejected at
 // its declaration, and a shadow warning about it elsewhere stays legitimate.
-func (c *completer) validateInheritedHolderRules(t *Type) {
+func (c *completer) validateInheritedHolderRules(t Type) {
 	if !t.IsPart() {
 		return
 	}
-	own := make(map[*Property]bool, len(t.properties))
+	own := make(map[Property]bool, len(t.properties))
 	for p := range t.Properties() {
 		own[p] = true
 	}
@@ -201,7 +203,7 @@ func (c *completer) validateInheritedHolderRules(t *Type) {
 			continue
 		}
 		c.errorfRelated(t.NameSpan(), diag.E_INVALID_ANNOTATION_TARGET,
-			[]location.RelatedInfo{{Span: a.Span(), Message: "@writeOnce declared here"}},
+			[]diag.RelatedInfo{{Span: a.Span(), Message: "@writeOnce declared here"}},
 			"@writeOnce cannot annotate property %q inherited by part type %q; a part is replaced on every parent write",
 			p.Name(), t.Name())
 	}
@@ -209,10 +211,10 @@ func (c *completer) validateInheritedHolderRules(t *Type) {
 
 // validatePropertyAnnotations validates the property-trailing annotations on
 // one own property, rejecting a repeated annotation name on the property.
-func (c *completer) validatePropertyAnnotations(t *Type, prop *Property) {
-	seen := make(map[string]*Annotation)
+func (c *completer) validatePropertyAnnotations(t Type, prop Property) {
+	seen := make(map[string]Annotation)
 	for _, a := range prop.annotations {
-		// An annotation on a line of its own binds to the property ABOVE it,
+		// An annotation that begins a line binds to the property ABOVE it,
 		// because the grammar's property-trailing annotation* does not care
 		// about line breaks. A reader used to prefix decorators writes it
 		// expecting the property BELOW, and nothing else in the load
@@ -221,8 +223,8 @@ func (c *completer) validatePropertyAnnotations(t *Type, prop *Property) {
 		// pick between the readings instead.
 		if a.detachedFrom > 0 {
 			c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
-				"annotation @%s is written on its own line but attaches to property %q declared on line %d; "+
-					"put it on that property's line, or use @@%s for a type-level annotation",
+				"annotation @%s begins a line but attaches to property %q declared on line %d; "+
+					"write it after that property on the line where the property ends, or use @@%s for a type-level annotation",
 				a.name, prop.Name(), a.detachedFrom, a.name)
 			continue
 		}
@@ -246,8 +248,8 @@ func (c *completer) validatePropertyAnnotations(t *Type, prop *Property) {
 
 // validateTypeAnnotations validates the type-level @@ members of one type,
 // rejecting an exact-duplicate member (name plus ordered argument texts).
-func (c *completer) validateTypeAnnotations(t *Type) {
-	seen := make(map[string]*Annotation)
+func (c *completer) validateTypeAnnotations(t Type) {
+	seen := make(map[string]Annotation)
 	for _, a := range t.annotations {
 		spec, known := annotationRegistry[annotationKey{PlacementType, a.name}]
 
@@ -265,7 +267,7 @@ func (c *completer) validateTypeAnnotations(t *Type) {
 			c.reportUnknownOrMisplaced(a, PlacementType)
 			continue
 		}
-		spec.validate(c, t, nil, a)
+		spec.validate(c, t, Property{}, a)
 	}
 }
 
@@ -283,7 +285,7 @@ func (c *completer) validateTypeAnnotations(t *Type) {
 //
 // span is separate from a because a target-eligibility error is anchored at the
 // offending property, not at the annotation.
-func (c *completer) annotationErrorf(a *Annotation, span location.Span, code diag.Code, format string, args ...any) {
+func (c *completer) annotationErrorf(a Annotation, span location.Span, code diag.Code, format string, args ...any) {
 	c.diagnosedAnnotations[a] = true
 	c.errorf(span, code, format, args...)
 }
@@ -292,7 +294,7 @@ func (c *completer) annotationErrorf(a *Annotation, span location.Span, code dia
 // related span, recording the annotation exactly as [completer.annotationErrorf]
 // does. Used where completer.errorf's single span is not enough: a duplicate
 // (pointing at the first occurrence) and a redundancy (pointing at the emitter).
-func (c *completer) annotationErrorWithRelated(a *Annotation, span location.Span, code diag.Code, related []location.RelatedInfo, format string, args ...any) {
+func (c *completer) annotationErrorWithRelated(a Annotation, span location.Span, code diag.Code, related []diag.RelatedInfo, format string, args ...any) {
 	c.diagnosedAnnotations[a] = true
 	c.errorfRelated(span, code, related, format, args...)
 }
@@ -301,7 +303,7 @@ func (c *completer) annotationErrorWithRelated(a *Annotation, span location.Span
 // registered at the other placement, and a genuinely unknown annotation
 // otherwise. The placement-mismatch path is a registry lookup miss on
 // (placement, name), not a special case.
-func (c *completer) reportUnknownOrMisplaced(a *Annotation, place AnnotationPlacement) {
+func (c *completer) reportUnknownOrMisplaced(a Annotation, place AnnotationPlacement) {
 	other := PlacementType
 	if place == PlacementType {
 		other = PlacementProperty
@@ -317,9 +319,9 @@ func (c *completer) reportUnknownOrMisplaced(a *Annotation, place AnnotationPlac
 
 // duplicateAnnotation reports E_INVALID_ANNOTATION at the second occurrence with
 // a related span at the first, matching the duplicate-property diagnostic shape.
-func (c *completer) duplicateAnnotation(dup, first *Annotation, format string, args ...any) {
+func (c *completer) duplicateAnnotation(dup, first Annotation, format string, args ...any) {
 	c.annotationErrorWithRelated(dup, dup.Span(), diag.E_INVALID_ANNOTATION,
-		[]location.RelatedInfo{{Span: first.Span(), Message: "first declared here"}},
+		[]diag.RelatedInfo{{Span: first.Span(), Message: "first declared here"}},
 		format, args...)
 }
 
@@ -330,19 +332,19 @@ func (c *completer) duplicateAnnotation(dup, first *Annotation, format string, a
 // Redundancy is judged over the types that actually emit the uniqueness
 // constraint, not over the type carrying the annotation; see
 // [completer.indexOnPrimaryKeyIsRedundant].
-func validateIndexProperty(c *completer, t *Type, prop *Property, a *Annotation) {
+func validateIndexProperty(c *completer, t Type, prop Property, a Annotation) {
 	if a.argCount() > 0 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
 			"@index takes no arguments; for a composite index use @@index(...) at the type level")
 		return
 	}
-	if c.annotationTargetTypeUnknown(prop.Constraint()) {
+	if constraintKindUnknown(prop.Constraint()) {
 		return // the target's type is already diagnosed; blaming the annotation would bury it
 	}
 	if !isIndexableScalar(prop.Constraint()) {
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
 			"@index requires a scalar property; property %q is %s",
-			prop.Name(), constraintKindName(prop.Constraint()))
+			prop.Name(), ResolveAlias(prop.Constraint()).Kind())
 		return
 	}
 	if !prop.IsPrimaryKey() {
@@ -355,18 +357,14 @@ func validateIndexProperty(c *completer, t *Type, prop *Property, a *Annotation)
 	}
 }
 
-// reportIndexRedundancy reports the "@index over a sole primary key is
-// redundant" error, at span, naming the emitter that made it redundant. When the
-// emitter is not the annotated type t — t may be an abstract mixin that emits
-// nothing — a related span points at the emitter.
-//
-// Only @index reaches here: @@index over a sole primary key is accepted per
-// docs/SPEC.md (see validateIndexType). The helper stays generic in its message
-// so that asymmetry lives at the one call site, not baked into this shape.
-func (c *completer) reportIndexRedundancy(a *Annotation, span location.Span, t, emitter *Type, format string, args ...any) {
-	var related []location.RelatedInfo
+// reportIndexRedundancy reports an index over a sole primary key as redundant,
+// at span, naming the emitter that made it redundant. When the emitter is not
+// the annotated type t — t may be an abstract mixin that emits nothing — a
+// related span points at the emitter.
+func (c *completer) reportIndexRedundancy(a Annotation, span location.Span, t, emitter Type, format string, args ...any) {
+	var related []diag.RelatedInfo
 	if emitter != t {
-		related = []location.RelatedInfo{{
+		related = []diag.RelatedInfo{{
 			Span:    emitter.Span(),
 			Message: "sole primary key emitted here",
 		}}
@@ -392,8 +390,10 @@ func (c *completer) reportIndexRedundancy(a *Annotation, span location.Span, t, 
 // compositely and genuinely needs the index — there is no edit that satisfies
 // both, and reporting an error the user cannot act on is worse than the
 // redundant index the mixed case emits. The rule therefore reports only what can
-// be safely removed. This is the one case where a redundant index still ships;
-// `yammm neo4j diff` surfaces it against a live database.
+// be safely removed. This is the one case where a redundant index still ships,
+// and no tool reports it: the neo4j package's Diff counts an online index a
+// constraint backs as the declared index's match while the plan keeps that
+// constraint.
 //
 // Emitters are measured by their EXTRACTED primary keys, via the non-allocating
 // [Type.primaryKeyCount], not by counting `primary` flags. But an extracted
@@ -401,6 +401,8 @@ func (c *completer) reportIndexRedundancy(a *Annotation, span location.Span, t, 
 // primary ([Type.hasRejectedPrimary]) means a composite the user intended
 // currently reads as sole, so the check defers there rather than stacking a
 // redundancy error on the E_INVALID_PRIMARY_KEY_TYPE the user has to fix first.
+// A member lost to a syntax error, in the emitter's body or a supertype's, may
+// be a co-key in the same way ([completer.lostAMember]).
 //
 // It also stays silent when there is no concrete emitter (nothing is emitted, so
 // nothing is redundant) and when any emitter still has an unresolved supertype
@@ -410,42 +412,45 @@ func (c *completer) reportIndexRedundancy(a *Annotation, span location.Span, t, 
 // KNOWN LIMIT — descendants declared in OTHER schemas are invisible, because
 // completion records subtypes for local types only. An abstract mixin annotated
 // in one file and made concrete in another therefore draws nothing, while the
-// same model written in a single file is rejected. Closing that needs
-// registry-wide descendant visibility at validation time; until then the rule is
-// sound for what it can see and silent beyond it, which errs toward accepting.
-func (c *completer) indexOnPrimaryKeyIsRedundant(t *Type) (*Type, bool) {
-	var first *Type
+// same model written in a single file is rejected. Closing that needs load-wide
+// descendant visibility at validation time. Until then the rule is sound for what
+// it can see and silent beyond it, which errs toward accepting.
+func (c *completer) indexOnPrimaryKeyIsRedundant(t Type) (Type, bool) {
+	var first Type
 	for e := range c.concreteEmitters(t) {
 		// Defer on any emitter whose key shape is not settled: an unresolved
-		// supertype may add a co-key, and a rejected primary means the intended
-		// composite currently reads as sole. Either way the sole-vs-composite
-		// question has no stable answer yet, and firing would stack a redundancy
-		// error on the real one (the unresolved reference, or the bad key type).
-		if c.hasUnresolvedSupertype(e) || e.hasRejectedPrimary() {
-			return nil, false
+		// supertype may add a co-key, a rejected primary means the intended
+		// composite currently reads as sole, and a member lost to a syntax error
+		// may be a co-key. Either way the sole-vs-composite question has no
+		// stable answer yet, and firing would stack a redundancy error on the
+		// real one (the unresolved reference, the bad key type, or the E_SYNTAX).
+		if c.hasUnresolvedSupertype(e) || e.hasRejectedPrimary() || c.lostAMember(e) {
+			return Type{}, false
 		}
-		if e.primaryKeyCount() != 1 {
-			return nil, false
+		// A part is keyed on its composed path, so no constraint over its
+		// declared key backs an index.
+		if e.primaryKeyCount() != 1 || e.IsPart() {
+			return Type{}, false
 		}
-		if first == nil {
+		if first.IsZero() {
 			first = e
 		}
 	}
-	return first, first != nil
+	return first, !first.IsZero()
 }
 
 // concreteEmitters yields the types that emit store-level constraints covering
 // t's members: t itself when it is not abstract, plus each of its concrete
 // descendants ([Type.SubTypes] is transitively closed). An abstract type
 // receives no Neo4j label and emits nothing.
-func (c *completer) concreteEmitters(t *Type) iter.Seq[*Type] {
-	return func(yield func(*Type) bool) {
+func (c *completer) concreteEmitters(t Type) iter.Seq[Type] {
+	return func(yield func(Type) bool) {
 		if !t.IsAbstract() && !yield(t) {
 			return
 		}
-		for ref := range t.SubTypes() {
-			sub := c.resolveTypeID(ref.ID())
-			if sub == nil || sub.IsAbstract() {
+		for id := range t.SubTypes() {
+			sub := c.resolveTypeID(id)
+			if sub.IsAbstract() {
 				continue
 			}
 			if !yield(sub) {
@@ -457,7 +462,7 @@ func (c *completer) concreteEmitters(t *Type) iter.Seq[*Type] {
 
 // validateVectorProperty checks @vector: exactly one similarity keyword and a
 // Vector-constrained target.
-func validateVectorProperty(c *completer, _ *Type, prop *Property, a *Annotation) {
+func validateVectorProperty(c *completer, _ Type, prop Property, a Annotation) {
 	if len(a.args) != 1 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
 			"@vector takes exactly one similarity keyword: %s", strings.Join(vectorSimilarityFunctions, " or "))
@@ -482,13 +487,19 @@ func validateVectorProperty(c *completer, _ *Type, prop *Property, a *Annotation
 			"unknown @vector similarity %q: must be %s", a.args[0].text, strings.Join(vectorSimilarityFunctions, " or "))
 		return
 	}
-	if c.annotationTargetTypeUnknown(prop.Constraint()) {
+	if constraintKindUnknown(prop.Constraint()) {
 		return
 	}
 	if !isVectorConstraint(prop.Constraint()) {
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
 			"@vector requires a Vector property; property %q is %s",
-			prop.Name(), constraintKindName(prop.Constraint()))
+			prop.Name(), ResolveAlias(prop.Constraint()).Kind())
+		return
+	}
+	if v, ok := ResolveAlias(prop.Constraint()).(VectorConstraint); ok && v.Dimension() > parse.MaxIndexedVectorDimensions {
+		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
+			"@vector indexes a Vector of at most %d dimensions; property %q has %d",
+			parse.MaxIndexedVectorDimensions, prop.Name(), v.Dimension())
 		return
 	}
 	a.setArgKind(0, ArgKeyword)
@@ -498,8 +509,8 @@ func validateVectorProperty(c *completer, _ *Type, prop *Property, a *Annotation
 // primary-key property (sole or composite member) — every merge match key is
 // immutable on match by construction, so the marker would be redundant and
 // confusing there.
-func validateWriteOnceProperty(c *completer, t *Type, prop *Property, a *Annotation) {
-	if t != nil && t.IsPart() {
+func validateWriteOnceProperty(c *completer, t Type, prop Property, a Annotation) {
+	if t.IsPart() {
 		// A part is replaced whole on every parent write, so create-once
 		// semantics cannot hold there.
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
@@ -522,19 +533,19 @@ func validateWriteOnceProperty(c *completer, t *Type, prop *Property, a *Annotat
 // constraint's backing index is a range index and cannot serve fulltext
 // queries, so a fulltext index over a primary key is a distinct, legitimate
 // object — the @index sole-key redundancy rule does not transfer.
-func validateFulltextProperty(c *completer, _ *Type, prop *Property, a *Annotation) {
+func validateFulltextProperty(c *completer, _ Type, prop Property, a Annotation) {
 	if a.argCount() > 0 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
 			"@fulltext takes no arguments; for a multi-property fulltext index use @@fulltext(...) at the type level")
 		return
 	}
-	if c.annotationTargetTypeUnknown(prop.Constraint()) {
+	if constraintKindUnknown(prop.Constraint()) {
 		return // the target's type is already diagnosed; blaming the annotation would bury it
 	}
 	if !isFulltextEligible(prop.Constraint()) {
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
 			"@fulltext requires a text property (String, Pattern, or Enum); property %q is %s",
-			prop.Name(), constraintKindName(prop.Constraint()))
+			prop.Name(), ResolveAlias(prop.Constraint()).Kind())
 	}
 }
 
@@ -548,7 +559,7 @@ func validateFulltextProperty(c *completer, _ *Type, prop *Property, a *Annotati
 // Literal arguments are rejected, and that rejection is a reserved surface,
 // not just hygiene: a trailing string literal is the extension slot for a
 // future analyzer option, which stays additive only while v1 refuses it.
-func validateFulltextType(c *completer, t *Type, _ *Property, a *Annotation) {
+func validateFulltextType(c *completer, t Type, _ Property, a Annotation) {
 	if a.argCount() == 0 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION, "@@fulltext requires at least one property reference")
 		return
@@ -577,13 +588,13 @@ func validateFulltextType(c *completer, t *Type, _ *Property, a *Annotation) {
 			}
 			continue
 		}
-		if c.annotationTargetTypeUnknown(ref.Constraint()) {
+		if constraintKindUnknown(ref.Constraint()) {
 			continue
 		}
 		if !isFulltextEligible(ref.Constraint()) {
 			c.annotationErrorf(a, arg.span, diag.E_INVALID_ANNOTATION_TARGET,
 				"@@fulltext member %q must be a text property (String, Pattern, or Enum); it is %s",
-				arg.text, constraintKindName(ref.Constraint()))
+				arg.text, ResolveAlias(ref.Constraint()).Kind())
 			continue
 		}
 		a.setArgKind(i, ArgPropertyRef)
@@ -592,10 +603,11 @@ func validateFulltextType(c *completer, t *Type, _ *Property, a *Annotation) {
 
 // validateIndexType checks @@index: at least one property-reference argument,
 // no duplicate references, and each reference resolving to a scalar property of
-// the type (own or inherited; primary-key members are allowed). Unknown-property
+// the type, own or inherited. A primary-key member is allowed, but a one-member
+// @@index over a sole key is redundant where @index on it would be. Unknown-property
 // reporting defers when the type has an unresolved supertype, since the
 // reference may live on a not-yet-visible cross-schema ancestor.
-func validateIndexType(c *completer, t *Type, _ *Property, a *Annotation) {
+func validateIndexType(c *completer, t Type, _ Property, a Annotation) {
 	if a.argCount() == 0 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION, "@@index requires at least one property reference")
 		return
@@ -624,55 +636,33 @@ func validateIndexType(c *completer, t *Type, _ *Property, a *Annotation) {
 			}
 			continue
 		}
-		if c.annotationTargetTypeUnknown(ref.Constraint()) {
+		if constraintKindUnknown(ref.Constraint()) {
 			continue
 		}
 		if !isIndexableScalar(ref.Constraint()) {
 			c.annotationErrorf(a, arg.span, diag.E_INVALID_ANNOTATION_TARGET,
 				"@@index member %q must be a scalar property; it is %s",
-				arg.text, constraintKindName(ref.Constraint()))
+				arg.text, ResolveAlias(ref.Constraint()).Kind())
 			continue
 		}
-		// No sole-primary-key redundancy check here, unlike @index: docs/SPEC.md
-		// lists "primary-key members allowed" for @@index with no caveat, framing
-		// the redundancy rule as @index-only. @@index is the explicit-shape
-		// construct, so a one-member @@index over a sole key is a deliberate
-		// request, not an accident to flag. The two placements differ here by
-		// design; resolving the difference the other way is a SPEC change.
+		// A one-member @@index over a primary key is the index @index on that
+		// key spells, so it is redundant exactly when @index there is.
+		if a.argCount() == 1 && ref.IsPrimaryKey() {
+			if emitter, redundant := c.indexOnPrimaryKeyIsRedundant(t); redundant {
+				c.reportIndexRedundancy(a, arg.span, t, emitter,
+					"@@index over primary-key property %q alone is redundant: %q keys on it alone, so the uniqueness constraint it emits already backs an index",
+					arg.text, emitter.Name())
+				continue
+			}
+		}
 		a.setArgKind(i, ArgPropertyRef)
 	}
-}
-
-// annotationTargetTypeUnknown reports whether an annotation target's type cannot
-// be judged at annotation-validation time, in which case the eligibility check
-// must defer. Two shapes qualify, and both already carry their own diagnostic:
-//
-//   - A nil constraint, left by parse-error recovery on a property whose type
-//     failed to build (E_SYNTAX or E_INVALID_CONSTRAINT). Checking eligibility
-//     here would blame the annotation for the type's failure and describe a
-//     property that plainly declares a type as "missing type".
-//   - A constraint bottoming out in an unresolved alias (a deferred import, a
-//     cyclic local chain), which alias resolution owns.
-//
-// The second test is shared with the primary-key rule via
-// [completer.primaryKeyTypeDeferred]. That predicate is named and documented for
-// its primary-key caller, but what it computes — "this constraint's terminal is
-// not knowable yet" — is the annotation question too. It is shared rather than
-// duplicated so one notion of "unresolved terminal" governs both; anyone
-// NARROWING it for a primary-key reason must keep that in mind, or annotation
-// targets start drawing eligibility errors stacked on the alias error the user
-// actually needs to fix.
-func (c *completer) annotationTargetTypeUnknown(constraint Constraint) bool {
-	return constraint == nil || c.primaryKeyTypeDeferred(constraint)
 }
 
 // isIndexableScalar reports whether a property constraint's underlying kind is a
 // scalar type eligible for a range index. Vector, List, and unresolved aliases
 // are not indexable scalars. Aliases are resolved to their terminal first.
 func isIndexableScalar(constraint Constraint) bool {
-	if constraint == nil {
-		return false
-	}
 	//exhaustive:enforce
 	switch ResolveAlias(constraint).Kind() {
 	case KindString, KindUUID, KindEnum, KindPattern, KindInteger,
@@ -692,9 +682,6 @@ func isIndexableScalar(constraint Constraint) bool {
 // opaque identifier, not tokenized text. Aliases are resolved to their terminal
 // first.
 func isFulltextEligible(constraint Constraint) bool {
-	if constraint == nil {
-		return false
-	}
 	//exhaustive:enforce
 	switch ResolveAlias(constraint).Kind() {
 	case KindString, KindPattern, KindEnum:
@@ -705,14 +692,6 @@ func isFulltextEligible(constraint Constraint) bool {
 	default:
 		return false
 	}
-}
-
-// constraintKindName returns the resolved kind name for diagnostics.
-func constraintKindName(constraint Constraint) string {
-	if constraint == nil {
-		return "missing type"
-	}
-	return ResolveAlias(constraint).Kind().String()
 }
 
 // vectorSimilarityFunctions is the blessed set of @vector similarity keywords —
@@ -743,15 +722,12 @@ func isVectorSimilarity(s string) bool {
 // source: "@@name(a, b)" with arguments, "@@name" without. The grammar's
 // argument list requires at least one argument, so an unconditional "(%s)" would
 // show the user "@@name()" — a spelling that is itself a syntax error.
-func annotationDisplay(a *Annotation) string {
+func annotationDisplay(a Annotation) string {
 	if len(a.args) == 0 {
 		return PlacementType.String() + a.name
 	}
 	texts := make([]string, 0, len(a.args))
 	for _, arg := range a.args {
-		// displayText re-quotes a string literal (whose stored text is unquoted)
-		// but leaves a number, boolean, or regex as its own spelling — echoing a
-		// spelling the source actually contained, whatever the literal's kind.
 		texts = append(texts, arg.displayText())
 	}
 	return PlacementType.String() + a.name + "(" + strings.Join(texts, ", ") + ")"

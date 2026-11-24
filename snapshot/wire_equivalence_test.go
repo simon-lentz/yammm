@@ -25,22 +25,22 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 
 	t.Run("holds with neither created_at nor metadata", func(t *testing.T) {
 		t.Parallel()
-		data, result := snapshot.Marshal(ctx, snap)
-		if err := result.Err(); err != nil {
+		data, readErr := snapshot.Marshal(ctx, snap)
+		if err := readErr; err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
 
-		updated, result := snapshot.UpdateMetadata(ctx, data, nil)
-		if err := result.Err(); err != nil {
+		updated, readErr := snapshot.UpdateMetadata(ctx, data, nil)
+		if err := readErr; err != nil {
 			t.Fatalf("UpdateMetadata: %v", err)
 		}
 
-		loaded, result := snapshot.Load(ctx, data, s)
-		if err := result.Err(); err != nil {
+		loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+		if err := readErr; err != nil {
 			t.Fatalf("load: %v", err)
 		}
-		remarshalled, result := snapshot.Marshal(ctx, loaded)
-		if err := result.Err(); err != nil {
+		remarshalled, readErr := snapshot.Marshal(ctx, loaded)
+		if err := readErr; err != nil {
 			t.Fatalf("re-marshal: %v", err)
 		}
 
@@ -52,23 +52,23 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 
 	t.Run("diverges once the document carries created_at", func(t *testing.T) {
 		t.Parallel()
-		stamped, result := snapshot.Marshal(ctx, snap,
+		stamped, readErr := snapshot.Marshal(ctx, snap,
 			snapshot.WithCreatedAt(time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC)))
-		if err := result.Err(); err != nil {
+		if err := readErr; err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
 
-		updated, result := snapshot.UpdateMetadata(ctx, stamped, nil)
-		if err := result.Err(); err != nil {
+		updated, readErr := snapshot.UpdateMetadata(ctx, stamped, nil)
+		if err := readErr; err != nil {
 			t.Fatalf("UpdateMetadata: %v", err)
 		}
 
-		loaded, result := snapshot.Load(ctx, stamped, s)
-		if err := result.Err(); err != nil {
+		loaded, readErr := snapshot.Unmarshal(ctx, stamped, s)
+		if err := readErr; err != nil {
 			t.Fatalf("load: %v", err)
 		}
-		remarshalled, result := snapshot.Marshal(ctx, loaded)
-		if err := result.Err(); err != nil {
+		remarshalled, readErr := snapshot.Marshal(ctx, loaded)
+		if err := readErr; err != nil {
 			t.Fatalf("re-marshal: %v", err)
 		}
 
@@ -88,26 +88,26 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 	// it with newMeta either way.
 	t.Run("holds on a document carrying metadata when newMeta is empty", func(t *testing.T) {
 		t.Parallel()
-		withMeta, result := snapshot.Marshal(ctx, snap,
+		withMeta, readErr := snapshot.Marshal(ctx, snap,
 			snapshot.WithMetadata(map[string]string{"pipeline": "done"}))
-		if err := result.Err(); err != nil {
+		if err := readErr; err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
 
-		updated, result := snapshot.UpdateMetadata(ctx, withMeta, nil)
-		if err := result.Err(); err != nil {
+		updated, readErr := snapshot.UpdateMetadata(ctx, withMeta, nil)
+		if err := readErr; err != nil {
 			t.Fatalf("UpdateMetadata: %v", err)
 		}
 		if bytes.Contains(updated, []byte("metadata")) {
 			t.Error("UpdateMetadata kept the input's metadata; it replaces the map wholesale")
 		}
 
-		loaded, result := snapshot.Load(ctx, withMeta, s)
-		if err := result.Err(); err != nil {
+		loaded, readErr := snapshot.Unmarshal(ctx, withMeta, s)
+		if err := readErr; err != nil {
 			t.Fatalf("load: %v", err)
 		}
-		remarshalled, result := snapshot.Marshal(ctx, loaded)
-		if err := result.Err(); err != nil {
+		remarshalled, readErr := snapshot.Marshal(ctx, loaded)
+		if err := readErr; err != nil {
 			t.Fatalf("re-marshal: %v", err)
 		}
 
@@ -122,20 +122,20 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 	t.Run("holds at every supported indent", func(t *testing.T) {
 		t.Parallel()
 		for _, indent := range []string{"  ", "\t", "    "} {
-			data, result := snapshot.Marshal(ctx, snap, snapshot.WithIndent(indent))
-			if err := result.Err(); err != nil {
+			data, readErr := snapshot.Marshal(ctx, snap, snapshot.WithIndent(indent))
+			if err := readErr; err != nil {
 				t.Fatalf("marshal at indent %q: %v", indent, err)
 			}
-			updated, result := snapshot.UpdateMetadata(ctx, data, nil)
-			if err := result.Err(); err != nil {
+			updated, readErr := snapshot.UpdateMetadata(ctx, data, nil)
+			if err := readErr; err != nil {
 				t.Fatalf("UpdateMetadata at indent %q: %v", indent, err)
 			}
-			loaded, result := snapshot.Load(ctx, data, s)
-			if err := result.Err(); err != nil {
+			loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+			if err := readErr; err != nil {
 				t.Fatalf("load at indent %q: %v", indent, err)
 			}
-			remarshalled, result := snapshot.Marshal(ctx, loaded, snapshot.WithIndent(indent))
-			if err := result.Err(); err != nil {
+			remarshalled, readErr := snapshot.Marshal(ctx, loaded, snapshot.WithIndent(indent))
+			if err := readErr; err != nil {
 				t.Fatalf("re-marshal at indent %q: %v", indent, err)
 			}
 			if !bytes.Equal(updated, remarshalled) {
@@ -149,25 +149,25 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 	// once newMeta is non-empty.
 	t.Run("diverges once newMeta is non-empty", func(t *testing.T) {
 		t.Parallel()
-		data, result := snapshot.Marshal(ctx, snap)
-		if err := result.Err(); err != nil {
+		data, readErr := snapshot.Marshal(ctx, snap)
+		if err := readErr; err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
 
-		updated, result := snapshot.UpdateMetadata(ctx, data, map[string]string{"pipeline": "done"})
-		if err := result.Err(); err != nil {
+		updated, readErr := snapshot.UpdateMetadata(ctx, data, map[string]string{"pipeline": "done"})
+		if err := readErr; err != nil {
 			t.Fatalf("UpdateMetadata: %v", err)
 		}
 		if !bytes.Contains(updated, []byte("metadata")) {
 			t.Error("UpdateMetadata did not write newMeta")
 		}
 
-		loaded, result := snapshot.Load(ctx, data, s)
-		if err := result.Err(); err != nil {
+		loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+		if err := readErr; err != nil {
 			t.Fatalf("load: %v", err)
 		}
-		remarshalled, result := snapshot.Marshal(ctx, loaded)
-		if err := result.Err(); err != nil {
+		remarshalled, readErr := snapshot.Marshal(ctx, loaded)
+		if err := readErr; err != nil {
 			t.Fatalf("re-marshal: %v", err)
 		}
 

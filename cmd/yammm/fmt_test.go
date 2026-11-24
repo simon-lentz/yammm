@@ -6,11 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
-	"github.com/simon-lentz/yammm/format"
+	"github.com/simon-lentz/yammm/internal/format"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -30,13 +34,13 @@ func writeFmtFixture(t *testing.T, name, content string) string {
 	return path
 }
 
-// TestFmtCheck_FormattedFileIsSilent pins the hook's success shape: exit zero
+// TestFmtList_FormattedFileIsSilent pins the hook's success shape: exit zero
 // and print nothing, so a pre-commit run over a clean tree stays quiet.
-func TestFmtCheck_FormattedFileIsSilent(t *testing.T) {
+func TestFmtList_FormattedFileIsSilent(t *testing.T) {
 	t.Parallel()
 
 	path := writeFmtFixture(t, "clean.yammm", fmtCanonical)
-	code, out, _ := executeCmdOutput(t, "fmt", "--check", path)
+	code, out, _ := executeCmdOutput(t, "fmt", "-l", path)
 	if code != cli.ExitOK {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitOK)
 	}
@@ -45,24 +49,47 @@ func TestFmtCheck_FormattedFileIsSilent(t *testing.T) {
 	}
 }
 
-// TestFmtCheck_UnformattedFileIsReported pins the gofmt -l shape: the path
-// alone, and the validation exit code the consumer's hook depends on.
-func TestFmtCheck_UnformattedFileIsReported(t *testing.T) {
+// TestFmtList_UnformattedFileIsListed pins the gofmt -l shape: the path alone
+// at exit 0, the file left as it was.
+func TestFmtList_UnformattedFileIsListed(t *testing.T) {
 	t.Parallel()
 
 	path := writeFmtFixture(t, "dirty.yammm", fmtUnformatted)
-	code, out, _ := executeCmdOutput(t, "fmt", "--check", path)
-	if code != cli.ExitValidation {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
+	code, out, _ := executeCmdOutput(t, "fmt", "-l", path)
+	if code != cli.ExitOK {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitOK)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != fmtUnformatted {
+		t.Errorf("-l changed the file: %q, %v", got, err)
 	}
 	if out != path+"\n" {
 		t.Errorf("output = %q, want the path alone", out)
 	}
 }
 
-// TestFmtCheck_MixedListReportsOnlyOffenders pins that one run over a file list
-// reports every unformatted path and no formatted one.
-func TestFmtCheck_MixedListReportsOnlyOffenders(t *testing.T) {
+// TestFmtList_AnUnformattedFilesNameActsOnNoTerminal holds -l's path line to
+// the text output's escape: a name that holds an escape sequence and a newline
+// is written with both escaped, on one line.
+func TestFmtList_AnUnformattedFilesNameActsOnNoTerminal(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows refuses a control character in a file name")
+	}
+
+	path := writeFmtFixture(t, "d\x1b[2J\nx.yammm", fmtUnformatted)
+	code, out, _ := executeCmdOutput(t, "fmt", "-l", path)
+	if code != cli.ExitOK {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitOK)
+	}
+	want := filepath.Dir(path) + string(filepath.Separator) + "d\u241b[2J\u240ax.yammm\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
+	}
+}
+
+// TestFmtList_MixedListReportsOnlyOffenders pins that one run over a file list
+// lists every unformatted path and no formatted one.
+func TestFmtList_MixedListReportsOnlyOffenders(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -80,9 +107,9 @@ func TestFmtCheck_MixedListReportsOnlyOffenders(t *testing.T) {
 		args = append(args, p)
 	}
 
-	code, out, _ := executeCmdOutput(t, append([]string{"fmt", "--check"}, args...)...)
-	if code != cli.ExitValidation {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
+	code, out, _ := executeCmdOutput(t, append([]string{"fmt", "-l"}, args...)...)
+	if code != cli.ExitOK {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitOK)
 	}
 	lines := strings.Fields(out)
 	if len(lines) != 2 {
@@ -112,10 +139,10 @@ func TestFmt_MultiplePathsConcatenateToStdout(t *testing.T) {
 	}
 }
 
-// TestFmtCheck_UnreadablePathDoesNotStopTheList pins both halves of the list
+// TestFmtList_UnreadablePathDoesNotStopTheList pins both halves of the list
 // contract: an unreadable path does not suppress the offenders after it, and
-// its I/O code outranks the validation code they produce.
-func TestFmtCheck_UnreadablePathDoesNotStopTheList(t *testing.T) {
+// its I/O code is the exit.
+func TestFmtList_UnreadablePathDoesNotStopTheList(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -125,24 +152,62 @@ func TestFmtCheck_UnreadablePathDoesNotStopTheList(t *testing.T) {
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	code, out, _ := executeCmdOutput(t, "fmt", "--check", missing, dirty)
+	code, out, _ := executeCmdOutput(t, "fmt", "-l", missing, dirty)
 	if code != cli.ExitRuntime {
-		t.Errorf("exit code = %d, want %d (an I/O failure outranks validation)", code, cli.ExitRuntime)
+		t.Errorf("exit code = %d, want %d (an I/O failure)", code, cli.ExitRuntime)
 	}
 	if out != dirty+"\n" {
 		t.Errorf("output = %q, want the readable offender after the unreadable path", out)
 	}
 }
 
-// TestFmt_CheckAndWriteAreMutuallyExclusive pins the usage code. The message
-// itself goes to os.Stderr, which this harness cannot see; the assertion on it
-// lives in testdata/script/fmt.txtar.
-func TestFmt_CheckAndWriteAreMutuallyExclusive(t *testing.T) {
+// TestFmt_ListAndWriteCombine pins gofmt's -l -w: each file that differs is
+// listed and rewritten, a canonical one is neither, and the run exits 0.
+func TestFmt_ListAndWriteCombine(t *testing.T) {
+	t.Parallel()
+
+	dirty := writeFmtFixture(t, "dirty.yammm", fmtUnformatted)
+	clean := writeFmtFixture(t, "clean.yammm", fmtCanonical)
+	code, out, _ := executeCmdOutput(t, "fmt", "-l", "-w", dirty, clean)
+	if code != cli.ExitOK {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitOK)
+	}
+	if out != dirty+"\n" {
+		t.Errorf("output = %q, want the rewritten file's path alone", out)
+	}
+	for _, p := range []string{dirty, clean} {
+		if got, err := os.ReadFile(p); err != nil || string(got) != fmtCanonical {
+			t.Errorf("%s = %q, %v, want the canonical form", p, got, err)
+		}
+	}
+}
+
+// TestFmt_TheCheckFlagIsRefused pins that --check, which -l replaced, is an
+// unknown flag.
+func TestFmt_TheCheckFlagIsRefused(t *testing.T) {
 	t.Parallel()
 
 	path := writeFmtFixture(t, "any.yammm", fmtCanonical)
-	if code := executeCmd(t, "fmt", "--check", "--write", path); code != cli.ExitUsage {
+	if code := executeCmd(t, "fmt", "--check", path); code != cli.ExitUsage {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
+	}
+}
+
+// TestFmt_AFilesSyntaxErrorPrecedesTheNextFilesOutput pins that fmt writes a
+// file's diagnostic before it formats the next file, so a terminal shows the
+// error beside the file it names.
+func TestFmt_AFilesSyntaxErrorPrecedesTheNextFilesOutput(t *testing.T) {
+	t.Parallel()
+
+	broken := writeFmtFixture(t, "broken.yammm", "schema \"s\"\ntype T {\n")
+	next := writeFmtFixture(t, "next.yammm", fmtUnformatted)
+	combined := executeCmdCombined(t, "fmt", broken, next)
+	at, payloadAt := strings.Index(combined, "E_SYNTAX"), strings.Index(combined, fmtCanonical)
+	if at < 0 || payloadAt < 0 {
+		t.Fatalf("output lacks the diagnostic or the formatted file:\n%s", combined)
+	}
+	if at > payloadAt {
+		t.Errorf("the first file's diagnostic follows the second file's output:\n%s", combined)
 	}
 }
 
@@ -175,15 +240,65 @@ func TestFmtWrite_MultiplePaths(t *testing.T) {
 	}
 }
 
+// TestFmt_ASameLengthRewriteIsUnformatted pins that -l and -w compare bytes:
+// the source and its canonical form have the same length.
+func TestFmt_ASameLengthRewriteIsUnformatted(t *testing.T) {
+	t.Parallel()
+
+	const src = "schema \"s\"\n\ntype A{\n\tid String \n}\n"
+	const canonical = "schema \"s\"\n\ntype A {\n\tid String\n}\n"
+	if len(src) != len(canonical) {
+		t.Fatalf("the fixture's lengths differ: %d and %d", len(src), len(canonical))
+	}
+
+	path := writeFmtFixture(t, "same_length.yammm", src)
+	if code, out, _ := executeCmdOutput(t, "fmt", "-l", path); code != cli.ExitOK || strings.TrimSpace(out) != path {
+		t.Errorf("-l: exit %d with %q, want %d with the path", code, out, cli.ExitOK)
+	}
+	if code := executeCmd(t, "fmt", "--write", path); code != cli.ExitOK {
+		t.Fatalf("--write: exit %d, want %d", code, cli.ExitOK)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != canonical {
+		t.Errorf("--write left %q, want %q", got, canonical)
+	}
+}
+
+// TestFmtWrite_LeavesAFormattedFileUntouched pins that --write writes nothing
+// when the file is already canonical: its modification time stays where the
+// test set it.
+func TestFmtWrite_LeavesAFormattedFileUntouched(t *testing.T) {
+	t.Parallel()
+
+	path := writeFmtFixture(t, "canonical.yammm", fmtCanonical)
+	old := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("set the times: %v", err)
+	}
+	if code := executeCmd(t, "fmt", "--write", path); code != cli.ExitOK {
+		t.Fatalf("exit %d, want %d", code, cli.ExitOK)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if !info.ModTime().Equal(old) {
+		t.Errorf("modification time = %v, want %v: --write rewrote a canonical file", info.ModTime(), old)
+	}
+}
+
 // tightOperators removes the spaces around a logical operator.
 var tightOperators = regexp.MustCompile(`[ \t]*(&&|\|\|)[ \t]*`)
 
-// fmtHazards returns schemas the formatter has been measured to rewrite into
-// something else: one loses an enum value and still loads, one no longer loads.
+// fmtHazards returns schemas whose canonical form is easy to get wrong: an enum
+// value on the opening line, and a logical operator with no spaces around it.
 func fmtHazards(t *testing.T) map[string]string {
 	t.Helper()
 	read := func(name string) string {
-		b, err := os.ReadFile(filepath.Join("..", "..", "format", "testdata", "roundtrip", name))
+		b, err := os.ReadFile(filepath.Join("..", "..", "internal", "format", "testdata", "roundtrip", name))
 		if err != nil {
 			t.Fatalf("read hazard: %v", err)
 		}
@@ -198,8 +313,8 @@ func fmtHazards(t *testing.T) map[string]string {
 // fmtSchemaHash loads src and returns its structural hash, reporting whether it
 // loaded.
 func fmtSchemaHash(src string) (string, bool) {
-	s, result := schema.LoadString(context.Background(), src, "hazard.yammm")
-	if result.Err() != nil || s == nil {
+	s, err := schema.LoadString(context.Background(), src, "hazard.yammm")
+	if err != nil || s.IsZero() {
 		return "", false
 	}
 	return schema.StructuralHash(s), true
@@ -216,7 +331,7 @@ func TestFmt_NeverLeavesAChangedSchema(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: the hazard does not load, so meaning cannot be compared", name)
 		}
-		for _, mode := range []string{"--write", "stdout", "--check"} {
+		for _, mode := range []string{"--write", "stdout", "-l"} {
 			t.Run(name+"/"+mode, func(t *testing.T) {
 				t.Parallel()
 
@@ -242,9 +357,9 @@ func TestFmt_NeverLeavesAChangedSchema(t *testing.T) {
 				}
 				formatted := string(got)
 				switch mode {
-				case "--check":
-					if code != cli.ExitOK && code != cli.ExitValidation {
-						t.Fatalf("exit %d, want 0, 1 or 3", code)
+				case "-l":
+					if code != cli.ExitOK {
+						t.Fatalf("exit %d, want 0 or 3", code)
 					}
 					return
 				case "stdout":
@@ -278,7 +393,7 @@ func TestFmtFailure_RefusalIsTheFormattersFault(t *testing.T) {
 		t.Errorf("refusal message = %q, want the path and that the file is left unchanged", msg)
 	}
 
-	_, parseErr := format.TokenStream("schema \"s\"\ntype T {\n")
+	_, parseErr := format.Source([]byte("schema \"s\"\ntype T {\n"))
 	if parseErr == nil {
 		t.Fatal("the unparseable input parsed")
 	}
@@ -287,20 +402,52 @@ func TestFmtFailure_RefusalIsTheFormattersFault(t *testing.T) {
 	}
 }
 
-// TestFmtCheck_LineEndingDifferenceIsUnformatted pins the behaviour the flag's
-// help text warns about: TokenStream normalizes CRLF before formatting and never
-// converts back, so a CRLF file is unformatted even when nothing else differs.
-func TestFmtCheck_LineEndingDifferenceIsUnformatted(t *testing.T) {
+// TestFmtList_LineEndingDifferenceIsUnformatted pins the behaviour the flag's
+// help text warns about: the formatter normalizes CRLF before formatting and never
+// converts back, so a CRLF file is listed even when nothing else differs.
+func TestFmtList_LineEndingDifferenceIsUnformatted(t *testing.T) {
 	t.Parallel()
 
 	crlf := strings.ReplaceAll(fmtCanonical, "\n", "\r\n")
 	path := writeFmtFixture(t, "crlf.yammm", crlf)
 
-	code, out, _ := executeCmdOutput(t, "fmt", "--check", path)
-	if code != cli.ExitValidation {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
+	code, out, _ := executeCmdOutput(t, "fmt", "-l", path)
+	if code != cli.ExitOK {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitOK)
 	}
 	if out != path+"\n" {
 		t.Errorf("output = %q, want the path reported", out)
+	}
+}
+
+// TestFmt_ASyntaxDiagnosticNamesTheFilesByteOffset pins that fmt places a
+// syntax diagnostic at the file's own byte offset, as validate does, though
+// the formatter parses the text with each CR LF made one LF.
+func TestFmt_ASyntaxDiagnosticNamesTheFilesByteOffset(t *testing.T) {
+	t.Parallel()
+	src := "schema \"s\"\r\n\r\ntype T {\r\n\tid String primary\r\n\te Enum[\"a\", \"\\xZZ\"]\r\n}\r\n"
+	path := writeFmtFixture(t, "crlf.yammm", src)
+	byteOf := regexp.MustCompile(`"offset":\s*(\d+)`)
+	offsets := func(args ...string) []string {
+		t.Helper()
+		_, out, errOut := executeCmdOutput(t, args...)
+		var got []string
+		for _, m := range byteOf.FindAllStringSubmatch(out+errOut, -1) {
+			got = append(got, m[1])
+		}
+		if len(got) < 2 {
+			t.Fatalf("%v printed no span's offsets:\n%s%s", args, out, errOut)
+		}
+		return got
+	}
+	want := strconv.Itoa(strings.Index(src, `"\xZZ"`))
+	validated := offsets("validate", "--json", path)
+	if validated[0] != want {
+		t.Fatalf("validate places the escape at byte %s, want %s", validated[0], want)
+	}
+	// The end is placed by the same rule as the start, so fmt writes every
+	// offset validate writes.
+	if got := offsets("fmt", "--json", path); !slices.Equal(got, validated) {
+		t.Errorf("fmt writes the offsets %v, want validate's %v", got, validated)
 	}
 }

@@ -7,20 +7,23 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 )
 
 // warningResult returns a result carrying one Warning with the given message.
 func warningResult(message string) diag.Result {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, message).Build())
 	return c.Result()
 }
 
 // errorResult returns a result carrying one Error with the given message.
 func errorResult(message string) diag.Result {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Error, diag.E_CONSTRAINT_FAIL, message).Build())
 	return c.Result()
 }
@@ -86,7 +89,7 @@ func TestDiagnosticSink_RendersOneJSONDocument(t *testing.T) {
 }
 
 // An empty sink writes nothing as text, and exactly one JSON document holding
-// no issue under --format json, so a JSON consumer parses stderr whatever the
+// no issue under --json, so a JSON consumer parses stderr whatever the
 // run found.
 func TestDiagnosticSink_EmptyRendersNothingAsTextAndOneDocumentAsJSON(t *testing.T) {
 	t.Parallel()
@@ -102,7 +105,7 @@ func TestDiagnosticSink_EmptyRendersNothingAsTextAndOneDocumentAsJSON(t *testing
 			t.Parallel()
 			var out strings.Builder
 			sink := NewDiagnosticSink(&out, c.format, true, false)
-			sink.Add(diag.OK())
+			sink.Add(diag.Result{})
 			_ = sink.Close(nil)
 			if out.String() != c.want {
 				t.Errorf("an empty sink wrote %q, want %q", out.String(), c.want)
@@ -128,7 +131,7 @@ func TestDiagnosticSink_ResultMergesEveryPhase(t *testing.T) {
 	if result.Len() != 2 {
 		t.Errorf("merged result holds %d issues, want 2", result.Len())
 	}
-	if !result.HasErrors() {
+	if diagtest.Err(result) == nil {
 		t.Error("an error added by an early phase must survive the merge")
 	}
 	if ExitForResult(result) != ExitValidation {
@@ -296,8 +299,8 @@ func (f fixedSource) Content(location.Span) ([]byte, bool) { return f.content, t
 func TestDiagnosticSink_SourceReachesTheRenderer(t *testing.T) {
 	t.Parallel()
 
-	source := location.MustNewSourceID("thing.yammm")
-	c := diag.NewCollectorUnlimited()
+	source := sourcetest.ID("thing.yammm")
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX, "unexpected token").
 		WithSpan(location.Span{
 			Source: source,

@@ -3,42 +3,37 @@ package snapshot
 import (
 	"context"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Verify runs all structural validation checks that [Load] performs on a .ys
-// file without materializing a Snapshot. Returns diag.Result with the same
-// diagnostic codes as Load.
+// Verify runs the checks [Unmarshal] runs on a .ys file before it materializes a
+// Snapshot, and returns the error Unmarshal would return: nil for a document
+// Unmarshal accepts, else a *[diag.ResultError] holding the failures, with
+// Unmarshal's codes. It takes Unmarshal's options and refuses any other.
 //
-// Verify runs Load's pipeline and stops before materialization, so it builds
-// no Snapshot and no instance objects. It does decode the instances section
+// Verify stops before materialization, so it builds no Snapshot and no graph
+// instance; under [WithRevalidation] a validator run that passes builds an instance
+// it discards. It does decode the instances section
 // first, holding every instance's properties, so peak memory scales with
 // document size rather than with key count.
 //
-// Panics if s is nil (programming error).
-func Verify(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption) diag.Result {
-	if s == nil {
-		panic("snapshot.Verify: nil Schema")
+// Panics if s is zero or ctx is nil (programming error).
+func Verify(ctx context.Context, data []byte, s schema.Schema, opts ...Option) error {
+	if s.IsZero() {
+		panic("snapshot.Verify: zero Schema")
+	}
+	if ctx == nil {
+		panic("snapshot.Verify: nil context")
+	}
+	cfg := newConfig(opts)
+	if err := cfg.refuse("Verify", readTakes...); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-		return c.Result()
+		return cancelled(err)
 	}
 
-	cfg := applyLoadOptions(opts)
 	sd := newStreamDecoder(data, s, cfg)
-
-	// Steps 1-3: Decode and validate header, types, schema hash.
-	if err := sd.decodeHeader(); err != nil {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return sd.collector.Result()
-	}
-	if sd.collector.HasErrors() {
-		return sd.collector.Result()
-	}
-
-	sd.runPipeline(ctx)
-	return sd.collector.Result()
+	sd.readDocument(ctx)
+	return sd.collector.Err()
 }

@@ -7,12 +7,14 @@
 # `go help test` states the rule under package list mode. The verdict is go
 # test's exit status.
 #
-# The full gate's definition is scripts/test.sh: every test run under the race
-# detector, in shuffled order, with no cached result, and judged by
-# internal/testsummary. `make gate` and every CI host run it.
+# The full gate's test definition is scripts/test.sh: every test run in shuffled
+# order, with no cached result, and judged by internal/testsummary, under the
+# race detector save the tests of a package only the build without it reads.
+# `make gate` and every CI host run it.
 #
-# The package set is scripts/packages.sh's and the toolchain is the module's, as
-# in scripts/test.sh. CGO_ENABLED and LC_ALL are set as that script sets them.
+# The package set is scripts/packages.sh's list for the plain build, and the
+# toolchain is the module's, as in scripts/test.sh. CGO_ENABLED and LC_ALL are
+# set as that script sets them.
 #
 # Usage: scripts/committest.sh
 set -euo pipefail

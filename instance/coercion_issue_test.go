@@ -13,10 +13,9 @@ import (
 // including a RECOVERED PANIC — reached the validated instance as data while
 // the node-property slot reported the same failure.
 //
-// The path is defensive: CoerceValue is not reachable-in-failure after
-// CheckValue passes through any constructor this library exposes — the schema
-// Builder cannot attach a constraint to an edge property, and the DSL cannot
-// express a malformed one. That is why the classifier is pinned here directly
+// The path is defensive: value.Coerce is not reachable-in-failure after
+// value.Check passes through any constructor this library exposes: the DSL cannot
+// express a malformed constraint. That is why the classifier is pinned here directly
 // rather than through the validator: an end-to-end test would need an input no
 // caller can construct.
 //
@@ -49,8 +48,8 @@ func TestCoercionIssue_ClassifiesAPanicApartFromAConversionFailure(t *testing.T)
 		if issue.Severity() != diag.Error {
 			t.Errorf("severity = %v, want Error", issue.Severity())
 		}
-		if issue.Code() != ErrTypeMismatch {
-			t.Errorf("code = %s, want %s", issue.Code(), ErrTypeMismatch)
+		if issue.Code() != diag.E_TYPE_MISMATCH {
+			t.Errorf("code = %s, want %s", issue.Code(), diag.E_TYPE_MISMATCH)
 		}
 		if !strings.Contains(issue.Message(), `FK field "_target_id"`) {
 			t.Errorf("message does not name the slot: %s", issue.Message())

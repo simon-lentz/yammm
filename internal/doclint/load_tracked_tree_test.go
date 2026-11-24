@@ -31,9 +31,9 @@ func TestLoad_ReadsATaggedTestFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the module: %v", err)
 	}
-	// adapter/neo4j/integration is behind a build tag and is nothing BUT test
+	// neo4j/integration is behind a build tag and is nothing BUT test
 	// files, so the whole directory vanished — TestMain among it.
-	integration := packageAt(t, m, "adapter/neo4j/integration")
+	integration := packageAt(t, m, "neo4j/integration")
 	if _, ok := integration.names["TestMain"]; !ok {
 		t.Error("TestMain is not in the loaded name set: a tagged test file was excluded")
 	}

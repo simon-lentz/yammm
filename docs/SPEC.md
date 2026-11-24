@@ -39,7 +39,7 @@ Productions are expressions constructed from terms and the following operators, 
 {}  repetition (0 to n times)
 ```
 
-Three naming conventions are used. **UPPER_SNAKE** names a lexical token produced by the lexer (`UC_WORD`, `LC_WORD`, `STRING`, `INTEGER`, `FLOAT`, `REGEXP`, `VARIABLE`, `DOC_COMMENT`, `EOF`) — with one exception, `BOOLEAN`, which is a non-terminal over the two word spellings `true` and `false` and is spelled in upper snake because it stands in for a literal. **CamelCase** names a syntactic non-terminal. **lower case** names a helper non-terminal defined where it is first used — a character class (`upper_letter`, `lower_letter`, `decimal_digit`, `newline`, `line_char`, `escape_sequence`), a single token (`format`, `dimensions`, `minLen`, `maxLen`), or a phrase (`min`, `max`, `exponent`). Literal tokens are enclosed in double quotes `""` or back quotes `` ` ``.
+Three naming conventions are used. **UPPER_SNAKE** names a lexical token the lexer produces (`UC_WORD`, `LC_WORD`, `STRING`, `INTEGER`, `FLOAT`, `REGEXP`, `VARIABLE`, `DOC_COMMENT`, `EOF`), with one exception: `BOOLEAN` is a non-terminal over the two word spellings `true` and `false`, spelled in upper snake because it stands in for a literal. **CamelCase** names a syntactic non-terminal; `UUIDT` is one, the acronym `UUID` before the `T` that ends each built-in type's production. A name that starts in **lower case** is a helper non-terminal with a production of its own: a character class (`upper_letter`, `lower_letter`, `decimal_digit`, `newline`, `line_char`, `string_char`, `regexp_char`), a single token (`dimensions`, `minLen`, `maxLen`), or a phrase (`min`, `max`, `exponent`, `escape_sequence`). Two kinds of lower-case name have no production: a `label=` prefix, described below, which is no non-terminal, and the names `production_name`, `label` and `token` of the notation's own productions above, each of which stands for what its name says. Literal tokens are enclosed in double quotes `""` or back quotes `` ` ``.
 
 Some productions carry `label=` prefixes, which name the field the reference implementation binds (`path=` and `alias=` on `ImportDecl`, `qualifier=` and `name=` on `TypeRef`, `message=` and `expr=` on `Invariant`); the Grammar Summary writes the same productions without them. A `/* … */` description is informal prose standing in for a rule not written out, and a `//` comment is commentary, not grammar.
 
@@ -47,9 +47,9 @@ Inside a production, `"a" ... "z"` is a character range — the closed set from 
 
 ## Source Code Representation
 
-Source code is Unicode text encoded in UTF-8. A byte sequence that is not valid UTF-8 is a syntax error (`E_SYNTAX`), reported at the bytes inside a comment or a string or regex literal and failing the construct that holds it anywhere else, and so is the NUL character (U+0000), which a string literal writes with the `\0` escape instead. The text is not canonicalized, so a single accented code point is distinct from the same character constructed from combining an accent and a letter. For simplicity, this document will use the unqualified term _character_ to refer to a Unicode code point in the source text.
+Source code is Unicode text encoded in UTF-8. A byte sequence that is not valid UTF-8 is a syntax error (`E_SYNTAX`), and so is the NUL character (U+0000), which a string literal writes with the `\0` escape instead. Inside a comment or a string or regex literal, each run of one kind draws one report. Anywhere else, the sequence is an unexpected token, and the parser recovers from it as from any other: the recovery can skip a later sequence, which then draws no report of its own. The text is not canonicalized, so a single accented code point is distinct from the same character constructed from combining an accent and a letter. For simplicity, this document will use the unqualified term _character_ to refer to a Unicode code point in the source text.
 
-A schema file can start with one UTF-8 byte order mark (U+FEFF). The lexer skips it: it is no token, though line 1's columns count it, and the formatter never writes one: `yammm fmt --check` reports a file that starts with one as unformatted, and `yammm fmt --write` removes it. A byte order mark anywhere else is a syntax error (`E_SYNTAX`), inside a comment or a literal too; a string literal writes U+FEFF with the `\uFEFF` escape. The `yammm.mod` marker file is the exception, below.
+A schema file can start with one UTF-8 byte order mark (U+FEFF). The lexer skips it: it is no token, though line 1's columns count it. The language server is the exception: for a file it reads from disk, it counts line 1's characters from the first character after the mark. The formatter removes a leading one: `yammm fmt -l` lists a file that starts with one, and `yammm fmt --write` removes it. A byte order mark anywhere else is a syntax error (`E_SYNTAX`), inside a comment or a literal too; a string literal writes U+FEFF with the `\uFEFF` escape. `yammm fmt` does not refuse a mark inside a comment or a string literal: it writes the mark back where it stands, and `yammm validate` refuses the file. The `yammm.mod` marker file is the exception, below.
 
 Each code point is distinct; upper and lower case letters are different characters.
 
@@ -97,7 +97,7 @@ type Person {
 }
 ```
 
-Block comments immediately preceding a schema, type, property, association, composition, data type, invariant, or type-level annotation declaration become that element's documentation and are preserved in the parsed model. The documentation is the text between `/*` and `*/` with its trailing white space removed and its leading white space removed up to the first text. Every line that begins after a newline is a continuation line. When a newline comes before the first text, the white space is removed only up to the start of that text's line, which is then a continuation line too. Each continuation line loses the leading spaces and tabs that every continuation line holding text shares. The shared indentation is compared byte by byte: a line indented by a tab and one indented by spaces share none. A line ends at a newline, U+000A or U+000D, a CR LF pair counting as one. In the example above, the documentation's second line is `that spans multiple lines`.
+Every block comment is a documentation comment, legal only directly before a declaration that takes one: a schema, type, property, edge property, association, composition, data type, invariant, or type-level annotation declaration. It becomes that element's documentation and is preserved in the parsed model. A block comment anywhere else is `E_SYNTAX`: before an import, after the last declaration, before a closing brace, alone in a body, between a declaration's tokens, before a property annotation, inside an argument or `extends` list, or a second one before one declaration. A line comment is legal at each of those positions but one: a line comment ends its line, so a property annotation after one begins a line and is refused with `E_INVALID_ANNOTATION`. The documentation is the text between `/*` and `*/` with its trailing white space removed and its leading white space removed up to the first text. Every line that begins after a newline is a continuation line. When a newline comes before the first text, the white space is removed only up to the start of that text's line, which is then a continuation line too. Each continuation line loses the leading spaces and tabs that every continuation line holding text shares. The shared indentation is compared byte by byte: a line indented by a tab and one indented by spaces share none. A line ends at a newline, U+000A or U+000D, a CR LF pair counting as one. In the example above, the documentation's second line is `that spans multiple lines`.
 
 A comment cannot start inside a string literal or inside another comment.
 
@@ -109,13 +109,13 @@ Tokens form the vocabulary of the YAMMM language. There are four classes: identi
 
 Identifiers name entities such as types, properties, and relationships. There are two classes of identifiers:
 
-**Upper-case identifiers** start with an ASCII upper-case letter (A-Z). Type names and data type aliases must take this form; relationship names and import aliases may:
+**Upper-case identifiers** start with an ASCII upper-case letter (A-Z). Type names and data type aliases must take this form. An import alias may, reserved keywords excepted. A relationship name takes the narrower `RelationName` form under [Associations](#associations), which admits no lower-case letter:
 
 ```text
 UC_WORD = upper_letter { upper_letter | lower_letter | decimal_digit | "_" } .
 ```
 
-**Lower-case identifiers** start with an ASCII lower-case letter (a-z). Property names and annotation names must take this form; relationship names and import aliases may:
+**Lower-case identifiers** start with an ASCII lower-case letter (a-z). Property names and annotation names must take this form. An import alias may, reserved keywords excepted. A relationship name never does:
 
 ```text
 LC_WORD = lower_letter { upper_letter | lower_letter | decimal_digit | "_" } .
@@ -198,7 +198,7 @@ includes    abstract    one    many    import
 
 Six spellings cannot be used as property names. The keywords `as`, `part`, and `in` would create parsing ambiguity in import declarations (`as`), type modifiers (`part`), and membership expressions (`in`) respectively. The literals `true`, `false`, and `nil` are also barred. The rule table is keywordless, so all six lex as ordinary words; what rejects them is a negative lookahead on the property-name production. All six are rejected where the property is declared, not where it is used.
 
-A seventh spelling, `self`, is grammatical and is refused at schema load rather than by the grammar (`E_INVALID_NAME`, at the declaration): `self` is bound to the instance in every invariant, at load and at evaluation alike, so a property so named could never be read. The rule is the schema layer's, and it applies to the parse front door and to the Go `Builder` alike.
+A seventh spelling, `self`, is grammatical, and on a type's property is refused at schema load rather than by the grammar (`E_INVALID_NAME`, at the declaration): `self` is bound to the instance in every invariant, at load and at evaluation alike, so the bare name and `$self` reach the instance first, and a property so named has no read under its own name. The rule is the schema layer's. A relation is read by its UPPER_SNAKE name, so a relation named `SELF` is read as `SELF` and loads.
 
 ### Operators and Punctuation
 
@@ -207,7 +207,7 @@ The following character sequences represent operators and punctuation:
 ```text
 +     -     *     /     %           // arithmetic
 ==    !=    <     <=    >     >=    // comparison
-&&    ||    ^     !                 // logical
+&&    ||    !                       // logical
 =~    !~                            // regex match
 in                                  // membership
 ->                                  // pipeline/function call
@@ -242,6 +242,10 @@ Examples:
 2.5e10
 1.0e-5
 ```
+
+A numeric literal token holds no sign. In an `Integer` or a `Float` bound, and in an expression wherever an operand can stand, a `-` directly before the token is the literal's sign: `-5` is one literal, and so is `-9223372036854775808`, the least `Integer`. After a left operand in an expression the `-` is subtraction.
+
+An `INTEGER` literal outside the range of `int64` is refused, save in a `Float` bound, which reads it as its nearest `float64`. A `FLOAT` literal is read as its nearest `float64`, in an expression and in a `Float` bound, as a data value is. A literal too near zero for a `float64` to hold, such as `1.0e-400`, is read as `0.0`. A literal no finite `float64` holds, such as `1.0e999`, is refused.
 
 ### String Literals
 
@@ -315,7 +319,7 @@ BOOLEAN = "true" | "false" .
 Variables are used within expression contexts, particularly in lambda parameters:
 
 ```text
-VARIABLE = "$" ( decimal_digit { decimal_digit } | LC_WORD ) .
+VARIABLE = "$" ( decimal_digit { decimal_digit } | LC_WORD | UC_WORD ) .
 ```
 
 Examples:
@@ -326,6 +330,7 @@ $1          // positional variable
 $self       // self reference in invariants
 $item       // named parameter in lambda
 $acc        // accumulator in reduce
+$WORKS_AT   // a relation, by its declared name
 ```
 
 ## Schemas
@@ -346,6 +351,8 @@ The schema name is a string literal that identifies the model:
 ```yammm
 schema "Vehicles"
 ```
+
+The literal's text must be an identifier: an ASCII letter, then ASCII letters, digits and underscores — the rule an import alias follows, save that a reserved word is no exception, since the name is never read as a token. Any other text, the empty string included, is refused at load with `E_INVALID_NAME`, and the file is then read as having no usable schema name: `schema "Vehicle Management"` and `schema "my-schema"` do not load. An escape is read before the rule applies, so `schema "my\x5fschema"` names `my_schema` and loads.
 
 An optional documentation comment may precede the schema declaration:
 
@@ -378,7 +385,8 @@ import "./common/types" as common   // explicit alias
 - Relative paths (`./parts`, `../common`) are resolved against the importing file's directory
 - Module-style paths (`internal/common`) are resolved against the module root (see `WithModuleRoot` option)
 - The `.yammm` extension is optional and will be appended if not present
-- Imports must resolve to `.yammm` files, not directories
+- Imports must resolve to `.yammm` files, not directories: an empty path, a path of separators alone, and a path whose last segment is `.` or `..`, names no file and draws `E_IMPORT_RESOLVE`. A trailing `/` after a file name is read past
+- The extension is part of the path that is resolved, so a relative path spelling the module root or an ancestor of it, such as `../z` from the root directory `z`, names a file above the root. A load looks among its in-memory sources first, so one that holds that file binds it. A load that then reads the disk draws `E_PATH_ESCAPE`, and a `WithSourcesOnly` load draws `E_IMPORT_RESOLVE`
 
 **The module root:** A directory is a module root when it holds a `yammm.mod` marker file. The loader resolves a schema's root in this order: the root the caller supplied (`WithModuleRoot`, or the `--module-root` flag), then the directory of the nearest ancestor holding a `yammm.mod`, then the schema file's own directory. The editor inserts its workspace folder between the second and the third.
 
@@ -388,7 +396,7 @@ The nearest marker wins, so a nested marker deliberately narrows a sub-module's 
 
 **Size:** A schema source — the entry file or an import — is read up to 16 MiB; a larger file is refused before it is parsed.
 
-**Security:** A load that reads imports from disk sandboxes their paths using `os.Root` to prevent path traversal attacks: `os.Root` resolves every component, a symlink's target included, against an open handle on the module root and rejects a path that would leave it. The module root is that sandbox's boundary, so committing a `yammm.mod` grants the loader read access to that directory's whole subtree for imports — which is what makes a repository-relative import resolve. A load under `schema.WithSyntheticRoot` reads no disk: it requires `WithSourcesOnly`, so every import is looked up among the sources the caller passed, and a relative import resolves against the importing source's key as text, so one that climbs above the root keeps its `..` rather than being rejected (`schema.SyntheticImportKey` states the rule).
+**Security:** A load that reads imports from disk sandboxes their paths using `os.Root` to prevent path traversal attacks: `os.Root` resolves every component, a symlink's target included, against an open handle on the module root and rejects a path that would leave it. The module root is that sandbox's boundary, so committing a `yammm.mod` grants the loader read access to that directory's whole subtree for imports — which is what makes a repository-relative import resolve. A load under `schema.WithSyntheticRoot` reads no disk: every import is looked up among the sources the caller passed, with or without `WithSourcesOnly`, and a relative import resolves against the importing source's key as text, so one that climbs above the root keeps its `..` rather than being rejected.
 
 **Default alias derivation:** When no explicit `as` clause is provided, the alias is derived from the last path segment:
 
@@ -410,7 +418,7 @@ import "./3rdparty" as thirdparty
 
 The two forms are alternatives, not a pair: importing one file twice draws `E_DUPLICATE_IMPORT` however the aliases differ.
 
-**Reserved keyword restriction:** Aliases cannot be reserved keywords. The rule table holds no keywords — every keyword lexes as an ordinary word — so this is a parser rule, applied to an explicit `as` alias and to a derived one alike. Reserved keywords include:
+**Reserved keyword restriction:** Aliases cannot be reserved keywords. The rule table holds no keywords — every keyword lexes as an ordinary word — so this is a parser rule. A written `as` clause that holds one is `E_SYNTAX`, and a path that derives one draws `E_INVALID_ALIAS`. Reserved keywords include:
 
 - DSL keywords: `schema`, `import`, `as`, `type`, `datatype`, `required`, `primary`, `extends`, `includes`, `abstract`, `part`, `one`, `many`, `in`
 - Built-in type keywords: `Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`
@@ -468,6 +476,8 @@ type Person {
 }
 ```
 
+A schema's types and data types share one namespace: a schema declares a name once, as a type or as a [data type alias](#data-type-aliases). A second declaration of a name, of either kind, is `E_DUPLICATE_TYPE` at that declaration. Type and data type names are matched exactly, as every reader of the model matches them, so two names that differ only in case, such as `Person` and `PERSON`, are two names. A name an import brings is another schema's: a reference reaches it through the import's alias, so it never meets a local name.
+
 ### Type Identity
 
 A type's identity is the pair (schema source, type name). Types with the same name from different schemas are distinct — an imported `Person` and a local `Person` are not the same type. This enables:
@@ -505,7 +515,7 @@ type Car {
 
 ### Immutability
 
-After compilation, all schema objects — types, relations, data types, and the schema itself — are sealed and become immutable. Slice accessors on sealed objects return defensive copies. This guarantees thread-safe concurrent read access without synchronization.
+After compilation, all schema objects — types, relations, data types, and the schema itself — are sealed and become immutable. An accessor that returns a slice returns a fresh copy. This guarantees thread-safe concurrent read access without synchronization.
 
 ### Inheritance
 
@@ -534,10 +544,13 @@ type Document extends Named, Timestamped {
 
 Inheritance rules:
 
-- Properties, associations, and compositions are inherited from parent types
+- `extends` includes members: properties, associations, compositions, invariants and annotations are inherited from parent types. It gives no substitution: a relation that targets a supertype holds no instance of a subtype, and an instance validates against the type it names alone
+- A supertype is abstract, or of the subtype's own kind: a concrete type extends abstract and concrete types, a part type extends abstract and part types, and an abstract type extends abstract types alone. Any other supertype is `E_INVALID_SUPERTYPE`, at its name in the `extends` clause
 - Child types may override inherited properties with compatible narrower constraints
 - A part type carries no association, declared or inherited (`E_INVALID_ASSOCIATION_TARGET`)
-- Relationship definitions must be unique after inheritance. Two relations of one kind reaching a type under one field name are an error when their definitions **differ** — a different declared spelling, target, multiplicity, or edge-property set; structurally identical ones are deduplicated keep-first with no diagnostic. An association and a composition that reach one type under one name are caught separately, after both merges, as `E_RELATION_COLLISION` naming both declarations. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
+- Relationship definitions must be unique after inheritance. Two relations of one kind reaching a type under one field name are an error when their definitions **differ** — a different declared spelling, target, multiplicity, or edge-property set; structurally identical ones, at least one of them inherited, are deduplicated keep-first with no diagnostic. Two relations a type declares itself under one name are `E_DUPLICATE_RELATION`, whatever their kinds. An association and a composition that reach one type under one name, at least one of them inherited, are caught separately, after both merges, as `E_RELATION_COLLISION` naming both declarations. Between two definitions of one kind, `E_RELATION_COLLISION` is reported once per collision on each type the two definitions reach, its own or inherited: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. Between an association and a composition it is reported on a type that carries both, unless a direct supertype of that type already carries both. Within one kind the diagnostic's related locations name the surviving declaration and one group of identical rivals; across the two kinds they name the association and the composition. A relation that reaches a type with a definition whose target did not resolve, or that holds an edge property of unknown type, is not judged on that type: the cause is already reported, and the definitions of that relation kind draw no `E_RELATION_COLLISION` from one another there, in any order of the `extends` clause.
+
+**One edge per supertype:** An `extends` clause that names one supertype twice declares one edge.
 
 **Linearization order:** Ancestors are flattened **ancestors-first**: each supertype's own ancestors are appended before the supertype itself, left to right across the `extends` clause, with keep-first deduplication. For `D extends C`, `C extends B`, `B extends A` the order is `[A, B, C]`; for `D extends B, C` with both extending `A` it is `[A, B, C]`.
 
@@ -545,18 +558,20 @@ Inheritance rules:
 2. Inherited **properties, relations and type-level annotations** follow in that ancestors-first order, so the most distant ancestor is read before the nearest. **Invariants and property-level annotations do not** — see Invariant merging and Annotation Inheritance below, where a subtype reads each direct supertype's already-merged set so a nearer declaration wins
 3. When the same ancestor is reachable via multiple paths (diamond inheritance), the first occurrence is kept and duplicates are skipped
 
-**Property conflict resolution:**
+**Property conflict resolution:** A type's own declaration must narrow every inherited one; with none, the inherited declaration that narrows every other is the property, and with none of those the load fails. A declaration narrows another when the two are equal or it is a valid narrowing of the other (see Constraint Narrowing). The rule reads every declaration of the name that reaches the type through its ancestors, so its answer does not depend on the order of the `extends` clause. Equal declarations can still differ in their documentation and in the data type they name. Among them, the merged view holds the one the first direct supertype holds, in the order of the `extends` clause, skipping a supertype another one extends: a supertype's re-declaration stands in place of the declaration it re-declares.
 
 | Situation | Result |
 | --------- | ------ |
-| Child re-declares with narrower constraint | Child's version is used |
-| Inherited property narrows an earlier ancestor's | Narrower version replaces wider |
-| Child re-declares with a constraint that is not a valid narrowing | `E_PROPERTY_CONFLICT` is emitted |
-| Two inherited properties are incompatible | `E_PROPERTY_CONFLICT` is emitted |
+| Child re-declares with a constraint that narrows every inherited one | Child's version is used |
+| Child does not re-declare, and one inherited declaration narrows every other | That declaration is used |
+| Child re-declares with a constraint that does not narrow an inherited one | `E_PROPERTY_CONFLICT`, unless the property has a definition of unknown type (below) |
+| Child does not re-declare, and no inherited declaration narrows every other | `E_PROPERTY_CONFLICT`, unless the property has a definition of unknown type (below) |
 
-`E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. Each subtype that inherits a conflicting combination re-detects and reports it independently.
+`E_PROPERTY_CONFLICT` is reported once per type and property, at the type. When the type declares the property, the related locations name its declaration and each inherited one it does not narrow, and the message names the first of those. Otherwise they name every inherited declaration, and the message names two of them, neither of which narrows the other. A subtype that inherits the same declarations and does not re-declare the property reports the conflict too, unless the exception below withholds the report.
 
-**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity, and must not be empty (`E_INVALID_INVARIANT`). A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. One definition reached through two ancestors merges silently.
+A property that reaches a type with a definition of unknown type draws no `E_PROPERTY_CONFLICT` on that type. A type is unknown when the parser could not build it (`Vector[0]`) or when it reads a name that did not resolve to a constraint, itself or as a `List` element. Whatever the cause, it is already reported, once. The conflict is withheld in any order of the `extends` clause, because a known type there could make the definitions agree. Only the report is withheld. A type's own declaration is the property whatever it inherits. With none, the merged view holds the definition the rule gives, or, with none, the first definition of unknown type in linearization order, so a rule that reads the property's kind defers to the reported cause when that definition's kind is unknown. A `List` whose element names an unresolved name is still a List, so a rule that refuses a List, such as an `@@index` member's, still judges it. The property's annotations are judged as for any property. A type the parser reports and still builds, such as `String[5, 1]`, is known and is judged.
+
+**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity, and must not be empty (`E_INVALID_INVARIANT`). A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. `n > -1` and `n > -(1)` are different expressions too: the first holds the literal `-1`, and the second negates the literal `1`. A literal with no value, whose own diagnostic already refuses the source, matches any literal of the kind the source wrote there (a string, an integer, a float or a regular expression), so the definitions of one message conflict only when no value for each such literal makes them all one, whatever order the supertypes are named in. One definition reached through two ancestors merges silently.
 
 ### Constraint Narrowing
 
@@ -569,8 +584,7 @@ When a child type re-declares an inherited property, the child's constraint must
 | `Float` | Child min >= parent min AND child max <= parent max |
 | `Enum` | Child values must be a subset of parent values |
 | `List` | Element constraint narrows AND length bounds narrow |
-| `Boolean`, `Date`, `UUID` | Equal only (no parameterized narrowing) |
-| `Timestamp` | Equal only (format must match exactly) |
+| `Boolean`, `Timestamp`, `Date`, `UUID` | Equal only (no parameterized narrowing) |
 | `Pattern` | Equal only (pattern strings must match) |
 | `Vector` | Equal only (dimension must match) |
 
@@ -606,6 +620,8 @@ PropertyName = LC_WORD .   // except as, part, in, nil, true, false
 
 Property names must start with a lower-case letter. A property may not be named `self`; see Lexical Structure.
 
+**Names match exactly, at every door.** Every door compares a name exactly, so a name in a case the door does not take names nothing there. In instance data a property arrives under its name, a relation under its [field name](#associations), an edge property under its name and a foreign-key field under its `_target_` name. A key in another case is an unknown field (`E_UNKNOWN_FIELD`, or `E_UNKNOWN_EDGE_FIELD` in an edge object), and the member it was meant for stays absent. In an invariant a bare name, a `$` variable and a member after `.` read a property by its name and a relation by its declared name, and a read in another case is refused at load where the checker knows the type read from. With `name` declared, `Name` is unknown in the data and in an invariant.
+
 ### Property Modifiers
 
 **Primary properties** form part of the type's identity. They are implicitly required:
@@ -617,7 +633,7 @@ type Car {
 }
 ```
 
-Every concrete (instantiable) type must declare or inherit at least one primary property. A type with no primary key has no identity — it cannot be added to a graph or referenced by an association — so it is rejected at load with `E_NO_PRIMARY_KEY`. Abstract types (never instantiated) and part types (identified through their parent composition) are exempt. A type may declare more than one primary property; together they form a composite key.
+Every concrete (instantiable) type must declare or inherit at least one primary property. A type with no primary key has no identity — it cannot be added to a graph or referenced by an association — so it is rejected at load with `E_NO_PRIMARY_KEY`. Abstract types (never instantiated) and part types (identified through their parent composition) are exempt. A type may declare more than one primary property; together they form a composite key. A key's properties are in key order: the type's own primary properties in declaration order, then inherited ones in linearization order (see [Inheritance](#inheritance)). An instance's key, a stored key and a key read as a list follow that order, and the structural hash reads it. A type whose body, or a supertype's body, may have lost a member to a syntax error draws no `E_NO_PRIMARY_KEY`: the lost member may be its key, and the `E_SYNTAX` is the report. A body may have lost a member when it ends at end of input, or when the text the parser skipped holds, outside parentheses that close, a token a member can begin with or an upper-case word; an annotation's name, next to its `@` or after spaces and line comments, and an argument list that does not parse lose none.
 
 **Required properties** must be present in all instances:
 
@@ -631,16 +647,19 @@ type Person {
 Properties without modifiers are **optional** and may be omitted from instance data.
 
 **An explicit `null` is the absent case.** For a property — on a type or on an
-association's edge — instance data carrying `null` is treated exactly as if the
-key were not there: a required property draws `E_MISSING_REQUIRED`, and an
-optional one is dropped rather than stored. The other slots that accept a
-`null` keep their own rules, because none is a property: an association's
-value must be an object or an array of objects, so `{"employer": null}` reports
-`E_EDGE_SHAPE_MISMATCH` rather than reading as absent (leave the key out to
-omit the association); a foreign-key component is a structural key position and
-reports `E_TYPE_MISMATCH`; a composition value must be an array and reports
-`E_EDGE_SHAPE_MISMATCH`; and a `null` element of a `(many)` association array
-or a `null` composition child reports `E_EDGE_SHAPE_MISMATCH` too.
+association's edge — and for a relation, a `null` value is treated exactly as
+the value left out. A required property draws
+`E_MISSING_REQUIRED`, a required composition draws
+`E_UNRESOLVED_REQUIRED_COMPOSITION`, a required association draws
+`graph.Check`'s `E_UNRESOLVED_REQUIRED` with the reason `absent`, and an
+optional property or relation is dropped rather than stored. A `null` in a
+slot that holds part of a value keeps that slot's own rule: a foreign-key
+component is a structural key position and reports `E_TYPE_MISMATCH`, a `null`
+element of a `(many)` association array or a `null` composition child reports
+`E_EDGE_SHAPE_MISMATCH`, and a `null` inside a List or a Vector is refused as
+the next paragraph states. The key that holds a `null` is still a key: it is
+matched to its member as a key holding a value is, so it is an unknown field
+where it names none.
 
 **A `null` inside a collection is not the absent case.** No element position is
 optional, so the element constraint applies to it and `["a", null]` is rejected
@@ -692,7 +711,7 @@ type Person {
 }
 ```
 
-Relationship properties are narrower than type properties: they cannot use `Vector` or `List` data types, cannot be `primary`, cannot carry annotations, and default to optional unless `required` is specified.
+Relationship properties are narrower than type properties: they cannot use `Vector` or `List` data types (`E_INVALID_EDGE_PROPERTY_TYPE`), cannot take the `primary` modifier, cannot carry annotations, and default to optional unless `required` is specified.
 
 ## Data Types
 
@@ -730,7 +749,7 @@ index Integer[_, 99]         // no minimum, maximum 99
 temperature Integer[-40, 50] // negative lower bound
 ```
 
-Validation accepts signed and unsigned integers, including named/alias types and pointer values, and refuses every float, whole or not. In a data document an `Integer` value is an integer literal — no `.`, `e` or `E` — read exactly, so `5.0` and `1e2` are floats and are refused. Unsigned inputs larger than `int64` are rejected before bound checks, and so is an integer literal outside the `int64` range: validation never reads it as its nearest float, which for a literal just below the minimum is the minimum itself. A `.ys` snapshot loaded without revalidation stores such a literal as its nearest `float64`; revalidation judges the document's own text.
+Validation accepts signed and unsigned integers, a named type over one included, and refuses every float, whole or not. A pointer to an integer is no integer. In a data document an `Integer` value is an integer literal — no `.`, `e` or `E` — read exactly, so `5.0` and `1e2` are floats and are refused. Unsigned inputs larger than `int64` are rejected before bound checks, and so is an integer literal outside the `int64` range: validation never reads it as its nearest float, which for a literal just below the minimum is the minimum itself. A `.ys` snapshot stores such a literal as its text and writes it back unchanged, and revalidation refuses it.
 
 #### Float
 
@@ -744,7 +763,7 @@ max    = [ "-" ] ( "_" | INTEGER | FLOAT ) .
 
 As for `Integer`, a minus sign before `_` is accepted with a Warning and no effect.
 
-Validation accepts floats and integers; an integer is widened to `float64`. In a JSON or CSV data document a `Float` value is any number literal, read as its nearest `float64`, so `-0` keeps its sign; a literal no finite `float64` holds, such as `1e400`, is refused. `NaN` and the infinities are refused. Loading a `.ys` snapshot stores a number by its spelling alone, with or without revalidation, so an integer literal under a `Float` there, such as `-0` or `5`, loads as an `int64`; the writer writes one only for an integer no `float64` holds exactly.
+Validation accepts floats and integers; an integer is widened to `float64`. In a JSON data document a `Float` value is any number literal, read as its nearest `float64`, so `-0` keeps its sign; a literal no finite `float64` holds, such as `1e400`, is refused. `NaN` and the infinities are refused. A `.ys` snapshot reads a number literal under a `Float` as its nearest `float64`, with or without revalidation: `5` loads as `5.0`, `-0` keeps its sign, and `9007199254740993` loads as its nearest `float64`, `9007199254740992.0`, which the next write states. A literal no finite `float64` holds stays as written, and revalidation refuses it.
 
 Examples:
 
@@ -797,7 +816,7 @@ Represents a value from a fixed set of string options:
 EnumT = "Enum" "[" STRING "," STRING { "," STRING } [ "," ] "]" .
 ```
 
-At least two options must be provided, and they must be distinct and non-empty: an empty or repeated value is dropped before the count is taken, so `Enum["a", "a"]` and `Enum["a", ""]` are both refused.
+At least two options must be provided, and they must be distinct and non-empty. The count is of the values written, and an empty or repeated value is refused at the value, so `Enum["a", "a"]` and `Enum["a", ""]` are each refused with one diagnostic, at the second value, and `Enum["a"]` is refused for its count.
 
 Examples:
 
@@ -809,10 +828,10 @@ priority Enum["low", "medium", "high", "critical"]
 
 #### Pattern
 
-Represents a string that must match one or more regular expressions:
+Represents a string that must match a regular expression:
 
 ```text
-PatternT = "Pattern" "[" STRING [ "," STRING ] "]" .
+PatternT = "Pattern" "[" STRING "]" .
 ```
 
 Examples:
@@ -822,31 +841,29 @@ email Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
 phone Pattern["^\\d{3}-\\d{3}-\\d{4}$"]
 ```
 
-When two patterns are provided, the value must match both.
+A `Pattern` takes exactly one pattern; a second is `E_SYNTAX`. To require two patterns of one value, write one of them as an invariant, which names the rule: `! "code ends in a digit" code == nil || code =~ /[0-9]$/`.
 
-A pattern follows Go's `regexp` syntax, and one that does not compile is `E_INVALID_CONSTRAINT`. So is a pattern that writes a surrogate code point (U+D800 to U+DFFF) with a `\x{…}` escape, alone or in a class: Go compiles it, but no string holds a surrogate, so the surrogate matches nothing and has no reading a JSON Schema validator shares. A class that spans the surrogate block, such as `[\x{D000}-\x{E000}]`, writes none.
+A match is a search, as for `=~`: the value matches when any part of it matches the pattern. `Pattern["or"]` takes `"north"`. To match the whole value, anchor the pattern, as the examples above do.
+
+A pattern is what Go's `regexp.Compile` accepts, and one it refuses is `E_INVALID_CONSTRAINT`.
 
 #### Timestamp
 
-Represents a date-time value with optional format specification:
+Represents a date-time value. It takes no argument:
 
 ```text
-TimestampT = "Timestamp" [ "[" format "]" ] .
-format     = STRING .
+TimestampT = "Timestamp" .
 ```
 
-The format string follows Go's time formatting conventions. When omitted, RFC 3339 with fractional seconds (`"2006-01-02T15:04:05.999999999Z07:00"`) is used.
+A value is RFC 3339 text as Go's `time.RFC3339` layout reads it, with or without fractional seconds, at a UTC offset under 24 hours, such as `2026-08-19T12:00:00.5+02:00`. That reading is not RFC 3339's grammar at every edge: it takes a comma before the fraction, a one-digit hour and an offset minute of `60`, which it reads as the next hour, and it takes no lower-case `t` or `z` and no leap second (`23:59:60`). Declare a property `String` or `Pattern` to hold date-time text in another form, such as a wall-clock time with no offset.
 
-**Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string** rendered through the declared format when one is given and through RFC 3339 with nanoseconds otherwise. A string is parsed and re-rendered, so one instant reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting.
-
-**A declared format that cannot represent an instant loses what it omits.** A layout carrying no zone, no fractional second, or neither drops that part of every value stored under it, and a reader parsing the text back gets a different instant. Declaring such a layout draws `W_TIMESTAMP_LOSSY_FORMAT` at schema load; the declaration is accepted, because a wall-clock layout is a legitimate domain choice.
+**Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string**, rendered as RFC 3339 with nanoseconds (`"2006-01-02T15:04:05.999999999Z07:00"`). A string is parsed and re-rendered, so one instant at one offset reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting. A `time.Time` is rendered as RFC 3339 with nanoseconds, and that text is judged and stored as a string is, so a time and the text it renders as reach one spelling: RFC 3339 writes an offset under a minute as `+00:00`, which is stored as `Z`. A time whose text the rule refuses is refused, such as a time outside years 0 to 9999 or at a UTC offset of 24 hours or more. Stored text is text Go's `time.Time` writes for itself (`MarshalText`, `MarshalJSON`), so a `time.Time` decodes and encodes every stored value as written. Go's layout reads an offset hour of `24` and `time.Time` writes none, so text at `+24:00`, or at `+23:60`, which Go reads as 24 hours, is refused.
 
 Examples:
 
 ```yammm-snippet
-createdAt Timestamp                                    // the default, RFC3339Nano
-eventTime Timestamp["2006-01-02T15:04:05.000Z07:00"]   // explicit, fixed 3-digit fraction
-logTime Timestamp["2006-01-02 15:04:05"]               // custom, and lossy: no zone, no fraction
+createdAt Timestamp
+seenAt Timestamp required
 ```
 
 #### Date
@@ -857,7 +874,7 @@ Represents a date value (without time component):
 DateT = "Date" .
 ```
 
-A `Date` property accepts a Go `time.Time` or a `"YYYY-MM-DD"` string, and **stores the string**. A `time.Time` is truncated to its calendar day **in its own location**: an instant at 00:30 `+02:00` is the 19th, and the same instant written 22:30 `Z` is the 18th. The location the caller built the value in decides.
+A `Date` property accepts a Go `time.Time` or a `"YYYY-MM-DD"` string, and **stores the string**. A `time.Time` is truncated to its calendar day **in its own location**: an instant at 00:30 `+02:00` is the 19th, and the same instant written 22:30 `Z` is the 18th. The location the caller built the value in decides. A `time.Time` whose text is no `"YYYY-MM-DD"` date, such as one outside years 0 to 9999, is refused.
 
 Example:
 
@@ -899,7 +916,7 @@ embedding Vector[768]       // 768-dimensional vector
 coordinates Vector[3]       // 3D coordinates
 ```
 
-Validation accepts float **slices** (`[]float32`, `[]float64`, and named types over them) and integer elements, which coerce to `float64`. A Go array or a pointer to a slice is refused. `NaN`, `Inf`, and non-numeric elements are rejected.
+Validation accepts any Go slice whose elements are numbers, floats or integers, such as `[]float64`, `[]float32`, `[]int`, `[]json.Number` or `[]any`, a named slice type and a slice of a named number type included, or an `immutable.Slice` of numbers. Each element is stored as a `float64`. A Go array and a pointer to a slice are refused; a nil slice holds no value. `NaN`, `Inf`, and non-numeric elements are rejected.
 
 #### List
 
@@ -925,14 +942,16 @@ matrix List<List<Integer>>                 // nested list
 embeddings List<Vector[768]>               // list of vectors
 ```
 
-Validation accepts JSON arrays where each element passes the element type's constraint. Length bounds (when present) are checked against the array length.
+Validation accepts JSON arrays where each element passes the element type's constraint. Length bounds (when present) are checked against the array length. A list reports its first bad element alone: validation stops at the first element that fails, and the elements after it are not checked.
+
+A `List` nests at most 1,000 levels. A deeper one written in one type is a syntax error (`E_SYNTAX`), reported at the first `List` past the limit. The count runs through each datatype a `List` names: a datatype or a property whose `List` passes the limit that way is refused at load (`E_INVALID_CONSTRAINT`), at its declaration. A declaration that names a datatype refused this way does not load and draws no second issue for the limit, so one chain of datatypes past the limit is one issue for it.
 
 **Restrictions:**
 
 - List types cannot be used as primary keys (see [Primary Key Types](#primary-key-types)).
 - List types cannot be used in relationship (edge) properties.
 
-**Export portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm neo4j constraints` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE`, and because constraint generation is all-or-nothing it emits **nothing for the whole schema**, not just for that property. Model the inner collection as a `part type` reached by a composition if the model must export to Neo4j.
+**Neo4j portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm gen --to cypher` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE` under every flag, `--type-constraints none` included, and because generation is all-or-nothing it emits **nothing for the whole schema**, constraints and indexes alike, not just for that property. The `neo4j` write path refuses a value of such a property, an empty list included, and not an absent one. `yammm gen --to cypher` judges a property on each concrete type and part type that declares or inherits it. Two exceptions follow from that: it does not report a property of a schema whose labels break the label rule, which it reports with `E_NEO4J_INVALID_IDENTIFIER` instead, or a property declared on an abstract type that no such type extends. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j.
 
 **Narrowing:**
 
@@ -977,7 +996,7 @@ type Money = Float[0, _]
 
 Aliases are:
 
-- Declared with an upper-case identifier
+- Declared with an upper-case identifier, in the one namespace a schema's types and data types share: `type Color = String` beside `type Color { ... }` is `E_DUPLICATE_TYPE`
 - Case-preserved: the declared name is canonical (not lowercased internally)
 - Referenced by name in property declarations
 - Not chainable: an alias target must be a built-in, so `type Money = PositiveInt` is a syntax error
@@ -1005,21 +1024,20 @@ Associations represent references between independent entities:
 ```text
 Association  = [ DOC_COMMENT ] "-->" RelationName [ Multiplicity ] TypeRef
                [ "{" { RelProperty } "}" ] .
-RelationName = upper_letter { upper_letter | decimal_digit | "_" } .
+RelationName = upper_letter { upper_letter | decimal_digit | "_" } .   // except UUID, a data type keyword
 ```
 
 A relation name is UPPER_SNAKE. Its **field name** — the key instance data
-carries the relation under, and the entry an invariant expression reads — is
-the name in lower case: `WORKS_AT` is read as `works_at`. An invariant reads
-the relation by either spelling, as a bare name or as a member, and a read in
-any other casing is rejected at load with `E_INVALID_NAME` wherever the checker
-knows the value read from is an instance of a type holding the relation. A read
-from a value whose type it cannot tell, such as an element of a list literal
-that mixes kinds, reads nothing in another casing at evaluation, as a member the
-instance lacks reads nothing. A variable names
-it by its field name alone (`$works_at`), since variable names are matched
-exactly. Instance data carries it under the field name, matched as a property
-name is.
+carries the relation under — is the name in lower case: `WORKS_AT` arrives in
+instance data as `works_at`, and under no other spelling. An invariant reads
+the relation by its declared name alone, as a bare name, as a member or as a
+variable (`WORKS_AT`, `$self.WORKS_AT`, `$WORKS_AT`). A read in any other
+casing, the field name among them (`works_at`, `$self.works_at`, `$works_at`),
+is rejected at load with `E_INVALID_NAME` wherever the checker knows the value
+read from is an instance of a type holding the relation. A read from a value
+whose type it cannot tell, such as an element of a list literal that mixes
+kinds, reads nothing in another casing at evaluation, as a member the instance
+lacks reads nothing.
 
 Examples:
 
@@ -1050,6 +1068,8 @@ Composition = [ DOC_COMMENT ] "*->" RelationName [ Multiplicity ] TypeRef .
 
 The target must be a concrete `part` type (not abstract).
 
+A cycle of compositions whose every link is required — `(one)`, `(one:one)` or `(one:many)`, declared or inherited — is refused at load with `E_COMPOSITION_CYCLE`: every instance on the cycle must hold a child of the next kind, so none is finite. Types that require one another through such cycles are one group and draw one issue, in any declaration order, at the group's first-declared type. Its message names the shortest cycle through that type, and each required link inside the group is related information. One optional link ends the chain, and a cycle that holds one loads.
+
 Examples:
 
 ```yammm
@@ -1062,9 +1082,9 @@ type Car {
 }
 ```
 
-Composition data is embedded inline in instance documents rather than using reference objects, and is **always an array**, `(one)` included. Anything else draws `E_EDGE_SHAPE_MISMATCH`. This differs from associations, where `(one)` takes a single object.
+Composition data is embedded inline in instance documents rather than using reference objects, and is **always an array**, `(one)` included. A `null` is the composition left out; any other value that is not an array draws `E_EDGE_SHAPE_MISMATCH`. This differs from associations, where `(one)` takes a single object.
 
-A part instance is identified through its parent composition, not by a global key. The library mints no address for one. An exporter that must give each part node an identity of its own — the Neo4j adapter's `_composed_key` property is the only one that does — derives it from the **owning root**, not from the immediate parent: the root's identity in that store, the root's key, then one segment per composition hop — for a `(one)` composition the relation name alone, since the slot holds exactly one child; for a `many` composition the relation name and either the child's key or, for a **keyless** part, its array position. Rooting the address at the owning root is what keeps it correct below depth one, and carrying the root's identity is what stops two root types that share a key value and a relation name from naming one part node. A positional segment is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
+A part instance is identified through its parent composition, not by a global key. The library mints no address for one. An exporter that must give each part node an identity of its own — the `neo4j` package's `_composed_key` property is the only one that does — derives it from the **owning root**, not from the immediate parent: the root's identity in that store, the root's key, then one segment per composition hop — for a `(one)` composition the relation name alone, since the slot holds exactly one child; for a `many` composition the relation name and either the child's key or, for a **keyless** part, its array position. Rooting the address at the owning root is what keeps it correct below depth one, and carrying the root's identity is what stops two root types that share a key value and a relation name from naming one part node. A positional segment is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
 
 ### Multiplicity
 
@@ -1142,11 +1162,11 @@ For **to-many associations**, use an array of edge objects:
 }
 ```
 
-**Reserved prefix:** The `_target_` prefix is reserved for foreign key fields. User-defined relation names cannot start with `_target_` (case-insensitive).
+**Reserved prefix:** The `_target_` prefix is reserved for foreign key fields. An identifier cannot start with an underscore, so no user-defined relation name starts with it.
 
 ## Annotations
 
-Annotations attach validated, store-agnostic metadata to properties and types. The core validates their structure and eligibility at load; downstream adapters interpret them (for example, turning them into index or write-shape DDL). Annotations do not change what instance data is valid, and they are excluded from the structural hash.
+Annotations attach validated, store-agnostic metadata to properties and types. The core validates their structure and eligibility at load; downstream generators and writers interpret them (for example, turning them into index DDL or a write shape). Annotations do not change what instance data is valid, and they are excluded from the structural hash.
 
 ### Syntax
 
@@ -1175,9 +1195,9 @@ type Document {
 
 The single/double sigil split is required, not stylistic. Because whitespace — including newlines — is not significant to the parser, a standalone type-level annotation written with a single `@` after a property would be parsed as another annotation on that property; the `@@` sigil disambiguates.
 
-**Placement on the line.** A property-level annotation must be written on the same line as the property it annotates. Because whitespace is not significant, an annotation on a line of its own still binds to the property **above** it — never the one below — so writing it prefix-style, as decorators are written in Python, TypeScript, or Java, would silently mark the wrong property and emit the wrong store DDL. That shape is rejected with `E_INVALID_ANNOTATION` naming the property it would have attached to. A property may carry several annotations, all on its own line (`first_seen Timestamp @writeOnce @index`); a marker meant for the type as a whole is written `@@name` on its own line.
+**Placement on the line.** A property-level annotation may not begin a line: it follows the property's last token on the line where the property ends. Because whitespace is not significant, an annotation that begins a line still binds to the property **above** it — never the one below — so writing it prefix-style, as decorators are written in Python, TypeScript, or Java, would silently mark the wrong property and emit the wrong store DDL. That shape is rejected with `E_INVALID_ANNOTATION` naming the property it would have attached to. A property may carry several annotations (`first_seen Timestamp @writeOnce @index`), and a property that spans lines carries them after its closing `]` (`] required @index`); a marker meant for the type as a whole is written `@@name` on its own line.
 
-**Ordering.** A property-level annotation must follow the datatype and any modifier: `state String @index` is valid, but `state String @index primary` is a syntax error — the modifier must precede the annotation. Recovery does not target the misplaced modifier, because `primary` is also a legal property name and the parser cannot tell the two readings apart. The reported `E_SYNTAX` is anchored at the first token that cannot continue the type body — often its closing brace, a line below the mistake. The property itself is still recorded, so the rest of the type is checked normally.
+**Ordering.** A property-level annotation must follow the datatype and any modifier: `state String @index` is valid, but `state String @index primary` is a syntax error — the modifier must precede the annotation. Recovery does not target the misplaced modifier, because `primary` is also a legal property name and the parser cannot tell the two readings apart. The reported `E_SYNTAX` is anchored at the first token that cannot continue the type body — often its closing brace, a line below the mistake. The property itself is still recorded, so the rest of the type is checked normally, except its primary key: the skipped `primary` may be a member, so the type draws no `E_NO_PRIMARY_KEY` and no index-redundancy refusal (see Property Modifiers).
 
 **Arguments** are positional. When parentheses are present they must hold at least one argument — `@index()` is a syntax error; a no-argument annotation is written without parentheses (`@index`). A trailing comma is allowed.
 
@@ -1185,18 +1205,18 @@ The single/double sigil split is required, not stylistic. Because whitespace —
 
 | Annotation | Placement | Arguments | Eligible target | Meaning |
 |---|---|---|---|---|
-| `@index` | property | none | a scalar property (String, UUID, Enum, Pattern, Integer, Float, Boolean, Date, Timestamp); rejected only when it is the sole primary key of every type that emits a constraint for it (see below) | single-property range index |
-| `@@index(p1, p2, …)` | type | one or more property references, ordered, no duplicates | each reference a scalar property of the type (own or inherited); primary-key members allowed | composite range index (order significant) |
-| `@vector(similarity)` | property | exactly one keyword: `cosine` or `euclidean` | a `Vector[N]` property | vector (approximate-nearest-neighbour) index |
+| `@index` | property | none | a scalar property (String, UUID, Enum, Pattern, Integer, Float, Boolean, Date, Timestamp); rejected only when it is the sole primary key of every type that emits a constraint for it and that type is not a `part` (see below) | single-property range index |
+| `@@index(p1, p2, …)` | type | one or more property references, ordered, no duplicates | each reference a scalar property of the type (own or inherited); primary-key members allowed, except a sole primary key as the only reference where `@index` on it is rejected (see below) | composite range index (order significant) |
+| `@vector(similarity)` | property | exactly one keyword: `cosine` or `euclidean` | a `Vector[N]` property of at most 4,096 dimensions | vector (approximate-nearest-neighbour) index |
 | `@fulltext` | property | none | a text property (String, Pattern, Enum); primary keys allowed, sole or composite (see below) | single-property fulltext index |
 | `@@fulltext(p1, p2, …)` | type | one or more property references, ordered, no duplicates | each reference a text property of the type (own or inherited); primary-key members allowed | fulltext index over the referenced properties (order significant) |
 | `@writeOnce` | property | none | any non-primary-key property of a non-`part` type | marks the property immutable after node creation |
 
-A member of a **composite** primary key may carry `@index`: the composite backing index does not serve single-property lookups on it. A **sole** primary key may not, because its uniqueness constraint already backs an index.
+A member of a **composite** primary key may carry `@index`: the composite backing index does not serve single-property lookups on it. A **sole** primary key may not, because its uniqueness constraint already backs an index. A `part` type's key is the exception: a part is keyed on the path it is composed under, so no constraint over its declared key backs an index, and `@index` on that key is accepted. An `@@index` whose only reference is a primary key is the index `@index` on that key declares, so it is rejected exactly where `@index` there is; an `@@index` of two or more references is never rejected for redundancy.
 
-Which of the two applies is decided over the types that actually **emit** the constraint — the annotated type when it is concrete, plus its concrete descendants — not over the type carrying the annotation. An abstract type emits nothing, and its key is only settled once a concrete type assembles it, so a key split across two abstract mixins is composite where it lands even though each mixin declares one member.
+Which of the two applies is decided over the types that actually **emit** the constraint — the annotated type when it is concrete, plus its concrete descendants — not over the type carrying the annotation. An emitter that may have lost a member to a syntax error (see Property Modifiers) is not judged: the lost member may be a second key. An abstract type emits nothing, and its key is only settled once a concrete type assembles it, so a key split across two abstract mixins is composite where it lands even though each mixin declares one member.
 
-`@index` is rejected only when **every** emitter keys on the property alone. When emitters disagree — one keys on it alone while another keys on it compositely and genuinely needs the index — no edit satisfies both, so the annotation is accepted and the redundant index ships on the sole-keyed emitter. No tool reports it: `DiffIndexes` counts a constraint-backed index as a match, deliberately, so that a fully-applied schema does not diff dirty forever. Descendants declared in **other schema files** are not visible to this check, so the same model can be accepted when split across files and rejected when written in one; that is a known limit, not a contract.
+`@index` (and the one-reference `@@index`) is rejected only when **every** emitter keys on the property alone. When emitters disagree — one keys on it alone while another keys on it compositely and genuinely needs the index — no edit satisfies both, so the annotation is accepted and the redundant index ships on the sole-keyed emitter. No tool reports it: `Diff` counts an online constraint-backed index that serves the declared index as its match while the plan keeps that constraint, deliberately, so that a fully-applied schema does not diff dirty forever. Descendants declared in **other schema files** are not visible to this check, so the same model can be accepted when split across files and rejected when written in one; that is a known limit, not a contract.
 
 `@writeOnce` is rejected on every primary-key member, sole or composite.
 
@@ -1209,16 +1229,16 @@ Annotation eligibility is **not** independent of type category. `@writeOnce` is 
 Annotations are validated at load, after inheritance linearization. Violations produce these diagnostics:
 
 - `E_UNKNOWN_ANNOTATION` — the name is not a blessed annotation at either placement. A name blessed at the *other* placement draws `E_INVALID_ANNOTATION` instead.
-- `E_INVALID_ANNOTATION` — a structural violation: wrong placement (e.g. `@@writeOnce`), a property annotation written on a line other than its property's, wrong arity, a literal where a reference or keyword is required, an unknown similarity keyword, or a duplicate.
+- `E_INVALID_ANNOTATION` — a structural violation: wrong placement (e.g. `@@writeOnce`), a property annotation that begins a line, wrong arity, a literal where a reference or keyword is required, an unknown similarity keyword, a duplicate, or an annotation two supertypes pass down in conflict.
 - `E_UNKNOWN_ANNOTATION_TARGET` — a `@@index` or `@@fulltext` reference names no property of the type (the same failure class as `E_UNKNOWN_PROPERTY`, on a different construct).
-- `E_INVALID_ANNOTATION_TARGET` — the annotation is attached to an ineligible property (a non-scalar `@index`, a non-`Vector` `@vector`, a non-text `@fulltext`, `@writeOnce` on a primary key, and so on).
+- `E_INVALID_ANNOTATION_TARGET` — the annotation is attached to an ineligible property (a non-scalar `@index`, a non-`Vector` `@vector` or one over 4,096 dimensions, a non-text `@fulltext`, `@writeOnce` on a primary key, and so on).
 - `W_ANNOTATION_SHADOWED` — a warning (not an error): a subtype re-declaration drops an inherited property's annotations without re-stating them (see [Annotation Inheritance](#annotation-inheritance)). The load still succeeds.
 
 ### Annotation Inheritance
 
 Property-level annotations travel with the property they decorate: a subtype that inherits a property unchanged inherits its annotations. Type-level annotations linearize like properties and relations, not like invariants — the subtype's own annotations first, then inherited ones in ancestors-first order, with exact duplicates (same name and argument list) deduplicated keep-first and no override by name. Two `@@index` members differing only in argument list are distinct indexes and both survive.
 
-Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype and the load reports `W_ANNOTATION_SHADOWED` (a warning; the load still succeeds). Re-state the annotations on the re-declaration to keep them.
+Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype. The load warns of the drop with `W_ANNOTATION_SHADOWED`, which does not fail it, for an annotation no direct supertype dropped, unless that annotation drew its own diagnostic or the merge refused the re-declaration: it drew `E_PROPERTY_CONFLICT`, or a definition of unknown type withheld that report. Re-state the annotations on the re-declaration to keep them.
 
 When a subtype does not re-declare an inherited property, its annotations are the **union across its direct supertypes' own resolved views**, independent of `extends` order. Because each supertype's view already reflects that supertype's decisions, this is transitive in the ordinary sense:
 
@@ -1236,7 +1256,7 @@ abstract type Other   extends Base { tag String }             // carries it
 type Doc extends Mutable, Other { id String primary }         // E_INVALID_ANNOTATION
 ```
 
-Resolve it on the subtype, which is authoritative: re-declare the property **with** the annotation to keep it, or **without** it to drop it. Two arms that both drop it agree, and are silent. `Leaf` draws no `W_ANNOTATION_SHADOWED` of its own if it re-declares the property, because by then there is nothing left to drop.
+Resolve it on the subtype, which is authoritative: re-declare the property **with** the annotation to keep it, or **without** it to drop it. Two arms that both drop it agree: the subtype draws neither `E_INVALID_ANNOTATION` nor a warning, and each arm draws its own `W_ANNOTATION_SHADOWED` at its re-declaration. `Leaf` draws no `W_ANNOTATION_SHADOWED` of its own if it re-declares the property, because by then there is nothing left to drop.
 
 Two nearest ancestors annotating the same property with the same annotation name but conflicting arguments — in practice only differing `@vector` similarities, since a `Vector[N]` property is equal regardless of its similarity keyword — is an unsatisfiable conflict, reported as `E_INVALID_ANNOTATION`. One shadowed annotation, and one such conflict, draws exactly one diagnostic however many ancestors carry the property forward.
 
@@ -1262,7 +1282,13 @@ type Person {
 }
 ```
 
-An invariant whose expression evaluates to `nil` **fails** the invariant (`E_INVARIANT_FAIL` — nil is falsey). An invariant whose expression evaluates to any non-boolean, non-nil value is an **evaluation error** (`E_EVAL_ERROR`).
+An invariant whose expression evaluates to `nil` **fails** the invariant (`E_INVARIANT_FAIL` — nil is falsey). An invariant whose expression evaluates to any non-boolean, non-nil value is an **evaluation error** (`E_EVAL_ERROR`). Where the static check knows the kind of the whole expression and that kind is no boolean — a string, a number, a list or an instance — the schema does not load (`E_INVALID_INVARIANT`): `! "m" name` and `! "m" age + 1` are refused. An expression whose kind the check does not know loads, and so does the `nil` literal.
+
+Both diagnostics name the invariant in the `invariant` detail, beside the `type` detail. The message of `E_INVARIANT_FAIL` is the invariant's message string, and the detail holds the same string. The message of `E_EVAL_ERROR` is `invariant "<message>": <cause>`, with the message string written as a quoted string: a `"` or a `\` in it is escaped.
+
+An instance that draws any other error runs no invariant. The validator evaluates invariants last, and only when the instance's properties and relations drew no error.
+
+A validator judges one record. `graph.Graph.AddOrMerge` can give a held root association records from several records, so `graph.Graph.Check` runs each root a merge grew through a validator again when its type declares an invariant. Each issue that run draws also carries the root's `pk` detail.
 
 ### Expression Grammar
 
@@ -1272,7 +1298,7 @@ Expressions support a rich set of operators and built-in functions.
 Expr = Literal
      | "[" [ Expr { "," Expr } [ "," ] ] "]"           // list
      | "-" Expr                                         // unary minus
-     | Expr "[" [ Expr { "," Expr } ] "]"              // indexing
+     | Expr "[" Expr "]"                                // indexing
      | Expr "->" Name [ Arguments ] [ Parameters ] [ "{" Expr "}" ]  // pipeline
      | Expr "." Name                                    // property access
      | "!" Expr                                         // logical not
@@ -1280,30 +1306,53 @@ Expr = Literal
      | Expr ( "+" | "-" ) Expr                         // additive
      | Expr ( "<" | "<=" | ">" | ">=" ) Expr           // comparison
      | Expr "in" Expr                                   // membership
-     | Expr ( "=~" | "!~" ) Expr                       // regex match
+     | Expr ( "=~" | "!~" ) REGEXP                     // regex match
      | Expr ( "==" | "!=" ) Expr                       // equality
      | Expr "&&" Expr                                   // logical and
-     | Expr ( "||" | "^" ) Expr                        // logical or/xor
+     | Expr "||" Expr                                   // logical or
      | Expr "?" "{" Expr ":" Expr "}"                  // ternary
      | "(" Expr ")"                                     // grouping
      | VARIABLE                                         // variable reference
      | PropertyName                                     // property reference
-     | DataTypeKeyword                                  // datatype literal
      | UC_WORD                                          // relation name
-     | "_"                                              // nil literal
-     | "nil"                                            // nil literal (alias)
      .
 
-Arguments  = "(" [ Expr { "," Expr } ] [ "," ] ")" .
+Literal    = STRING | [ "-" ] ( INTEGER | FLOAT ) | BOOLEAN | "_" | "nil" .
+Arguments  = "(" [ Argument { "," Argument } ] [ "," ] ")" .
+Argument   = Expr | REGEXP .                            // REGEXP: Match alone
 Parameters = "|" VARIABLE { "," VARIABLE } [ "," ] "|" .
 Name       = LC_WORD | UC_WORD .
 ```
 
-The `Name` after `->` is a built-in function's name. The `Name` after `.` is a
-member — a property or a relation's field name — and admits any word, keywords
-included: a property may be named `type` and a relation `IN`, so `$self.type`
-and `$self.in` are member accesses. Whether the member exists is the type's
-question, answered by the static check below, not the grammar's.
+The `Name` after `->` is a built-in function's name, matched exactly: `Len` is
+a function and `len` is not. The position admits any word, and a word that
+names no function is refused at load (`E_INVALID_INVARIANT`). The `Name` after
+`.` is a member — a property, or a relation by its name — and admits any word,
+keywords included: a property may be named `type` and a relation `IN`, so
+`$self.type` and `$self.IN` are member accesses. Whether the member exists is
+the type's question, answered by the static check below, not the grammar's.
+
+A `-` directly before an `INTEGER` or a `FLOAT` token is the literal's sign,
+wherever an operand can stand: `-5 -> Abs` pipes the literal `-5`. After a left
+operand the `-` is subtraction, so `n -5` is `n - 5`. Before any other operand
+it is unary minus.
+
+A datatype keyword — `String`, `Integer`, `Float`, `Boolean`, `Timestamp`,
+`Date`, `UUID`, `Enum`, `Pattern`, `Vector` or `List` — is no operand, and one
+where an operand stands is a syntax error (`E_SYNTAX`). To test a value's kind, compare
+its `TypeOf`.
+
+A regex literal is no value. It stands only on the right of `=~` or `!~` and as
+the argument of `Match`, and anywhere else it is refused at load
+(`E_INVALID_INVARIANT`). The reference parser reads any expression in those two
+positions, so the static check reports one that is no regex literal.
+
+An expression's tree is at most 1,000 levels deep, and a deeper one is a syntax
+error (`E_SYNTAX`). A literal or a name is one level. Each operator, call, index,
+member read, list literal and pair of parentheses is one level above its
+deepest operand. So a
+name under 999 pipeline stages loads, as a chain of 999 `+` does, and one more
+stage or one more `+` does not.
 
 > **`_` and `nil` in expressions.** Within invariant expressions, `_` and `nil` are interchangeable — both produce a nil literal. Use whichever reads more naturally: `end_date == nil` for null-guard idioms, `end_date == _` for consistency with other DSL contexts. Note that `_` retains distinct, non-nil roles in constraint bounds (`Integer[0, _]`) and multiplicity (`(_:many)`), where `nil` cannot be used.
 
@@ -1324,7 +1373,7 @@ Operators are listed from highest to lowest precedence:
 | 9 | Regex match `=~`, `!~` | Left |
 | 10 | Equality `==`, `!=` | Left |
 | 11 | Logical and `&&` | Left |
-| 12 | Logical or/xor `\|\|`, `^` | Left |
+| 12 | Logical or `\|\|` | Left |
 | 13 | Ternary `? { then : else }` | Left |
 
 The three postfix operators share one level and apply left to right: `$self.tags[0]` indexes the property, `$i.name -> Len` pipes it, and `LINES -> First.qty` reads a member of the pipeline's result. The name after `.` is a property or relation name, never an expression.
@@ -1332,6 +1381,30 @@ The three postfix operators share one level and apply left to right: `$self.tags
 Parentheses group as usual.
 
 ### Operators
+
+#### Operand Kinds
+
+The static check judges each operand by one table, as it judges a builtin's receiver and its arguments:
+
+| Operator | Operand | Takes |
+| -------- | ------- | ----- |
+| `-`, `*`, `/`, unary `-` | each | a number |
+| `%` | each | an integer |
+| `expr[i]` | the index | an integer |
+| `!`, `&&`, `\|\|` | each | a boolean |
+| `? { : }` | the condition | a boolean |
+| `<`, `<=`, `>`, `>=` | each | a value the total order ranks |
+| `=~`, `!~` | the left | a string |
+| `=~`, `!~` | the right | a regex literal |
+| `+` | both | two numbers, two strings or two lists |
+| `in` | the right | a list |
+| `==`, `!=` | each | any value |
+
+An operand of a known kind that its operator does not take is refused at load (`E_INVALID_INVARIANT`): the evaluator refuses every non-nil value of that kind where it reads the operand, save at an ordered comparison, where the check is the narrower of the two ([Comparison Operators](#comparison-operators)). The check refuses the right operand of `&&` and `||` by the same rule, though the evaluator does not read it when the left operand decides: `flag || name` does not load. The message names the operator and what it takes, as in `% takes an integer as its right operand`. An operand whose kind the check does not know loads, save on the right of `=~` and `!~`, which takes a regex literal alone.
+
+The `nil` literal is refused at each of these positions but three: an ordered comparison ranks it below every value, `in` reads it as an empty list, and equality takes any value. An optional property that is absent at evaluation is not the literal. It loads, and the operator's own section states what the evaluator does with it.
+
+The check knows when a number is a float. A `Float` property, a float literal, an element of a `Vector` or of a `List<Float>`, and arithmetic with a float operand are floats, and so is `Abs`, `Floor`, `Ceil` or `Round` of a float. A float where an integer is taken is refused, whole or not: `tags[1.0]` and `count % 2.0` do not load. Every other number loads there. `Sum` is one over any list, since an empty list sums to the integer `0`.
 
 #### Arithmetic Operators
 
@@ -1362,6 +1435,8 @@ Integer arithmetic is exact within `int64`. A result outside it — `+`, `-`, `*
 
 Ordered comparisons (`<`, `<=`, `>`, `>=`) follow a **total order across type strata** — `nil` < booleans < numbers < strings < lists — so a mixed-type ordered comparison is defined, not false: `1 < "a"` is true, `nil < 0` is true, and `false < true` is true. Within the numeric stratum, integers and floats compare exactly. Floats order `-Inf` < finite < `+Inf` < `NaN`, and `NaN` equals `NaN`, so `Sort`, `Unique`, and `Contains` treat non-finite values consistently. An ordered comparison on an unsupported shape (a map) is an evaluation error.
 
+The total order ranks no instance. The static check refuses an instance, and a list that holds one, as an operand of an ordered comparison and as a value `Sort`, `Min`, `Max` or `Compare` ranks. The refusal is by the operand's type: at evaluation a list ranks above every scalar whatever it holds, so `LINES < 1` would answer, and it does not load.
+
 Timestamp comparison is string comparison: RFC 3339 values with mixed UTC offsets do not order by instant. `Date` values (`YYYY-MM-DD`) order correctly by construction. `UUID` values order over their canonical lowercase text.
 
 #### Logical Operators
@@ -1370,8 +1445,9 @@ Timestamp comparison is string comparison: RFC 3339 values with mixed UTC offset
 !    logical not
 &&   logical and (short-circuit)
 ||   logical or (short-circuit)
-^    logical xor
 ```
+
+Each operand is a boolean. An operand that is `nil` at evaluation is an evaluation error, not false: guard an optional flag with `flag == nil || ...`. The language has no exclusive-or operator. For two booleans, `a != b` is exclusive or.
 
 #### Membership Operator
 
@@ -1385,42 +1461,26 @@ Example:
 ! "status must be valid" status in ["active", "inactive", "pending"]
 ```
 
-#### Pattern and Type Match Operators
+The right operand is a list. A right operand that is `nil` at evaluation is an empty list, so the test is false. Any other right operand that is no list is an evaluation error.
+
+#### Pattern Match Operators
 
 ```text
-=~   matches pattern or type
-!~   does not match pattern or type
+=~   matches pattern
+!~   does not match pattern
 ```
 
-These operators support two modes:
-
-**Regular expression matching:** When the right operand is a regex literal, performs pattern matching:
+The left operand is a string and the right operand is a regex literal:
 
 ```yammm-snippet
 ! "email must be valid" email =~ /.+@.+\..+/
 ```
 
-**Type checking:** When the right operand is one of the datatype keywords listed below, checks whether the value matches that type at runtime:
+A match is a search. The pattern matches when any part of the string matches it, as Go's `regexp.MatchString` reads one: `name =~ /or/` holds for `"north"`. To match the whole string, anchor the pattern: `name =~ /^north$/`.
 
-```yammm-snippet
-! "value must be integer" value =~ Integer
-! "price must be numeric" price =~ Float
-! "must not be string" data !~ String
-```
+A left operand that is no string is an evaluation error, `nil` among them: guard an optional property, as in `email == nil || email =~ /.+@.+/`. The static check refuses a left operand of another known kind, and a right operand that is no regex literal (`E_INVALID_INVARIANT`).
 
-Supported datatype keywords for type checking:
-
-- `String` - checks for string values
-- `Integer` - checks for integer values
-- `Float` - checks for floating-point values
-- `Boolean` - checks for boolean values
-- `UUID` - checks for valid UUID strings
-- `Timestamp` - checks for valid timestamp values
-- `Date` - checks for valid date values
-
-Each check applies the rule a property of that kind applies: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts a `time.Time` or an RFC 3339 string. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
-
-Numeric type checks follow the property rules: `5 =~ Float` holds, because an integer widens to a float, and `5.0 =~ Integer` does not — a float is never an integer, whole or not.
+The operators test no datatype. To test a value's kind, compare its `TypeOf`: `value -> TypeOf == "integer"`.
 
 #### Ternary Operator
 
@@ -1433,6 +1493,8 @@ Example:
 ```yammm-snippet
 ! "adult status" age >= 18 ? { "adult" : "minor" } == category
 ```
+
+The condition is a boolean. A condition that is `nil` at evaluation is an evaluation error, as any other non-boolean is.
 
 The else branch is required. Omitting the `:` branch is a load-time syntax error:
 
@@ -1448,7 +1510,7 @@ type T {
 
 ### Indexing
 
-The bracket operator accepts exactly one index:
+The bracket operator takes exactly one index expression:
 
 ```text
 expr[index]        // single element access
@@ -1459,9 +1521,9 @@ Works on:
 - Strings (rune indexing)
 - Lists
 
-A non-integer index is an evaluation error. An out-of-range index evaluates to `nil`, not an error. Indexing `nil` evaluates to `nil`. There is no range slice: two or more bracket arguments draw an evaluation error.
+The index is an integer. An index of another known kind, a float among them, is refused at load (`E_INVALID_INVARIANT`). Indexing a value that is `nil` at evaluation evaluates to `nil`, whatever the index, and the `nil` literal as the receiver is refused at load. On any other value, an index that is no integer at evaluation, `nil` among them, is an evaluation error. An out-of-range index evaluates to `nil`, not an error.
 
-The bracket grammar is more permissive than the language: it also accepts an empty index list (`expr[]`, an evaluation error) and a trailing comma (`expr[a,]`, evaluated as `expr[a]`). These parse without a diagnostic — do not write either.
+There is no range slice. An empty bracket (`expr[]`), a second index (`expr[a, b]`) and a trailing comma (`expr[a,]`) are each a syntax error (`E_SYNTAX`).
 
 ### Property Access
 
@@ -1473,16 +1535,19 @@ name               // implicit property reference
 $item.price        // lambda parameter property
 ```
 
-Invariant expressions are checked **statically** at schema load. The checker types every sub-expression — an instance, an association key, a list, a scalar — and follows the type through member access, indexing and every pipeline stage, so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. A builtin's result is typed by its subkind — `Len`, `Sum`, `Count`, `Compare` and the numeric functions yield a number; `Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring` and `TypeOf` a string; `Split` and `Match` a list of strings; the predicates and `IsNil` a boolean; `Min` and `Max` with an argument the receiver or the argument, ranked by the total order — so the stage after it is judged: `name -> Len -> Upper` is refused, as `age -> Upper` is. It rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters or arguments; and a receiver or an argument of a kind its builtin refuses on every input (`E_INVALID_INVARIANT`) — `age -> Upper` on a number, `name -> Match("nor")` with a string where a pattern is required, `name -> Substring("a")` with a string where a number is — because an invariant that fails on every instance is a defect in the schema, not in the data.
+Invariant expressions are checked **statically** at schema load. The checker types every sub-expression it reads — as an instance, an association key, a list, a scalar, a value that is always `nil`, or a value of no known kind — and follows the type through member access, indexing and every pipeline stage whose builtin declares its result (`Reduce` declares none), so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. It does not read the body of a lambda written on a builtin that takes none, since the lambda itself is refused, and it reads no invariant of a type with a supertype the load could not resolve, a link that load already reports. A builtin's result is typed by its subkind — `Len`, `Count`, `Compare` and `Sum` yield a number, and `Abs`, `Floor`, `Ceil` and `Round` a number that is a float when the receiver is one ([Operand Kinds](#operand-kinds)); `Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring` and `TypeOf` a string; `Split` and `Match` a list of strings; the predicates and `IsNil` a boolean; `Min` with an argument the lower-ranked of the two where both are scalars the total order separates (a boolean, a number, a string) and a value of either's kind for any other pair, and `Max` with an argument a value of either's kind, since it yields the lower one when the higher is absent — so the stage after it is judged: `name -> Len -> Upper` is refused, as `age -> Upper` is. Among what it rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters, a `Reduce` lambda that binds one name twice, too few or too many arguments; and a receiver or an argument of a kind its builtin refuses on every input (`E_INVALID_INVARIANT`) — `age -> Upper` on a number, `name -> Match("nor")` with a string where a pattern is required, `name -> Substring("a")` with a string where an integer is — because a call that errors on every value of that kind is a defect in the schema, not in the data.
 
-**The nil guards are typed by one rule.** `Default`, `Coalesce` and `Lest` evaluate to one of their alternatives — the receiver, or the fallback that stands in for it when the receiver is nil — and `Then` to its body, or nil for an absent receiver. The checker types each as what every alternative agrees on, so the stage after the guard is typed by a value it predicted. Alternatives of different kinds — a string beside a number, a list beside a scalar, an instance beside either — are refused at load (`E_INVALID_INVARIANT`): `(name -> Coalesce(1)) -> Upper` and `(note -> Lest { 1 }) -> Upper` are refused as `(name -> Default(1)) -> Upper` is, and `note -> Lest { true }` is refused because with `note` present the invariant evaluates to a string. The nil literal stands in for any receiver and the empty list literal for any list. Two instance types agree on the members both declare, whatever their ancestry: after `(A_SLOT -> Default(B_SLOT))` a member declared on `A` and on `B` reads, and a member declared on one of them alone is `E_UNKNOWN_PROPERTY`, since the evaluator would read nil there on the input that selects the other. A conditional and a list literal join their branches the same way, and admit alternatives of different kinds as a value of unknown kind. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
+**The `nil` literal is refused where a position takes no `nil`.** It is refused as an operand at every position the [Operand Kinds](#operand-kinds) table lists but the three it names, as an argument that takes a string, an integer or a pattern, as the receiver of an index or of a member read, and as the receiver of a builtin that errors on nil: each function that takes a string receiver (the string functions but `Join`, and `Match`), `Abs`, `Floor`, `Ceil` and `Round`, `Min` and `Max` with no argument, and `Reduce` with no initial value. The literal is a mistake the schema's author can see. An expression the check knows is always nil is judged as the literal is: `x -> Then { nil }` and `[nil][0]` are two. The empty list `[]` has no element, so the check knows no kind for a value read from it. `Then` runs no body on nil, so the check knows no kind for the parameter of `nil -> Then { ... }`. A property that is absent at evaluation is data, and the guards below are for it.
 
-**Relations are in scope**, under the relation's field name — the UPPER_SNAKE
-name in lower case — so `WORKS_AT` and `works_at` read one entry as a bare name
-or as a member, and any other casing there, such as `Works_At`, is rejected at
-load (`E_INVALID_NAME`) wherever the checker knows the value read from, and
-reads nothing at evaluation where it does not; a variable reads it as
-`$works_at` alone. What a
+**A lambda binds each name once.** `Reduce` binds its accumulator and its element, as its two parameters or as `$0` and `$1`. A lambda that gives both one name is refused at load (`E_INVALID_INVARIANT`): `|$x, $x|`, and also `|$1|`, whose one parameter names the accumulator and leaves the element as `$1`.
+
+**The nil guards are typed by one rule.** `Default`, `Coalesce` and `Lest` evaluate to one of their alternatives — the receiver, or the fallback that stands in for it when the receiver is nil — and `Then` to its body, or nil for an absent receiver. The checker types each as what every alternative agrees on, so the stage after the guard is typed by a value it predicted. Alternatives of different kinds — a string beside a number, a list beside a scalar, an instance beside either — are refused at load (`E_INVALID_INVARIANT`): `(name -> Coalesce(1)) -> Upper` and `(note -> Lest { 1 }) -> Upper` are refused as `(name -> Default(1)) -> Upper` is, and `note -> Lest { true }` is refused because with `note` present the invariant evaluates to a string. The nil literal stands in for any receiver and the empty list literal for any list. Two instance types agree on the members both declare, whatever their ancestry: after `(A_SLOT -> Default(B_SLOT))` a member declared on `A` and on `B` with one kind reads, a member the two declare with different kinds is refused (`E_INVALID_INVARIANT`), and a member declared on one of them alone is `E_UNKNOWN_PROPERTY`, since the evaluator would read nil there on the input that selects the other. A conditional and a list literal join their branches the same way, and admit alternatives of different kinds: two scalars of different kinds are a scalar of unknown kind, which still has no members and is no list, two lists whose elements differ are a list whose element joins the same way, and any other such pair is a value of unknown kind. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
+
+**Relations are in scope**, under the relation's declared UPPER_SNAKE name, so
+`WORKS_AT` reads the relation as a bare name, as a member and as `$WORKS_AT`.
+Any other casing as a bare name or a member, such as `works_at` or `Works_At`,
+is rejected at load (`E_INVALID_NAME`) wherever the checker knows the value
+read from, and reads nothing at evaluation where it does not. What a
 relation evaluates to depends on where its data lives:
 
 - A **composition**'s children are part of the instance, so the relation
@@ -1491,7 +1556,7 @@ relation evaluates to depends on where its data lives:
   `ITEMS -> All |$i| { $i.qty > 0 }` and `ITEMS[0].qty` all read real values.
 - An **association**'s target is a reference. The instance holds the foreign
   key, not the target's row, so the relation evaluates to the target key — a
-  list for a `many` association, the single key otherwise. A key reads as the
+  list for a `many` association, ordered as `Sort` orders them, the single key otherwise. A key reads as the
   target's primary-key property, which is a string for every key kind, and a
   composite key as a list of those strings: `PLACED_BY -> Upper`,
   `PLACED_BY + "!"` and `REGION -> Len == 2` are typed as the values they
@@ -1499,8 +1564,14 @@ relation evaluates to depends on where its data lives:
   type's properties are not in this instance to answer with, and reaching for
   one is rejected at load (`E_INVALID_INVARIANT`).
 
-A relation with no value evaluates to `nil`, so the null-guard idioms apply to a
-relation exactly as they do to a property.
+A `many` relation evaluates to a list, empty when it holds nothing, whether the
+data wrote an empty list or left the field out: `LINES -> Len > 0` is its
+presence test, and `LINES != nil` is always true. A single-valued relation with
+no value evaluates to `nil`, so the null-guard idioms apply to it exactly as
+they do to a property. A relation reads only what a graph holds of it, an
+association's targets as a set, so an invariant judges a root a merge grew, or
+one the snapshot reader rebuilt, as it would judge one record that holds all of
+it.
 
 ```yammm-schema
 schema "orders"
@@ -1527,9 +1598,9 @@ type Order {
 
 **Numeric variables** (`$0`, `$1`, ...) are evaluator-local and default to `nil` when unset.
 
-**Named variables** are resolved through the evaluator's parent chain — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body. A property may not be named `self`: the binding would leave it unreadable, so it is refused at load (`E_INVALID_NAME`).
+**Named variables** resolve in the invariant's scope — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither, save `$self` below, is rejected at schema load (`E_INVALID_INVARIANT`), unless it spells a relation's name in another casing, which is `E_INVALID_NAME` (see [Associations](#associations)). Variable names are matched exactly, as member names are: `$myVar` and `$myvar` are two names. A lambda parameter may be named `$self`, and then shadows the instance for the body. A property may not be named `self`: the binding reaches the instance first, so it is refused at load (`E_INVALID_NAME`).
 
-**`$self`** is bound when evaluating invariants against property maps and is inherited by child evaluators unless explicitly overridden.
+**`$self`** is bound when evaluating invariants against property maps. A lambda body's scope keeps the binding unless a parameter named `$self` overrides it.
 
 Lambda parameters shadow outer variables.
 
@@ -1540,6 +1611,8 @@ Built-in functions are invoked via the pipeline `->` syntax; the left-hand side 
 ```text
 expr -> function(args)|$params|{ body }
 ```
+
+A function's name is matched exactly, as the tables below write it: `Len` is a function, and `len` is refused at load as an unknown function.
 
 #### Collection Functions
 
@@ -1557,7 +1630,7 @@ expr -> function(args)|$params|{ body }
 | `Sum` | Sum numeric elements: `items -> Sum` |
 | `First` | First element (nil if empty): `items -> First` |
 | `Last` | Last element (nil if empty): `items -> Last` |
-| `Sort` | Sort elements: `items -> Sort` |
+| `Sort` | Sort elements by the total order: `items -> Sort`. The elements are values the total order ranks: nil, scalars, or lists that hold no instance. A list of instances is refused |
 | `Reverse` | Reverse element order: `items -> Reverse` |
 | `Flatten` | Flatten one level of nesting: `items -> Flatten` |
 | `Contains` | Check if element exists: `items -> Contains(value)` |
@@ -1590,7 +1663,7 @@ Results on an empty collection are a mixed family:
 | `Round` | Round to the nearest whole number (banker's rounding); the result keeps the operand's kind, as `Floor` and `Ceil` do — a Float yields a Float |
 | `Min` | Minimum value: `a -> Min(b)` or `items -> Min` |
 | `Max` | Maximum value: `a -> Max(b)` or `items -> Max` |
-| `Compare` | Three-way comparison: `a -> Compare(b)` returns -1, 0, or 1, for any two values the total order ranks; an instance is refused |
+| `Compare` | Three-way comparison: `a -> Compare(b)` returns -1, 0, or 1, for any two values the total order ranks; an instance is refused, and a list that holds one |
 
 #### String Functions
 
@@ -1606,7 +1679,7 @@ Results on an empty collection are a mixed family:
 | `StartsWith` | Check prefix: `s -> StartsWith("pre")` |
 | `EndsWith` | Check suffix: `s -> EndsWith("suf")` |
 | `Replace` | Replace all occurrences: `s -> Replace("old", "new")` |
-| `Substring` | Extract substring: `s -> Substring(start)` or `s -> Substring(start, end)`; negative indices count from the end; out-of-range indices clamp |
+| `Substring` | Extract substring: `s -> Substring(start)` or `s -> Substring(start, end)`; each index is an integer; negative indices count from the end; out-of-range indices clamp |
 
 #### Control Flow Functions
 
@@ -1626,7 +1699,7 @@ Results on an empty collection are a mixed family:
 
 | Function | Description |
 | -------- | ----------- |
-| `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"pattern"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type, so a `Timestamp`, `Date` or `UUID` property yields `"string"` — validation stores all three as text, whichever Go representation the caller submitted |
+| `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, or `"map"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type, so a `Timestamp`, `Date` or `UUID` property yields `"string"` — validation stores all three as text, whichever Go representation the caller submitted |
 | `IsNil` | Check if nil: `value -> IsNil` |
 | `Default` | Return default if nil: `value -> Default(fallback)`; typed as the join of receiver and fallback |
 | `Coalesce` | Return first non-nil: `a -> Coalesce(b, c)`; typed as the join of receiver and every argument |
@@ -1680,8 +1753,8 @@ type Person {
 ### Evaluation Notes
 
 - The evaluator only works against the in-memory instance graph
-- There is no implicit database lookup or multi-hop relation navigation
-- Evaluation errors (undefined named variables, type errors) surface as error-severity diagnostics; validation continues collecting further issues. A reference to an undeclared property is a load-time error, not an evaluation error, and a declared-but-absent property evaluates to `nil`
+- There is no implicit database lookup. An association reads as its target key, so no navigation passes through one; a composition reads as its children, whose members an expression reads in turn, at any depth
+- Evaluation errors surface as error-severity diagnostics, among them a type error, an integer division or modulo by zero, and an integer overflow; validation continues collecting further issues. A named variable that nothing binds is a load-time error, not an evaluation error, and so is a reference to an undeclared property wherever the checker knows the type it reads from. A declared property or single-valued relation the instance leaves unset evaluates to `nil`, and a `many` relation to the empty list, read by its bare name or as a `$` variable alike
 - A genuine panic is recovered as a Fatal `E_INTERNAL` carrying a Go stack trace, which stops that instance's validation. Division by zero is not a panic — see Division semantics
 
 ### Evaluation Model
@@ -1710,7 +1783,7 @@ Invariant expressions are always evaluated against concrete instance data. There
 
 ## Diagnostics
 
-YAMMM uses structured diagnostics with stable error codes. The Go programmatic interface (`diag.Result` methods, `diag.Renderer`) is documented in [API.md](API.md#diagnostics).
+YAMMM uses structured diagnostics with stable error codes. The Go programmatic interface (`diag.ResultError`, `diag.Result` methods, `diag.Renderer`) is documented in [API.md](API.md#diagnostics): a call returns its Fatal and Error issues as one `*diag.ResultError`, and hands each Warning, Info and Hint to its `WithWarnings` callback.
 
 ### Severity Levels
 
@@ -1724,60 +1797,57 @@ YAMMM uses structured diagnostics with stable error codes. The Go programmatic i
 
 ### Diagnostic Codes
 
-Codes are stable identifiers for programmatic matching. The authoritative list is the registry `diag.AllCodes()` returns: `diag/code.go` holds the built-in codes, and the adapter packages register their own on import. Categories and their codes:
+Codes are stable identifiers for programmatic matching. `diag/code.go` holds the built-in codes. The Neo4j codes, which `schema/cypher` and `neo4j` declare, register when their package is linked. The codes, grouped by what they report:
 
 **Sentinel** — internal conditions:
 
 - `E_INTERNAL` — unexpected invariant failure (internal bug indicator)
-- `E_COMMAND_FAILED` — a command-line failure that is not itself a diagnostic, carried into a `--format json` document with the process exit code as its `exit_code` detail
+- `E_COMMAND_FAILED` — a command-line failure that is not itself a diagnostic, carried into a `--json` document with the process exit code as its `exit_code` detail
 - `E_CONTEXT_CANCELLED` — operation cancelled via context
 
 **Schema** — schema compilation errors:
 
-- `E_DUPLICATE_TYPE` — type name conflicts
-- `E_DUPLICATE_SCHEMA` — two schemas in one registry, or in one import closure, declare one name
+- `E_DUPLICATE_TYPE` — a schema declares one name more than once: two types, two data types, or a type and a data type, which share one namespace. The issue stands at each later declaration and names the first
+- `E_DUPLICATE_SCHEMA` — two schemas in one load declare one name. A schema whose load reported an error takes no name and draws no such report
 - `E_INHERIT_CYCLE` — circular inheritance chain
+- `E_INVALID_SUPERTYPE` — an `extends` clause names a type of a kind the subtype may not extend: a supertype is abstract or of the subtype's own kind
 - `E_UNKNOWN_TYPE` — unresolvable type reference
-- `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — property definition errors
+- `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — a property declared twice on one type or an edge property twice on one association, or an invariant reading a member the type it reads neither declares nor inherits
 - `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION` — relation conflicts
-- `E_DUPLICATE_INVARIANT`, `E_INVARIANT_CONFLICT` — an invariant message declared twice on one type, or inherited with two different expressions
-- `E_CASE_COLLISION` — names differ only by case
-- `E_PROPERTY_RELATION_COLLISION` — property and relation share a name
-- `E_RESERVED_PREFIX` — name uses a reserved prefix
+- `E_DUPLICATE_INVARIANT`, `E_INVARIANT_CONFLICT` — an invariant message declared twice on one type, or inherited with two different expressions (a literal with no value matches any literal of its kind)
+- `E_CASE_COLLISION` — two property names of a type, or two edge property names of an association, differ only by case
+- `E_PROPERTY_RELATION_COLLISION` — a property's lower-cased name equals a relation's field name, the relation name in lower case
 - `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
+- `E_COMPOSITION_CYCLE` — a cycle of compositions whose every link is required, which no finite instance satisfies
 - `E_INVALID_CONSTRAINT` — constraint definition error
 - `E_INVALID_INVARIANT` — an invariant's expression or message is invalid
-- `E_INVALID_NAME` — a name the schema refuses: an identifier whose format its production refuses, an empty schema name, a property or relation field named `self`, a name the `schema.Builder` takes that the DSL cannot state (a built-in type name as a type, datatype or relation name, or a schema name that is not UTF-8), or an invariant that reads a relation in a casing other than its name or its field name
+- `E_INVALID_NAME` — a name the schema refuses: a relation name that is not UPPER_SNAKE, a schema name that is not an identifier, a property named `self`, or an invariant that reads a relation in a casing other than its declared name
 - `E_INVALID_PRIMARY_KEY_TYPE` — disallowed type for primary key
 - `E_NO_PRIMARY_KEY` — concrete type declares or inherits no primary key
-- `E_LIST_ON_EDGE` — List type used in relationship property
-- `E_PROPERTY_CONFLICT` — conflicting inherited properties
+- `E_INVALID_EDGE_PROPERTY_TYPE` — a relationship property of a type an edge does not hold: a `List` or a `Vector`, written or through a datatype
+- `E_PROPERTY_CONFLICT` — a type's own declaration of a property does not narrow an inherited one, or, with none, no inherited declaration narrows every other
 - `E_UPSTREAM_FAIL` — imported schema failed to compile
-- `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
-- `E_LOAD_IO_FAILURE` — I/O error during schema loading
-- `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines
-- `E_LOAD_SOURCE_CHANGED` — a source a shared registry holds with content that differs from the load's: re-registered after an edit, registered with its sources where the registry's schema has none, or imported where the load's own bytes for it differ from the ones the registry compiled
-- `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, or duplicate errors
+- `E_LOAD_IO_FAILURE` — I/O error during schema loading, or a load whose arguments or option values the loader refuses (an option a load does not take is refused with an error that carries no code)
+- `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link that resolves to no file
+- `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, argument kind or value, duplicate, or inherited-disagreement errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
-- `W_TIMESTAMP_LOSSY_FORMAT` (Warning) — a `Timestamp["layout"]` declares a layout that cannot reproduce an instant
-- `E_REVERSE_CLAUSE_REMOVED` — the schema carries the reverse clause removed in v0.15.0
 
 **Syntax** — parse errors:
 
-- `E_SYNTAX` — syntax error in schema source, or a `schema.Builder` documentation string no doc comment can carry
+- `E_SYNTAX` — syntax error in schema source
 
 **Import** — import resolution errors:
 
 - `E_IMPORT_RESOLVE` — import path could not be resolved
 - `E_IMPORT_CYCLE` — circular import dependency
-- `E_INVALID_ALIAS` — import alias is not a valid identifier
+- `E_INVALID_ALIAS` — an import with no `as` clause derives a reserved word as its alias from its path, such as `import "./schema"`. A written `as` clause that holds a reserved word is `E_SYNTAX`
 - `E_PATH_ESCAPE` — import path escapes allowed directory
-- `E_IMPORT_NOT_ALLOWED` — imports refused via `WithImportsAllowed(false)`
+- `E_IMPORT_NOT_ALLOWED` — imports refused via `WithImportsAllowed(false)`, and by `LoadString`, which takes none
 - `E_DUPLICATE_IMPORT` — the same schema imported multiple times, or two different schemas sharing one alias
-- `E_IMPORT_ALIAS_COLLISION` — import alias collides with local name
+- `E_IMPORT_ALIAS_COLLISION` — an import alias is the name of a type or a data type the schema declares
 
-**Instance** — validation errors:
+**Instance** — data parse and validation errors:
 
 - `E_INSTANCE_TYPE_NOT_FOUND` — type not found in schema
 - `E_ABSTRACT_TYPE` — attempt to instantiate abstract type, an empty batch under its name included
@@ -1787,109 +1857,109 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UNKNOWN_FIELD` — unexpected field in instance data
 - `E_CONSTRAINT_FAIL` — constraint check failed
 - `E_INVARIANT_FAIL` — invariant check failed
-- `E_EVAL_ERROR` — expression evaluation error, including a call to an unknown built-in function
-- `E_MISSING_FK_TARGET` — foreign key target missing
+- `E_EVAL_ERROR` — expression evaluation error. A call to an unknown built-in function is refused at load with `E_INVALID_INVARIANT`, so no loaded schema reaches the evaluator's own refusal of one
+- `E_MISSING_FK_TARGET` — an edge object holds none of its target's `_target_` foreign-key fields
 - `E_PARTIAL_COMPOSITE_FK` — partial composite foreign key
 - `E_UNKNOWN_EDGE_FIELD` — unknown field in edge data
-- `E_EDGE_SHAPE_MISMATCH` — edge has wrong shape (object vs array)
+- `E_EDGE_SHAPE_MISMATCH` — an edge or a composition value has a JSON shape its relation does not take, such as an object where an array belongs or the reverse, a scalar, or a composed child or a `(many)` edge element that is not an object
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
-- `E_COMPOSITION_NOT_FOUND` — referenced composition not found
-- `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the same bound the snapshot writer and reader enforce; a validated instance is always one a snapshot can carry
-- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and graph assembly raises it again over children validated separately. `snapshot.Load` and `snapshot.Verify` raise it for a `(one)` slot a document fills more than once; `snapshot.Info` reads without a schema and makes no such claim
-- `E_INVALID_TYPE_TAG` — a type tag that is not a type name by the grammar: a JSON document's top-level key, or a CSV type-column value
-- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field or edge property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `NAME`, input `Name` and `name`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
+- `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the bound the `.ys` reader holds a document to with `E_SNAPSHOT_DEPTH_EXCEEDED`, so a snapshot can carry every nesting a validator accepts
+- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and `snapshot.Unmarshal` and `snapshot.Verify` raise it for two children of a keyed `(many)` slot at one key, compared as written (a child whose key component its kind stores as other text is malformed), and for a `(one)` slot a document holds several children in; `snapshot.Stat` reads without a schema and makes no such claim
+- `E_DUPLICATE_EDGE` — a `(many)` association names one target twice for one source: a graph holds one edge per source, association and target. The validator raises it at each listing of a target key that an earlier listing names, where no other check refused either listing, since two listings can carry different edge properties; a refused listing's own issue stands for the repeat. `snapshot.Unmarshal` and `snapshot.Verify` refuse such a document with `E_SNAPSHOT_MALFORMED` where no other check refused the repeating listing, one sound root (of a type that can hold a root, its stored key admitted by the key rule) holds the source's address alone, and an edge's target's, and no root stands at a record's target and no refused unit states it; elsewhere the issue at the listing, the source or the target stands for the repeat; `snapshot.Stat` reads no schema, so it knows no multiplicity and does not judge it. A `(one)` association never draws this code: its count, `E_GRAPH_CARDINALITY`, judges a second record there
+- `E_INVALID_TYPE_TAG` — a type tag that is not a type name by the grammar: a JSON document's top-level key
+- `E_DATA_PARSE` — an instance document `yammm check` or `yammm snapshot save` reads is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, holds a string that is not valid UTF-8 or holds a `\u` escape that is half of no surrogate pair, or nests deeper than the decoder's 10,000-level limit
 
 **Graph** — graph construction errors:
 
 - `E_DUPLICATE_PK` — duplicate primary key
-- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child (also raised by the validator and the snapshot reader; see Instance)
+- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child (raised by the validator and the snapshot reader; see Instance)
+- `E_DUPLICATE_EDGE` — a `(many)` association names one target twice for one source (raised by the validator; see Instance)
 - `E_UNRESOLVED_REQUIRED` — required association unresolved
-- `E_GRAPH_TYPE_NOT_FOUND` — type not found in graph operations
-- `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
-- `E_GRAPH_MISSING_PK` — a root whose type declares no primary key
-- `E_GRAPH_INVALID_PK` — primary key empty, of the wrong arity, with a component `graph.ParseKey` cannot read back, with a key property absent or null, or disagreeing with the instance's own key properties; or an association target key of the wrong arity or with such a component
-- `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or a `.ys` document
-- `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one
-- `E_GRAPH_ABSTRACT_TYPE` — an instance of an abstract type reached the graph
+- `E_GRAPH_MISSING_PK` — an instance added at a root whose type declares no primary key
+- `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: a merge at `Graph.AddOrMerge` that would add a second target, or several edges and unresolved records no check refused in a `.ys` document
+- `E_GRAPH_UNKNOWN_RELATION` — an association record or an empty edge list under a relation name the type does not declare as an association
 
 **Snapshot** — persistence errors:
 
-- `E_SNAPSHOT_MALFORMED` — invalid JSON, missing required fields, or content a structural rule refuses: an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict. `snapshot.Marshal` raises it for input that would write such a file: an indent that is not whitespace, or a property value the wire cannot carry
-- `E_SNAPSHOT_UNSUPPORTED_VERSION` — unrecognized format version
+- `E_SNAPSHOT_MALFORMED` — invalid JSON, a header past `MaxHeaderSize` where `snapshot.ReadHeader` reads, missing required fields, a wrong outer shape (the four top-level keys, in order, each once and none null, with nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a `Timestamp`, `Date` or `UUID` component of a stored key, a target key, a record's source key, or a duplicate's key or conflict key that its kind stores as other text (`Stat` reads no kind and compares keys as written, so it reports such a component only where it parts two keys that name one address: a reference and the root it names as `E_SNAPSHOT_DANGLING_REFERENCE`, a duplicate's key and the key its instance carries as malformed, a duplicate's conflict and the key the duplicate carries as malformed), a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict or another one, a duplicate stating a parent or a relation (a `null` `parent_type`, and a `null` or empty `parent_key` or `relation`, state none, and the next `Marshal` drops the member), or a string holding invalid UTF-8 or a surrogate escape that is half of no pair, which `encoding/json` would silently read as U+FFFD. Every reader raises it for a `created_at` that is not an RFC 3339 time, the empty string included. `snapshot.Marshal` raises it for input it refuses to write: an indent that is not JSON whitespace, a metadata key or value, or a provenance source name or path, that is not valid UTF-8, or a `WithCreatedAt` time with no RFC 3339 form; `snapshot.UpdateMetadata` raises it for such metadata too
+- `E_SNAPSHOT_UNSUPPORTED_VERSION` — unrecognized format version. A surface that holds the whole document raises it only for a document whose outer shape, member names and text pass, which it judges first
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
 - `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch
 - `E_SNAPSHOT_UNKNOWN_TYPE` — type name not found in schema
 - `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under, or a composed child's or an association record's target row is not the relation's declared target
-- `E_SNAPSHOT_DANGLING_REFERENCE` — an edge target, a duplicate's conflict or parent, or an unresolved record's source not found
-- `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges, or composed children stand under a name the type does not declare as a composition
-- `E_SNAPSHOT_INVALID_ROOT` — an instances group, empty or not, or a root duplicate record names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built
-- `E_SNAPSHOT_UNNAMEABLE_TYPE` — an instances group, empty or not, or a root duplicate record names a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. `adapter/json` and `adapter/csv` key their output by the name of each type a snapshot denotes, so such a document describes a snapshot they cannot render. Refused whatever the load options say, and the hint names the remedy, which is to import the declaring schema directly
-- `E_DUPLICATE_PK` — two root instances in one group state the same primary key. Listed here as well as under Graph: `snapshot.Load`, `snapshot.Verify` and `snapshot.Info` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Info` resolves no schema, so it compares keys as written and folds only identical spellings, where `Load` and `Verify` fold a timestamp, date or UUID key written two ways
+- `E_SNAPSHOT_DANGLING_REFERENCE` — an edge target, a duplicate's conflict, or an unresolved record's source names no root instance; a reference to an address a refused unit states draws none, the unit's refusal being its one issue
+- `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges, or composed children stand under a name the parent's type does not declare as a composition
+- `E_SNAPSHOT_INVALID_ROOT` — an instances group, empty or not, or a duplicate record that states no parent names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built. One types-table row draws one issue, however many positions name it, and a root of it holds no address: it owes no required association, it is in no `(one)` count, and a second root at its key is no duplicate. A break its records or its slots show by themselves stays its own
+- `E_DUPLICATE_PK` — two root instances in one group, both of whose stored keys the key rule accepts, state one primary key. Under a schema, only roots of a type that can hold a root count. Listed here as well as under Graph: `snapshot.Unmarshal`, `snapshot.Verify` and `snapshot.Stat` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Stat` resolves no schema, so it judges no type and compares keys as the reader's number rule renders them; `Unmarshal` and `Verify` compare them as written too, since they refuse a `Timestamp`, `Date` or `UUID` key component its kind stores as other text
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
-- `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match
-- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the schema hash algorithm in the snapshot header is not recognized. An Error on the body-reading surfaces (`Load`, `Verify`, `Info`, `UpdateMetadata`): the document is refused rather than half-trusted. A Warning on header-only reads, which stay classifiable for dispatch
-- `W_SNAPSHOT_PATH_FALLBACK` (Warning) — a provenance path string could not be parsed into a canonical path and fell back to the root path; the original string is preserved for round-trip fidelity
-- `E_SNAPSHOT_IO` — a directory- or file-level I/O failure during `ScanDir` / `ScanDirSlice`, or a failing reader under `HeaderOnlyRead`
-- `E_UPDATE_METADATA_BODY_OFFSET` — `UpdateMetadata` could not resolve the byte range of the body it reuses
-- `W_UPDATE_METADATA_FALLBACK` (Warning) — `UpdateMetadataOrReMarshal` fell back from the fast path to `Load` + `Marshal`
-- `W_SNAPSHOT_VALUE_NONCONFORMING` (Warning) — under `WithValueConformance`, a stored `Timestamp`, `Date` or `UUID` does not conform to its declared constraint
-- `W_SNAPSHOT_VALUE_DROPPED` (Warning) — the writer held a value the wire cannot carry at that position and did not write it. The document is well-formed; the warning names what is missing from it
-- `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record for a required association
+- `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match the document, or the header holds none (an empty, null or absent `integrity_hash`); `WithIntegrityCheck(false)` skips the check, at `UpdateMetadata` too, which then seals under a new hash any body whose shape and text it accepts, and refuses any other with `E_SNAPSHOT_MALFORMED`
+- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the schema hash algorithm in the snapshot header is not recognized. An Error on the body-reading surfaces (`Unmarshal`, `Verify`, `Stat`, `UpdateMetadata`): the document is refused rather than half-trusted. `ReadHeader` and `ScanDir` accept such a header and draw nothing, so a document stays classifiable for dispatch: `Header.SchemaHashAlgorithm` states the algorithm, and the CLI reports it as a Warning; a header that fails another way returns no `Header`, so beside that failure the CLI reports no such Warning
+- `E_SNAPSHOT_IO` — a file that fails to open during `ScanDir`, a failing reader under `ReadHeader`, or a directory `yammm snapshot info --dir` fails to read
+- `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 
-**Adapter** — format-specific errors. `E_ADAPTER_PARSE` and `E_ADAPTER_IO` are declared in `diag`, so they are always in `diag.AllCodes()`; every other code below is registered by its adapter package, so it appears there only once that package is linked:
+**Neo4j** — Neo4j mapping, diff and write errors. `schema/cypher` registers each code below but `E_NEO4J_INVALID_REMOTE_OBJECT` when it is linked, and `neo4j`, which imports it, registers that one too:
 
-- `E_ADAPTER_PARSE` — parsing error in adapter input
-- `E_ADAPTER_IO` (Fatal) — an adapter's input failed to arrive: the reader a parse reads from returned an error that is neither the input's end nor a fault in its content. What was read before the failure is kept
-- `E_CSV_COERCE` — a CSV cell's text does not coerce to the type its member declares
-- `E_CSV_CONFIG` — the CSV adapter holds a setting the parse cannot use: a list separator it could not find again, a delimiter `encoding/csv` refuses, or `ParseWithTypeColumn` with no type column set or with one whose name holds a CR LF, which no header can hold. No record is read
-- `E_NEO4J_LABEL_COLLISION` — two types render the same Neo4j label
-- `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher
-- `E_NEO4J_UNSUPPORTED_TYPE` — a property kind the adapter cannot express
+- `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher, or a label breaks the label rule
+- `E_NEO4J_UNSUPPORTED_TYPE` — a property kind Neo4j cannot store
 - `E_NEO4J_UNKNOWN_PROPERTY` — an annotation names a property the type does not declare
 - `E_NEO4J_INVALID_INDEX_TARGET` — an index annotation targets an ineligible property
 - `W_NEO4J_NODE_KEY_UNSUPPORTED` (Warning) — NODE KEY is unavailable on this edition
 - `W_NEO4J_EDITION_CONSTRAINT_OMITTED` (Warning) — a constraint was omitted because the edition does not support it
-- `W_NEO4J_INDEXES_UNREADABLE` (Warning) — a comparison could not read the database's indexes, so the half needing them did not run. The constraint half is complete; a declaration whose name an index already holds reads as a create that will not take effect
+- `E_NEO4J_INVALID_REMOTE_OBJECT` — `neo4j.Diff` was given a remote row it cannot plan from: a constraint or an index with no name, two rows of one kind under one name, or a property type constraint that reports no property type
 
 ## File Extension and Conventions
 
 - Schema files use the `.yammm` extension
 - Snapshot files use the `.ys` extension
-- UTF-8 encoding is required; one leading byte order mark is accepted and never written
+- A schema file is UTF-8. It can start with one byte order mark, which the formatter removes; a snapshot file that starts with one is refused (`E_SNAPSHOT_MALFORMED`)
 - One schema per file
 - Import paths are case-sensitive on case-sensitive filesystems
 - `/` separates an import path's segments on every host, and only a `./` or `../` prefix makes an import relative. An import path holding a backslash is refused: Windows reads a backslash as a separator and every other host as part of a file name, so the path would name a different file on each
-- Canonical formatting is defined by `format.TokenStream` (see [API.md](API.md#formatting))
+- Canonical formatting is what `yammm fmt` writes (see [API.md](API.md#formatting))
 
 ## Schema Identity
 
 Each compiled schema has a deterministic structural hash (SHA-256) computed over its whole import closure. For every member schema — the entry schema and each schema it imports, directly or transitively — the input covers:
 
 - The member's schema name
-- Type names, properties (with constraints and modifiers), the primary-key set, relations (with targets and cardinalities), compositions, association edge properties, and inheritance edges
+- Type names, properties (with constraints and modifiers), the primary key with its properties in key order, relations (with targets and cardinalities), compositions, association edge properties, and each supertype by its type name
 - Each type's `abstract` and `part` markers
 - Invariant expressions (the invariant's *name* is excluded — it is the failure message)
 - Data type names and constraints
 
 Two schemas that hash the same agree on every one of those rules everywhere in their closures. The converse does not hold: a hash can also move on a change to an imported schema this schema never references, because closure membership is part of the identity. Members are framed under their schema names, the entry schema first and the rest ordered by name, so the order imports are declared in does not enter the digest.
 
-**Excluded, deliberately:** annotations — they drive downstream store DDL and write shape and never reject data, so a schema that gains its first annotation hashes identically and every persisted `.ys` snapshot header hash stays valid; import aliases and source paths — a member is framed by its declared name, never its source, a relation target is the pair (owning schema name, type name), and a supertype hashes by name alone, so `embedded://` and disk loads of one schema text agree; and documentation and source positions. Adding an invariant, an edge property, or flipping a type between concrete and `part` changes the hash in any member.
+**Excluded, deliberately:** annotations — they drive downstream store DDL and write shape and never reject data, so a schema that gains its first annotation hashes identically and every persisted `.ys` snapshot header hash stays valid; source paths — a member is framed by its declared name, never its source, and a relation target is the pair (owning schema name, type name), so `embedded://` and disk loads of one schema text agree; and documentation and source positions. Adding an invariant, an edge property, or flipping a type between concrete and `part` changes the hash in any member.
 
-The hash is deterministic. Most inputs are sorted by name; invariant blobs are sorted by their serialized bytes, and the operands of one expression are hashed in declared order, because operand order is semantic.
+Two more facts are outside the hash, and two schemas that hash the same can differ in them:
 
-The hash format is `sha256:<hex>`. A structural hash version (currently `4`) is bumped when the algorithm changes; version 2 arrived in v0.15.0 with invariants and the `abstract` / `part` markers, version 3 in v0.17.0 when the input widened to the whole import closure, and version 4 when a relation target became the pair (owning schema name, type name) so two closure members declaring one type name no longer collide. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
+- **The import graph and the entry schema's name surface**: no member's imports are hashed, so one member set under two import graphs or two aliases hashes the same. The entry schema's direct import set and its import aliases decide which type names the schema resolves, such as `lb.T`, so a type name a caller validates data under can resolve under one and miss under the other; they change no rule a type applies. A `.ys` snapshot names a type by its declaring schema's name and its own, so a snapshot read resolves it through the member set alone.
+- **Which member owns a supertype, and which data type a property names.** A supertype hashes by its type name, and the subtype hashes the members it inherits. A property hashes its resolved constraint and never a data type's name. So `K extends a.Base` and `K extends b.Base` hash the same when `a` and `b` declare `Base` alike, and a property typed `a.Code`, one typed `b.Code` and one typed `String[3, 3]` hash the same when each `Code` is `String[3, 3]`. Instance validity agrees in each case.
+
+So a test that compares generated code's `SchemaHash` constant with the hash cannot see stale generated code after any change the hash leaves out: the generated code embeds the schema sources and their documentation comments. After a change to the name surface, a supertype's owner or a property's data type, a field's Go type or a graph field can differ too.
+
+The hash is deterministic. Most inputs are sorted by name; invariant blobs are sorted by their serialized bytes. Two inputs keep their order, because it is semantic: a primary key's properties, in key order, and the operands of one expression, in declared order.
+
+The hash format is `sha256:<hex>`. A structural hash version (currently `4`) names the algorithm, and a snapshot that records another version is not hash-compared, and draws `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` on a body read (a header-only read draws nothing); version 2 arrived in v0.15.0 with invariants and the `abstract` / `part` markers, version 3 in v0.17.0 when the input widened to the whole import closure, and version 4 in v0.21.0 when a relation target became the pair (owning schema name, type name) so two closure members declaring one type name no longer collide. A hash can also move within a version: under version 4 a composite key is now hashed in key order and a negative number in an invariant as a signed literal, so a hash v0.21 stored for a schema with a composite key declared out of name order, or with such a number, no longer matches. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
 
 ## Grammar Summary
 
 This section is the normative statement of the language YAMMM **accepts** — a
 production describes what loads, not what the reference parser's own grammar
-admits. The two differ where the parser deliberately accepts a shape so a
-checker can report a better message than a parse error: an arity violation such
-as `Enum["a"]` parses and is then refused with `E_INVALID_CONSTRAINT`, never
-`E_SYNTAX`.
+admits. The two differ where the parser accepts a shape that a later check
+refuses. An `Enum` of fewer than two values, such as `Enum["a"]`, parses and is
+then refused with `E_INVALID_CONSTRAINT`; every other wrong argument count to a
+type, such as `Integer[1]` or `Pattern["a", "b"]`, is `E_SYNTAX`. The parser
+also accepts every argument its tokens spell, and a later check refuses with
+`E_INVALID_CONSTRAINT` each one its type's rule refuses, such as the inverted
+bound `Integer[5, 1]`. A relation name that is no reserved word and is not upper
+snake case, such as `worksAt`, draws `E_INVALID_NAME`, and so do a schema name
+whose text is no identifier, such as `"Vehicle Management"`, and a type's own
+property named `self`. A property annotation that begins a line draws
+`E_INVALID_ANNOTATION`.
 
 It is maintained by hand. Nothing checks it automatically, and no second grammar
 exists to check it against. Two non-terminals it names are defined elsewhere in
@@ -1898,33 +1968,35 @@ Invariants, and the six spellings `PropertyName` refuses, under Keywords.
 
 ```text
 Schema     = SchemaName { ImportDecl } { TypeDecl | DataTypeDecl } EOF .
-SchemaName = [ DOC_COMMENT ] "schema" STRING .
+SchemaName = [ DOC_COMMENT ] "schema" STRING .   // the text an identifier: an ASCII letter, then ASCII letters, digits, "_"
 ImportDecl = "import" STRING [ "as" AliasName ] .
 
 TypeDecl   = [ DOC_COMMENT ] [ "abstract" | "part" ] "type" TypeName
              [ ExtendsClause ] "{" TypeBody "}" .
 DataTypeDecl = [ DOC_COMMENT ] "type" TypeName "=" BuiltIn .
 
-TypeName   = UC_WORD .
-AliasName  = UC_WORD | LC_WORD .
+TypeName   = UC_WORD .   // except a data type keyword
+AliasName  = UC_WORD | LC_WORD .   // except a keyword or reserved identifier (see Keywords)
 TypeRef    = [ AliasName "." ] TypeName .
 ExtendsClause = "extends" TypeRef { "," TypeRef } [ "," ] .
 TypeBody   = { Property | Association | Composition | Invariant | TypeAnnotation } .
 
 Property   = [ DOC_COMMENT ] PropertyName DataTypeRef [ "primary" | "required" ] { Annotation } .
+             // the name not self; an Annotation that begins a line is E_INVALID_ANNOTATION
 PropertyName = LC_WORD .   // except as, part, in, nil, true, false
 DataTypeRef = BuiltIn | QualifiedAlias .
-QualifiedAlias = [ AliasName "." ] UC_WORD .
+QualifiedAlias = [ AliasName "." ] TypeName .
 
 Annotation     = "@" PropertyName [ AnnotationArgs ] .
 TypeAnnotation = [ DOC_COMMENT ] "@@" PropertyName [ AnnotationArgs ] .
 AnnotationArgs = "(" AnnotationArg { "," AnnotationArg } [ "," ] ")" .
 AnnotationArg  = PropertyName | UC_WORD | STRING | INTEGER | FLOAT | BOOLEAN | REGEXP .
+                 // UC_WORD except the eleven built-in type names: @@index(Integer) is E_SYNTAX
 
 Association  = [ DOC_COMMENT ] "-->" RelationName [ Multiplicity ] TypeRef
                [ "{" { RelProperty } "}" ] .
 Composition  = [ DOC_COMMENT ] "*->" RelationName [ Multiplicity ] TypeRef .
-RelationName = upper_letter { upper_letter | decimal_digit | "_" } .
+RelationName = upper_letter { upper_letter | decimal_digit | "_" } .   // except UUID, a data type keyword
 Multiplicity     = "(" MultiplicitySpec ")" .
 MultiplicitySpec = "_" [ ":" ( "one" | "many" ) ]
                  | "one" [ ":" ( "one" | "many" ) ]
@@ -1938,8 +2010,8 @@ BuiltIn    = "Integer" [ "[" IntBound "," IntBound "]" ]
            | "Boolean"
            | "String" [ "[" ListBound "," ListBound "]" ]
            | "Enum" "[" STRING "," STRING { "," STRING } [ "," ] "]"
-           | "Pattern" "[" STRING [ "," STRING ] "]"
-           | "Timestamp" [ "[" STRING "]" ]
+           | "Pattern" "[" STRING "]"
+           | "Timestamp"
            | "Date"
            | "UUID"
            | "Vector" "[" INTEGER "]"

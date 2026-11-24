@@ -1,0 +1,105 @@
+{
+  "name": "\"abstract_test\"",
+  "span": {
+    "s": 0,
+    "e": 22
+  },
+  "types": [
+    {
+      "name": "Base",
+      "name_span": {
+        "s": 38,
+        "e": 42
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 52,
+              "e": 58
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 49,
+            "e": 66
+          }
+        }
+      ],
+      "span": {
+        "s": 24,
+        "e": 68
+      }
+    },
+    {
+      "name": "Widget",
+      "name_span": {
+        "s": 75,
+        "e": 81
+      },
+      "extends": [
+        {
+          "name": "Base",
+          "span": {
+            "s": 90,
+            "e": 94
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 106,
+              "e": 112
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 101,
+            "e": 120
+          }
+        },
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 130,
+              "e": 136
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 125,
+            "e": 144
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 154,
+              "e": 160
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 149,
+            "e": 169
+          }
+        }
+      ],
+      "span": {
+        "s": 70,
+        "e": 171
+      }
+    }
+  ]
+}
