@@ -427,7 +427,7 @@ func (w *worker) compiledUnder(ctx context.Context, m mutant, changed bool) (con
 func (w *worker) restore(ctx context.Context, j *judgement, when string) error {
 	differed, err := w.tree.restore(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %w", when, err)
 	}
 	if len(differed) > 0 {
 		fmt.Fprintf(&j.log, "the tree differed from the checkout %s and was restored: %s\n", when, strings.Join(differed, " "))

@@ -84,7 +84,12 @@ type tree struct {
 	dir   string
 	files map[string]entry       // by slash-separated path from dir
 	dirs  map[string]fs.FileMode // each directory that holds a copied path, with its mode
-	index [sha256.Size]byte      // of what git lists as staged
+	// index is the sum of what git reads from the index as copied, its flags
+	// among them (readIndex), and objectSize the size of the copy's object names.
+	index      [sha256.Size]byte
+	objectSize int
+	// repository holds every path under .git but the index.
+	repository map[string]entry
 }
 
 // newTree copies the checkout's listed files to dir and gives the copy an
@@ -97,17 +102,27 @@ func newTree(ctx context.Context, r *run, dir string) (*tree, error) {
 			return nil, err
 		}
 	}
-	if _, err := gitOutput(ctx, dir, r.env, "init", "-q"); err != nil {
+	if _, err := t.git(ctx, nil, "init", "-q"); err != nil {
 		return nil, err
+	}
+	format, err := t.git(ctx, nil, "rev-parse", "--show-object-format")
+	if err != nil {
+		return nil, err
+	}
+	var known bool
+	if t.objectSize, known = objectSizes[strings.TrimSpace(string(format))]; !known {
+		return nil, fmt.Errorf("the copy's repository has the object format %q", strings.TrimSpace(string(format)))
 	}
 	if err := t.stage(ctx); err != nil {
 		return nil, err
 	}
-	var err error
 	if t.files, t.dirs, err = t.read(); err != nil {
 		return nil, err
 	}
-	if t.index, err = t.staged(ctx); err != nil {
+	if t.index, err = t.staged(); err != nil {
+		return nil, fmt.Errorf("reading the copy's index: %w", err)
+	}
+	if t.repository, err = t.readRepository(); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -163,17 +178,26 @@ func writeFile(path string, content []byte, mode fs.FileMode) error {
 	return nil
 }
 
+// git runs git on the copy's own repository and work tree, whatever its
+// config says. Restore makes the repository again before it runs git, but a
+// process the run did not stop can remove it after that: git would then find
+// a repository above the copy, and stage would write that repository's index.
+func (t *tree) git(ctx context.Context, input []byte, args ...string) ([]byte, error) {
+	env := setEnv(setEnv(t.run.env, "GIT_DIR", filepath.Join(t.dir, ".git")), "GIT_WORK_TREE", t.dir)
+	return gitInput(ctx, t.dir, env, input, args...)
+}
+
 // stage makes the copy's index hold the checkout's tracked files and no other.
 func (t *tree) stage(ctx context.Context) error {
 	_ = os.Remove(filepath.Join(t.dir, ".git", "index"))
 	paths := []byte(strings.Join(t.run.tracked, "\x00"))
-	_, err := gitInput(ctx, t.dir, t.run.env, paths, "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul")
+	_, err := t.git(ctx, paths, "add", "-f", "--pathspec-from-file=-", "--pathspec-file-nul")
 	return err
 }
 
-func (t *tree) staged(ctx context.Context) ([sha256.Size]byte, error) {
-	out, err := gitOutput(ctx, t.dir, t.run.env, "ls-files", "-z", "--stage")
-	return sha256.Sum256(out), err
+// staged returns the sum of what git reads from the copy's index.
+func (t *tree) staged() ([sha256.Size]byte, error) {
+	return readIndex(filepath.Join(t.dir, ".git", "index"), t.objectSize)
 }
 
 // read walks the copy and returns every file and symbolic link outside .git,
@@ -239,16 +263,73 @@ func (t *tree) read() (files map[string]entry, dirs map[string]fs.FileMode, err 
 		return nil
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading %s: %w", t.dir, err)
+		return nil, nil, fmt.Errorf("reading the copy: %w", err)
 	}
 	return files, dirs, nil
 }
 
+// readRepository returns every path under the copy's .git but the index: a
+// directory by its mode, a file or link by its mode and sum. It fails when a
+// path cannot be read, and returns nil when .git is not a directory.
+func (t *tree) readRepository() (map[string]entry, error) {
+	root := filepath.Join(t.dir, ".git")
+	if info, err := os.Lstat(root); err != nil || !info.IsDir() {
+		return nil, err //nolint:wrapcheck // the caller wraps it
+	}
+	held := map[string]entry{}
+	err := filepath.WalkDir(root, func(at string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, at)
+		if err != nil {
+			return err //nolint:wrapcheck // the caller wraps it
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "index" {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err //nolint:wrapcheck // the caller wraps it
+		}
+		e := entry{mode: info.Mode()}
+		switch {
+		case info.Mode()&fs.ModeSymlink != 0:
+			target, err := os.Readlink(at)
+			if err != nil {
+				return err //nolint:wrapcheck // the caller wraps it
+			}
+			e.sum = sha256.Sum256([]byte(target))
+		case info.Mode().IsRegular():
+			content, err := os.ReadFile(at)
+			if err != nil {
+				return err //nolint:wrapcheck // the caller wraps it
+			}
+			e.sum = sha256.Sum256(content)
+		}
+		held[rel] = e
+		return nil
+	})
+	return held, err //nolint:wrapcheck // the caller wraps it
+}
+
 // restore holds the copy to what was copied. It returns the paths that
 // differed, each restored from the checkout, removed, or given back its copied
-// mode, with .git/index when it staged the index again. It fails when the
-// copy cannot be made the same again: a later run would judge another tree.
-func (t *tree) restore(ctx context.Context) (differed []string, err error) {
+// mode, with .git when it made the copy's repository again and .git/index
+// when it staged the index again. It fails when the copy cannot be made the
+// same again, since a later run would judge another tree, and every failure
+// reads "<dir> cannot be restored: <cause>".
+func (t *tree) restore(ctx context.Context) ([]string, error) {
+	differed, err := t.putBack(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s cannot be restored: %w", t.dir, err)
+	}
+	return differed, nil
+}
+
+// putBack does restore's work and returns a failure without restore's prefix.
+func (t *tree) putBack(ctx context.Context) (differed []string, err error) {
 	// Modes come first, each directory before what it holds: a directory left
 	// without read or search permission cannot be walked, one without write
 	// permission refuses the removal or making of each entry it holds, and a
@@ -267,7 +348,7 @@ func (t *tree) restore(ctx context.Context) (differed []string, err error) {
 		at := filepath.Join(t.dir, filepath.FromSlash(name))
 		info, err := os.Lstat(at)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("restoring %s: %w", t.dir, err)
+			return nil, fmt.Errorf("giving back its modes: %w", err)
 		}
 		if err != nil || !info.IsDir() {
 			gone[name] = true
@@ -276,11 +357,13 @@ func (t *tree) restore(ctx context.Context) (differed []string, err error) {
 		if info.Mode() != t.dirs[name] {
 			differed = append(differed, name)
 			if err := os.Chmod(at, t.dirs[name]); err != nil {
-				return nil, fmt.Errorf("restoring %s: %w", t.dir, err)
+				return nil, fmt.Errorf("giving back its modes: %w", err)
 			}
 		}
 	}
-	for name, e := range t.files {
+	// Paths are taken in order, so a failure names the same path run after run.
+	for _, name := range slices.Sorted(maps.Keys(t.files)) {
+		e := t.files[name]
 		if !e.mode.IsRegular() || gone[path.Dir(name)] {
 			continue
 		}
@@ -288,7 +371,7 @@ func (t *tree) restore(ctx context.Context) (differed []string, err error) {
 		if info, err := os.Lstat(at); err == nil && info.Mode().IsRegular() && info.Mode() != e.mode {
 			differed = append(differed, name)
 			if err := os.Chmod(at, e.mode.Perm()); err != nil {
-				return nil, fmt.Errorf("restoring %s: %w", t.dir, err)
+				return nil, fmt.Errorf("giving back its modes: %w", err)
 			}
 		}
 	}
@@ -296,13 +379,13 @@ func (t *tree) restore(ctx context.Context) (differed []string, err error) {
 	if err != nil {
 		return nil, err
 	}
-	for name, e := range now {
+	for _, name := range slices.Sorted(maps.Keys(now)) {
 		if want, ok := t.files[name]; !ok {
 			differed = append(differed, name)
 			if err := removeAll(filepath.Join(t.dir, filepath.FromSlash(name))); err != nil {
 				return nil, err
 			}
-		} else if e != want {
+		} else if now[name] != want {
 			differed = append(differed, name)
 		}
 	}
@@ -310,6 +393,18 @@ func (t *tree) restore(ctx context.Context) (differed []string, err error) {
 		if _, ok := now[name]; !ok {
 			differed = append(differed, name)
 		}
+	}
+	// A repository a test changed, removed, or left unreadable is made again
+	// and staged below, since its config can change what git in the copy sees.
+	// The removal pass above has already removed a .git that is not a directory.
+	if repository, err := t.readRepository(); err != nil || !maps.Equal(repository, t.repository) {
+		if err := removeAll(filepath.Join(t.dir, ".git")); err != nil {
+			return nil, err
+		}
+		if _, err := t.git(ctx, nil, "init", "-q"); err != nil {
+			return nil, err
+		}
+		differed = append(differed, ".git")
 	}
 	slices.Sort(differed)
 	differed = slices.Compact(differed)
@@ -329,11 +424,8 @@ func (t *tree) restore(ctx context.Context) (differed []string, err error) {
 			return nil, err
 		}
 	}
-	index, err := t.staged(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if index != t.index {
+	// An index git cannot read, or one a test changed, is staged again.
+	if index, err := t.staged(); err != nil || index != t.index {
 		differed = append(differed, ".git/index")
 		if err := t.stage(ctx); err != nil {
 			return nil, err
@@ -346,15 +438,23 @@ func (t *tree) restore(ctx context.Context) (differed []string, err error) {
 	if err != nil {
 		return nil, err
 	}
-	index, err = t.staged(ctx)
+	// A held path unlike what was copied names the cause, which the index,
+	// staged from the copy's files, would otherwise hide.
+	if len(now) == len(t.files) {
+		if err := t.unlike(now); err != nil {
+			return nil, err
+		}
+	}
+	index, err := t.staged()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading the copy's index: %w", err)
 	}
-	if index != t.index || len(now) != len(t.files) || !maps.Equal(nowDirs, t.dirs) {
-		return nil, fmt.Errorf("%s cannot be restored to what was copied (%s)", t.dir, strings.Join(differed, " "))
+	repository, err := t.readRepository()
+	if err != nil {
+		return nil, fmt.Errorf("reading the copy's repository: %w", err)
 	}
-	if err := t.unlike(now); err != nil {
-		return nil, err
+	if index != t.index || len(now) != len(t.files) || !maps.Equal(nowDirs, t.dirs) || !maps.Equal(repository, t.repository) {
+		return nil, fmt.Errorf("the copy still differs from what was copied after putting back %s", strings.Join(differed, " "))
 	}
 	return differed, nil
 }
@@ -373,13 +473,13 @@ func (t *tree) unlike(now map[string]entry) error {
 		case ok && got == want:
 			continue
 		case ok && got.mode.IsRegular() && got.sum == [sha256.Size]byte{}:
-			return fmt.Errorf("%s cannot be restored: %s cannot be read", t.dir, name)
+			return fmt.Errorf("%s cannot be read", name)
 		case !t.checkoutHolds(name, want):
-			return fmt.Errorf("%s cannot be restored: %s is not what was copied, so the checkout changed during the run", t.dir, name)
+			return fmt.Errorf("%s is not what was copied, so the checkout changed during the run", name)
 		case !ok:
-			return fmt.Errorf("%s cannot be restored: %s is gone after it was copied back, so a process the run did not stop removes it", t.dir, name)
+			return fmt.Errorf("%s is gone after it was copied back, so a process the run did not stop removes it", name)
 		default:
-			return fmt.Errorf("%s cannot be restored: %s is not what was copied back from the checkout, so a process the run did not stop changes it", t.dir, name)
+			return fmt.Errorf("%s is not what was copied back from the checkout, so a process the run did not stop changes it", name)
 		}
 	}
 	return nil

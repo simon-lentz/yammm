@@ -2,7 +2,9 @@ package main
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -11,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/internal/gittree"
 )
@@ -112,7 +115,8 @@ func TestTree_RestorePutsBackWhatWasCopied(t *testing.T) {
 	gittree.WriteFile(t, tree.dir, "new/deep/left.txt", []byte("left\n"), 0o600)  // a new directory
 	gittree.WriteFile(t, tree.dir, "m/left.go", []byte("package m\n"), 0o600)     // a new file beside copied ones
 	gittree.WriteFile(t, tree.dir, "ignored/cache.bin", []byte("cache\n"), 0o600) // a new file git ignores
-	want := []string{".git/index", "go.mod", "ignored", "m/left.go", "m/m.go", "m/m_test.go", "new", "untracked.txt"}
+	// The git add below writes an object to the repository as well as the index.
+	want := []string{".git", ".git/index", "go.mod", "ignored", "m/left.go", "m/m.go", "m/m_test.go", "new", "untracked.txt"}
 	if err := os.Remove(in("m/m_test.go")); err != nil {
 		t.Fatal(err)
 	}
@@ -180,6 +184,334 @@ func TestTree_RestoreFailsWhenTheCheckoutChanged(t *testing.T) {
 	}
 }
 
+// Every failure of restore starts by saying the copy cannot be restored, and
+// says it once, whatever step failed: putting a file back, reading the index,
+// or the last read.
+func TestTree_RestoreNamesTheCopyInEveryFailure(t *testing.T) {
+	t.Parallel()
+	rows := []struct {
+		name  string
+		unix  bool // the spoil needs a host whose directory modes bind a non-root user
+		spoil func(t *testing.T, tree *tree)
+		cause string
+		is    error // a cause the error wraps, or nil
+	}{
+		{"a file the checkout no longer holds", false, func(t *testing.T, tree *tree) {
+			t.Helper()
+			gittree.WriteFile(t, tree.dir, "m/m.go", []byte("package m\n\n// changed in the copy\n"), 0o600)
+			if err := os.Remove(filepath.Join(tree.run.checkout, "m", "m.go")); err != nil {
+				t.Fatal(err)
+			}
+		}, "copying the checkout: ", fs.ErrNotExist},
+		{"a copy whose directory cannot be read", true, func(t *testing.T, tree *tree) {
+			t.Helper()
+			above := filepath.Dir(tree.dir)
+			if err := os.Chmod(above, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(above, 0o700) }) //nolint:gosec // restoring the test's own directory
+		}, "giving back its modes: lstat ", fs.ErrPermission},
+		{"a file the checkout changed", false, func(t *testing.T, tree *tree) {
+			t.Helper()
+			gittree.WriteFile(t, tree.run.checkout, "m/m.go", []byte("package m\n\n// changed in the checkout\n"), 0o600)
+			gittree.WriteFile(t, tree.dir, "m/m.go", []byte("package m\n"), 0o600)
+		}, "m/m.go is not what was copied, so the checkout changed during the run", nil},
+	}
+	for _, tt := range rows {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.unix && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+				t.Skip("a directory's mode stops no read on Windows or for root")
+			}
+			tree := copied(t)
+			tt.spoil(t, tree)
+			differed, err := tree.restore(t.Context())
+			if err == nil {
+				t.Fatalf("restore returned %q, nil; want a failure", differed)
+			}
+			if differed != nil {
+				t.Errorf("restore returned %q with its failure, want no paths", differed)
+			}
+			prefix := tree.dir + " cannot be restored: "
+			if msg := err.Error(); !strings.HasPrefix(msg, prefix+tt.cause) || strings.Count(msg, "cannot be restored") != 1 {
+				t.Errorf("restore = %q, want it to start %q and say so once", msg, prefix+tt.cause)
+			}
+			if tt.is != nil && !errors.Is(err, tt.is) {
+				t.Errorf("restore = %v, which does not wrap %v", err, tt.is)
+			}
+		})
+	}
+}
+
+// A copy whose repository a test changed in any way gets it made again and
+// staged, so git in the copy, run as a later test runs it, sees the checkout's
+// tracked files; and git never reaches a repository above the copy.
+func TestTree_RestoreMakesTheCopysRepositoryAgain(t *testing.T) {
+	t.Parallel()
+	configured := func(setting string) func(repository string) error {
+		return func(repository string) error {
+			config, err := os.OpenFile(filepath.Join(repository, "config"), os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				return err
+			}
+			defer config.Close()
+			if _, err := config.WriteString("[core]\n\t" + setting + "\n"); err != nil {
+				return err
+			}
+			return os.Remove(filepath.Join(repository, "index"))
+		}
+	}
+	rows := []struct {
+		name  string
+		above bool // the copy sits inside another repository
+		unix  bool // the spoil needs a host whose directory modes bind a non-root user
+		spoil func(repository string) error
+	}{
+		{"removed", false, false, os.RemoveAll},
+		{"removed, inside another repository", true, false, os.RemoveAll},
+		{"made a file, inside another repository", true, false, func(repository string) error {
+			if err := os.RemoveAll(repository); err != nil {
+				return err
+			}
+			return os.WriteFile(repository, []byte("gitdir: elsewhere\n"), 0o600)
+		}},
+		{"emptied, inside another repository", true, false, func(repository string) error {
+			if err := os.RemoveAll(repository); err != nil {
+				return err
+			}
+			return os.Mkdir(repository, 0o750)
+		}},
+		{"without HEAD", false, false, func(repository string) error {
+			return os.Remove(filepath.Join(repository, "HEAD"))
+		}},
+		{"with another work tree in its config", false, false, configured("worktree = ../..")},
+		{"made bare in its config", false, false, configured("bare = true")},
+		{"with a file added", false, false, func(repository string) error {
+			return os.WriteFile(filepath.Join(repository, "ORIG_HEAD"), []byte("left\n"), 0o600)
+		}},
+		{"with an index lock left", false, false, func(repository string) error {
+			return os.WriteFile(filepath.Join(repository, "index.lock"), nil, 0o600)
+		}},
+		{"with a directory that cannot be read", false, true, func(repository string) error {
+			return os.Chmod(filepath.Join(repository, "refs"), 0o000)
+		}},
+	}
+	for _, tt := range rows {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.unix && (runtime.GOOS == "windows" || os.Geteuid() == 0) {
+				t.Skip("a directory's mode stops no read on Windows or for root")
+			}
+			tree := copied(t)
+			above := filepath.Dir(tree.dir)
+			if tt.above {
+				gitLines(t, above, "init", "-q")
+			}
+			if err := tt.spoil(filepath.Join(tree.dir, ".git")); err != nil {
+				t.Fatal(err)
+			}
+			differed, err := tree.restore(t.Context())
+			if err != nil {
+				t.Fatalf("restore: %v", err)
+			}
+			if want := []string{".git", ".git/index"}; !slices.Equal(differed, want) {
+				t.Errorf("restore reports %q, want %q", differed, want)
+			}
+			if tt.above {
+				if staged := gitLines(t, above, "ls-files"); len(staged) != 0 {
+					t.Errorf("the repository above the copy has %q staged", staged)
+				}
+			}
+			if tracked, want := gitLines(t, tree.dir, "ls-files"), gitLines(t, tree.run.checkout, "ls-files"); !slices.Equal(tracked, want) {
+				t.Errorf("git in the copy tracks %q, want the checkout's %q", tracked, want)
+			}
+			if top := gitLines(t, tree.dir, "rev-parse", "--is-inside-work-tree", "--show-prefix"); !slices.Equal(top, []string{"true"}) {
+				t.Errorf("git in the copy reads %q, want the copy the top of its work tree", top)
+			}
+			if again, err := tree.restore(t.Context()); err != nil || len(again) != 0 {
+				t.Errorf("the restored tree differs: %q, %v", again, err)
+			}
+		})
+	}
+}
+
+// An index a test changed, flags that git lists with no staged change among
+// them, is staged again, so git in the copy reads the index as copied; one git
+// wrote again with new stat data or at another version is left as it is.
+func TestTree_RestoreMakesTheIndexAgain(t *testing.T) {
+	t.Parallel()
+	rows := []struct {
+		name  string
+		spoil func(t *testing.T, tree *tree)
+		want  []string
+	}{
+		{"an index git cannot read", func(t *testing.T, tree *tree) {
+			t.Helper()
+			if err := os.WriteFile(filepath.Join(tree.dir, ".git", "index"), []byte("not an index\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{".git/index"}},
+		{"a file marked skip-worktree", func(t *testing.T, tree *tree) {
+			t.Helper()
+			gitLines(t, tree.dir, "update-index", "--skip-worktree", "m/m.go")
+		}, []string{".git/index"}},
+		{"a file marked assume-unchanged", func(t *testing.T, tree *tree) {
+			t.Helper()
+			gitLines(t, tree.dir, "update-index", "--assume-unchanged", "m/sub/s.txt")
+		}, []string{".git/index"}},
+		// git add -N writes the empty blob to the repository as well.
+		{"a file made intent-to-add", func(t *testing.T, tree *tree) {
+			t.Helper()
+			gitLines(t, tree.dir, "rm", "-q", "--cached", "m/sub/s.txt")
+			gitLines(t, tree.dir, "add", "-N", "m/sub/s.txt")
+		}, []string{".git", ".git/index"}},
+		{"an index git wrote again with new stat data", func(t *testing.T, tree *tree) {
+			t.Helper()
+			later := time.Now().Add(time.Hour)
+			if err := os.Chtimes(filepath.Join(tree.dir, "m", "m.go"), later, later); err != nil {
+				t.Fatal(err)
+			}
+			gitLines(t, tree.dir, "update-index", "-q", "--refresh")
+		}, nil},
+		{"an index written at version 4", func(t *testing.T, tree *tree) {
+			t.Helper()
+			gitLines(t, tree.dir, "update-index", "--index-version", "4")
+		}, nil},
+		{"an index at version 4 with a file marked skip-worktree", func(t *testing.T, tree *tree) {
+			t.Helper()
+			gitLines(t, tree.dir, "update-index", "--index-version", "4")
+			gitLines(t, tree.dir, "update-index", "--skip-worktree", "m/sub/s.txt")
+		}, []string{".git/index"}},
+		// A split index writes its shared part to the repository.
+		{"an index split", func(t *testing.T, tree *tree) {
+			t.Helper()
+			gitLines(t, tree.dir, "update-index", "--split-index")
+		}, []string{".git", ".git/index"}},
+	}
+	for _, tt := range rows {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tree := copied(t)
+			tt.spoil(t, tree)
+			differed, err := tree.restore(t.Context())
+			if err != nil {
+				t.Fatalf("restore: %v", err)
+			}
+			if !slices.Equal(differed, tt.want) {
+				t.Errorf("restore reports %q, want %q", differed, tt.want)
+			}
+			tracked := gitLines(t, tree.dir, "ls-files")
+			for _, line := range gitLines(t, tree.dir, "ls-files", "-v") {
+				if line != "H" && !slices.Contains(tracked, line) {
+					t.Errorf("git in the copy tags a file %q, want every file H", line)
+				}
+			}
+			if staged := gitLines(t, tree.dir, "diff", "--cached", "--name-only"); !slices.Equal(staged, tracked) {
+				t.Errorf("git in the copy stages %q, want every tracked file %q", staged, tracked)
+			}
+			if again, err := tree.restore(t.Context()); err != nil || len(again) != 0 {
+				t.Errorf("the restored tree differs: %q, %v", again, err)
+			}
+		})
+	}
+}
+
+// Every prefix of an index git wrote, at version 2 and at version 4, is
+// refused without a panic, and the whole one reads as the copy's index.
+func TestReadIndex_RefusesEachPrefixOfAnIndex(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{"2", "4"} {
+		t.Run("version "+version, func(t *testing.T) {
+			t.Parallel()
+			tree := copied(t)
+			gitLines(t, tree.dir, "update-index", "--index-version", version)
+			gitLines(t, tree.dir, "update-index", "--skip-worktree", "m/m.go")
+			content, err := os.ReadFile(filepath.Join(tree.dir, ".git", "index"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			whole, err := indexSum(content, tree.objectSize)
+			if err != nil {
+				t.Fatalf("indexSum of the whole index: %v", err)
+			}
+			if whole == tree.index {
+				t.Error("an index with a file marked skip-worktree reads as the copy's")
+			}
+			// An index ends in a checksum of objectSize bytes, so a prefix one
+			// checksum short of the whole is the last that holds every entry.
+			for n := range len(content) - tree.objectSize {
+				if _, err := indexSum(content[:n], tree.objectSize); err == nil {
+					t.Fatalf("indexSum of the first %d of %d bytes = nil error", n, len(content))
+				}
+			}
+		})
+	}
+}
+
+// A repository is held as git init made it from its template: a link there
+// is held by its target, and a repository made again unlike the one held,
+// here from a template that gained a file, fails the restore.
+func TestTree_RestoreHoldsTheRepositoryGitInitMade(t *testing.T) {
+	t.Parallel()
+	templated := func(t *testing.T) (*tree, string) {
+		t.Helper()
+		base := copied(t)
+		template := t.TempDir()
+		gittree.WriteFile(t, template, "description", []byte("template\n"), 0o600)
+		r := *base.run
+		r.env = setEnv(r.env, "GIT_TEMPLATE_DIR", template)
+		tree, err := newTree(t.Context(), &r, filepath.Join(t.TempDir(), "w2"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tree, template
+	}
+	t.Run("a link retargeted", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("a link needs a privilege on Windows")
+		}
+		base := copied(t)
+		template := t.TempDir()
+		if err := os.Symlink("held", filepath.Join(template, "link")); err != nil {
+			t.Fatal(err)
+		}
+		r := *base.run
+		r.env = setEnv(r.env, "GIT_TEMPLATE_DIR", template)
+		tree, err := newTree(t.Context(), &r, filepath.Join(t.TempDir(), "w2"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(tree.dir, ".git", "link")
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("other", link); err != nil {
+			t.Fatal(err)
+		}
+		differed, err := tree.restore(t.Context())
+		if want := []string{".git", ".git/index"}; err != nil || !slices.Equal(differed, want) {
+			t.Errorf("restore = %q, %v; want %q", differed, err, want)
+		}
+		if target, err := os.Readlink(link); err != nil || target != "held" {
+			t.Errorf("the link reads %q, %v; want held", target, err)
+		}
+	})
+	t.Run("a template that gained a file", func(t *testing.T) {
+		t.Parallel()
+		tree, template := templated(t)
+		gittree.WriteFile(t, template, "extra", []byte("extra\n"), 0o600)
+		if err := os.RemoveAll(filepath.Join(tree.dir, ".git")); err != nil {
+			t.Fatal(err)
+		}
+		_, err := tree.restore(t.Context())
+		want := tree.dir + " cannot be restored: the copy still differs from what was copied after putting back .git .git/index"
+		if err == nil || err.Error() != want {
+			t.Errorf("restore = %v, want %q", err, want)
+		}
+	})
+}
+
 // A path written while the copy is restored, as by a process a test left
 // running outside its group, leaves the copy unlike what was copied, and
 // restore fails.
@@ -187,7 +519,7 @@ func TestTree_RestoreFailsWhileAWriterAddsFiles(t *testing.T) {
 	t.Parallel()
 	tree := copied(t)
 	gittree.WriteFile(t, tree.dir, "m/m.go", []byte("package m\n"), 0o600)
-	stop, done := make(chan struct{}), make(chan struct{})
+	stop, started, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
 		for i := 0; ; i++ {
@@ -196,14 +528,24 @@ func TestTree_RestoreFailsWhileAWriterAddsFiles(t *testing.T) {
 				return
 			default:
 				_ = os.WriteFile(filepath.Join(tree.dir, fmt.Sprintf("w%d.txt", i)), nil, 0o600)
+				if i == 0 {
+					close(started)
+				}
 			}
 		}
 	}()
+	<-started
 	differed, err := tree.restore(t.Context())
 	close(stop)
 	<-done
-	if err == nil || !strings.Contains(err.Error(), "cannot be restored") {
-		t.Errorf("restore returned %q, %v; want an error that says the copy cannot be restored", differed, err)
+	// Windows refuses to remove a file the writer holds open, so restore can
+	// fail there before its last read.
+	want := tree.dir + " cannot be restored: the copy still differs from what was copied after putting back "
+	if runtime.GOOS == "windows" {
+		want = tree.dir + " cannot be restored: "
+	}
+	if err == nil || !strings.HasPrefix(err.Error(), want) || strings.Count(err.Error(), "cannot be restored") != 1 {
+		t.Errorf("restore returned %q, %v; want an error that starts %q", differed, err, want)
 	}
 }
 
@@ -546,8 +888,8 @@ func TestTree_UnlikeNamesTheCauseFromTheCheckout(t *testing.T) {
 			switch {
 			case tt.want == "" && err != nil:
 				t.Errorf("unlike = %v, want nil", err)
-			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
-				t.Errorf("unlike = %v, want an error holding %q", err, tt.want)
+			case tt.want != "" && (err == nil || !strings.HasPrefix(err.Error(), tt.want)):
+				t.Errorf("unlike = %v, want an error that starts %q", err, tt.want)
 			}
 		})
 	}
@@ -559,7 +901,7 @@ func TestTree_UnlikeNamesTheCauseFromTheCheckout(t *testing.T) {
 		first := slices.Sorted(maps.Keys(tree.files))[0]
 		for range 20 {
 			err := tree.unlike(map[string]entry{})
-			if err == nil || !strings.Contains(err.Error(), ": "+first+" is gone after it was copied back") {
+			if err == nil || !strings.HasPrefix(err.Error(), first+" is gone after it was copied back") {
 				t.Fatalf("unlike = %v, want the first path in order, %s, named", err, first)
 			}
 		}

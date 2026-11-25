@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -759,6 +760,47 @@ func TestRun_ExitsOneWhenAMutantCannotBeJudged(t *testing.T) {
 	r.wantStderr(t, "1 row(s) are ERROR")
 	if log := r.log(t, "w01"); !strings.Contains(log, "data.txt is not what was copied, so the checkout changed during the run") {
 		t.Errorf("the log does not say why:\n%s", log)
+	} else if !strings.Contains(log, "after the run before the change: ") {
+		t.Errorf("the log does not say at which step the copy could not be restored:\n%s", log)
+	}
+}
+
+// A worker whose copy cannot be restored before a mutant judges it ERROR, and
+// the log names that step.
+func TestWorker_NamesTheStepBeforeTheMutantWhenTheCopyCannotBeRestored(t *testing.T) {
+	t.Parallel()
+	tree := copied(t)
+	gittree.WriteFile(t, tree.run.checkout, "m/m.go", []byte("package m\n\n// changed in the checkout\n"), 0o600)
+	gittree.WriteFile(t, tree.dir, "m/m.go", []byte("package m\n"), 0o600)
+	w := &worker{number: 1, tree: tree, out: io.Discard}
+	j := w.judge(t.Context(), mutant{}, "asis")
+	if want := "mutants: before the mutant: " + tree.dir + " cannot be restored: "; j.verdict != verdictError || !strings.HasPrefix(j.log.String(), want) {
+		t.Errorf("judge = %s with log %q, want ERROR with a log that starts %q", j.verdict, j.log.String(), want)
+	}
+}
+
+// A mutant whose tests change the checkout reads ERROR, and the log names the
+// step after the mutant, since the run before the change restored the copy.
+func TestRun_NamesTheStepAfterTheMutantWhenTheCopyCannotBeRestored(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := newFixture(t)
+	f.write("data.txt", "one\n")
+	f.write("w/w.go", "package w\n\nconst W = 1\n")
+	f.write("w/w_test.go", "package w\n\nimport (\n\t\"os\"\n\t\"path/filepath\"\n\t\"testing\"\n)\n\nfunc TestWrites(t *testing.T) {\n"+
+		"\tif W == 1 {\n\t\treturn\n\t}\n"+
+		"\tfor _, name := range []string{\"../data.txt\", filepath.Join(os.Getenv(\"FX_CHECKOUT\"), \"data.txt\")} {\n"+
+		"\t\tif err := os.WriteFile(name, []byte(\"two\\n\"), 0o600); err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t}\n}\n")
+	f.index()
+	f.env = []string{"FX_CHECKOUT=" + f.checkout}
+	f.mutant("w01", "w/w.go", "W = 1", "W = 2", "./w/")
+
+	r := f.run()
+
+	r.wantCode(t, 1)
+	r.wantVerdicts(t, map[string]string{"w01": verdictError})
+	if log := r.log(t, "w01"); !strings.Contains(log, "mutants: after the mutant: ") || !strings.Contains(log, "data.txt is not what was copied, so the checkout changed during the run") {
+		t.Errorf("the log does not say at which step and why the copy could not be restored:\n%s", log)
 	}
 }
 
