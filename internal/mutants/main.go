@@ -23,11 +23,24 @@
 //     TMPDIR's last component "T" spelled "t", the same directory only on a
 //     volume that folds case; a host without one records NOFOLD.
 //   - pkgs, optional: the packages to judge by, as go test takes them, each
-//     word matching a package of the checkout. Without it the set is the
-//     package in the file's directory, every tracked package whose code or
-//     tests import it, and ./docs, which holds the documentation's own tests;
-//     a file in a directory that holds no tracked package, as a file a package
-//     embeds from below it, needs pkgs. ./diag's TestModuleCitesRegisteredCodes
+//     word matching a package of the checkout. Without it the set holds
+//     ./docs, which holds the documentation's own tests, and the packages
+//     whose test runs compile the file. A file a tracked package's build
+//     takes, as a source or an embedded file, is compiled by that package and
+//     by every tracked package whose go test run links it, through its code,
+//     its tests or what either imports at any depth. A file only a package's
+//     tests take, as a _test.go file, and a file no build takes in a
+//     package's directory, as a fixture its tests read, is judged by that
+//     package alone. go list -test decides what each build takes and links,
+//     once under each configuration (see below), so a package that links the
+//     file only under a build tag is a member; but a mutant is judged under
+//     one configuration, and that package's tagged tests run only when it is
+//     that tag's. A caller's GOFLAGS that a configuration's go command
+//     refuses, as -covermode=set beside -race, refuses a run that computes a
+//     set. A file outside every package's directory that no build takes
+//     needs pkgs, and a package that reaches the file only through a program
+//     a test builds and runs is no member: name it in pkgs. ./diag's
+//     TestModuleCitesRegisteredCodes
 //     judges a code a comment or a Markdown file cites, so a mutant of a
 //     citation in docs/*.md names ./diag in pkgs: the set leaves it out.
 //

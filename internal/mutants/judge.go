@@ -183,6 +183,10 @@ func (t *testRun) classify(records map[string]record) {
 			state = packageNoResult
 		case result == "skip" && !ran:
 			state = packageNoFiles
+		// Under -cover go test passes a package with no test files and with
+		// statements, with a coverage line, and starts no binary.
+		case result == "pass" && !ran && len(pkg.TestGoFiles)+len(pkg.XTestGoFiles) == 0:
+			state = packageNoFiles
 		case result == "fail" && !started:
 			state = packageNotStarted
 			if t.tally.FailedBuild(pkg.ImportPath) != "" {
@@ -386,7 +390,7 @@ func (w *worker) compiled(entries []listed, file string) (compiled, known bool) 
 		}
 		// A package that fails to load still holds the file: a mutant that
 		// brings a broken file into the build is then judged, and reads NOBUILD.
-		if names(e, e.GoFiles, e.CgoFiles, e.SFiles, e.CFiles, e.CXXFiles, e.HFiles, e.SysoFiles, e.MFiles, e.FFiles, e.SwigFiles, e.SwigCXXFiles, e.EmbedFiles, e.InvalidGoFiles) {
+		if names(e, e.buildFiles()) {
 			holders = append(holders, e.ImportPath)
 		}
 		if names(e, e.TestGoFiles, e.XTestGoFiles, e.IgnoredGoFiles, e.IgnoredOtherFiles) {

@@ -77,7 +77,7 @@ func TestRun_RefusesEveryMalformedMutantByName(t *testing.T) {
 		"mutant pkgs-no-go-file has a pkgs file that names ./doc, a directory with no Go file\n",
 		"mutant pkgs-outside has a pkgs file that names fmt, which is no package directory of the checkout\n",
 		"mutant pkgs-word-matching-nothing has a pkgs file whose word ./doc/... matches no package\n",
-		`mutant no-package-and-no-pkgs names "doc/notes.txt", whose directory is no tracked Go package`,
+		`mutant no-package-and-no-pkgs names "doc/notes.txt", which no tracked Go package's build or tests take, in a directory that holds none`,
 	}
 	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
 		if err := os.Chmod(filepath.Join(f.mutant("unreadable-search", "m/m.go", "a + b", "a - b", "./m/"), "search"), 0); err != nil {

@@ -426,8 +426,8 @@ func TestRun_TakesFourWorkersByDefault(t *testing.T) {
 }
 
 // A file's set holds every tracked package that imports it from its code, its
-// tests or its external tests, and ./docs; an importer in a directory git
-// ignores is no member.
+// tests or its external tests, a package with no test files among them, and
+// ./docs; an importer in a directory git ignores is no member.
 func TestRun_ComputesTheSetFromEveryTrackedImporter(t *testing.T) {
 	t.Parallel()
 	skipJudgingOnWindows(t)
@@ -450,6 +450,154 @@ func TestRun_ComputesTheSetFromEveryTrackedImporter(t *testing.T) {
 	r.wantCode(t, 0)
 	if got := r.rows(t)["m01/asis"]["packages"]; got != "./c ./docs ./it ./m ./xt" {
 		t.Errorf("the computed set is %q, want ./c ./docs ./it ./m ./xt", got)
+	}
+}
+
+// A file's set holds every tracked package whose go test run builds the file's
+// package, at any depth: b's test reaches m only through a, and kills a mutant
+// m's own test passes. c's test does not link m, so c is no member.
+func TestRun_ComputesTheSetFromEveryTestBuildThatLinksTheFile(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := newFixture(t)
+	f.write("m/twice.go", "package m\n\nfunc Twice(a int) int { return a + a }\n")
+	f.write("a/a.go", "package a\n\nimport \"example.com/fx/m\"\n\nfunc Quad(a int) int { return m.Twice(m.Twice(a)) }\n")
+	f.write("b/b.go", "package b\n")
+	f.write("b/b_test.go", "package b\n\nimport (\n\t\"testing\"\n\n\t\"example.com/fx/a\"\n)\n\n"+
+		"func TestQuad(t *testing.T) {\n\tif a.Quad(1) != 4 {\n\t\tt.Fatal(\"Quad(1) is wrong\")\n\t}\n}\n")
+	f.write("c/c.go", "package c\n")
+	f.write("c/c_test.go", "package c\n\nimport \"testing\"\n\nfunc TestC(t *testing.T) {}\n")
+	f.index()
+	f.mutant("m01", "m/twice.go", "a + a", "a * a", "")
+
+	r := f.run()
+
+	r.wantCode(t, 0)
+	rows := r.wantVerdicts(t, map[string]string{"m01": verdictKilled})
+	if got := rows["m01/asis"]["packages"]; got != "./a ./b ./m" {
+		t.Errorf("the computed set is %q, want ./a ./b ./m", got)
+	}
+	if got := rows["m01/asis"]["failing tests"]; got != "TestQuad" {
+		t.Errorf("m01 names the failing tests %q, want TestQuad", got)
+	}
+}
+
+// Each computed set holds the packages whose test runs compile the file, as
+// the go command builds them, and each set is read once whatever else the run
+// computes.
+func TestRun_ComputesEachSetFromWhatTheTestRunsCompile(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := newFixture(t)
+	xtest := func(pkg, imports string) string {
+		return "package " + pkg + "_test\n\nimport (\n\t\"testing\"\n" + imports + ")\n\nfunc TestX(t *testing.T) {}\n"
+	}
+	// it's internal test links m and its external test, listed after it, does not.
+	f.write("it/it.go", "package it\n")
+	f.write("it/it_test.go", "package it\n\nimport \"example.com/fx/m\"\n\nvar _ = m.Add\n")
+	f.write("it/x_test.go", xtest("it", ""))
+	// tg's only test, behind the mermaid tag, links a file of m behind that tag.
+	f.write("m/m_mermaid.go", "//go:build mermaid\n\npackage m\n\nfunc Mermaid() int { return 1 }\n")
+	f.write("tg/tg.go", "package tg\n")
+	f.write("tg/tg_test.go", "//go:build mermaid\n\npackage tg\n\nimport \"example.com/fx/m\"\n\nvar _ = m.Mermaid\n")
+	// p's test binary compiles t again, as "t [p.test]": t imports p, which has an internal test.
+	f.write("p/p.go", "package p\n\nconst P = 1\n")
+	f.write("p/p_test.go", "package p\n")
+	f.write("p/x_test.go", xtest("p", "\n\t_ \"example.com/fx/t2\"\n"))
+	f.write("t/t.go", "package t\n\nimport \"example.com/fx/p\"\n\nconst T = p.P\n")
+	f.write("t2/t2.go", "package t2\n\nimport \"example.com/fx/t\"\n\nconst T2 = t.T\n")
+	// nt has no test files and no importer.
+	f.write("nt/nt.go", "package nt\n")
+	// foo's external test package is spelled as the real package foo_test is.
+	f.write("foo/foo.go", "package foo\n")
+	f.write("foo/x_test.go", xtest("foo", "\n\t_ \"example.com/fx/foo\"\n"))
+	f.write("foo_test/ft.go", "package ft\n\nconst F = 1\n")
+	// r imports q. Only q's test binary compiles q's test file and the file it
+	// embeds, and no build takes loose.txt, which only q's tests can read.
+	f.write("q/q.go", "package q\n\nconst Q = 1\n")
+	f.write("q/q_test.go", "package q\n\nimport _ \"embed\"\n\n//go:embed tdata.txt\nvar tdata string\n")
+	f.write("q/tdata.txt", "t\n")
+	f.write("q/loose.txt", "l\n")
+	f.write("r/r.go", "package r\n\nimport \"example.com/fx/q\"\n\nconst R = q.Q\n")
+	// emb embeds a file of the directory that holds the package sub, whose
+	// build does not take it.
+	f.write("emb/emb.go", "package emb\n\nimport _ \"embed\"\n\n//go:embed sub/data.txt\nvar Data string\n")
+	f.write("emb/sub/sub.go", "package sub\n")
+	f.write("emb/sub/data.txt", "data\n")
+	// te's test embeds a fixture; te2 imports te.
+	f.write("te/te.go", "package te\n")
+	f.write("te/te_test.go", "package te\n\nimport _ \"embed\"\n\n//go:embed testdata/g.txt\nvar golden string\n")
+	f.write("te/testdata/g.txt", "g\n")
+	f.write("te2/te2.go", "package te2\n\nimport _ \"example.com/fx/te\"\n")
+	f.index()
+	want := map[string]string{
+		"m/m_mermaid.go":    "./it ./m ./tg",
+		"t/t.go":            "./p ./t ./t2",
+		"nt/nt.go":          "./nt",
+		"foo_test/ft.go":    "./foo_test",
+		"q/q_test.go":       "./q",
+		"q/tdata.txt":       "./q",
+		"q/loose.txt":       "./q",
+		"emb/sub/data.txt":  "./emb",
+		"te/testdata/g.txt": "./te",
+	}
+	ids := map[string]string{}
+	for file := range want {
+		id := strings.NewReplacer("/", "_", ".", "_").Replace(file)
+		ids[id] = file
+		f.mutant(id, file, "not in the file", "x", "")
+	}
+
+	r := f.run()
+
+	r.wantCode(t, 0)
+	rows := r.rows(t)
+	for id, file := range ids {
+		if got := rows[id+"/asis"]["packages"]; got != want[file] {
+			t.Errorf("the computed set of %s is %q, want %s", file, got, want[file])
+		}
+	}
+}
+
+// A run whose listing of the checkout's tests fails is refused, as one whose
+// listing of its packages fails.
+func TestRun_RefusesARunWhoseTestListingFails(t *testing.T) {
+	skipJudgingOnWindows(t)
+	goPath, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n\tif [ \"$a\" = -test ]; then echo 'no test listing here' >&2; exit 1; fi\ndone\nexec '" + goPath + "' \"$@\"\n"
+	gittree.WriteFile(t, bin, "go", []byte(script), 0o700)
+	t.Setenv("PATH", bin+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	f := newFixture(t)
+	f.mutant("m01", "m/m.go", "not in the file", "x", "")
+
+	r := f.run()
+
+	r.wantCode(t, 2)
+	r.wantStderr(t, "mutant m01 listing the checkout's tests under the default configuration: ")
+	r.wantStderr(t, "no test listing here")
+}
+
+// Under a caller's -cover, go test passes a main package with no test files
+// and starts no binary; the run reads it as having none and judges the mutant.
+func TestRun_JudgesUnderCoverAPackageWithNoTestFiles(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := newFixture(t)
+	f.env = append(f.env, "GOFLAGS=-mod=mod -cover")
+	f.write("cmd/q/main.go", "package main\n\nimport \"example.com/fx/m\"\n\nfunc main() { _ = m.Add(1, 2) }\n")
+	f.index()
+	f.mutant("m01", "m/m.go", "a + b", "a - b", "")
+
+	r := f.run()
+
+	r.wantCode(t, 0)
+	rows := r.wantVerdicts(t, map[string]string{"m01": verdictKilled})
+	if got := rows["m01/asis"]["packages"]; got != "./cmd/q ./m" {
+		t.Errorf("the computed set is %q, want ./cmd/q ./m", got)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -141,36 +142,42 @@ func readMutant(ctx context.Context, r *run, sets *packageSets, dir, id string) 
 
 // A listed is the part of a `go list -json` entry this program reads.
 type listed struct {
-	ImportPath     string
-	Dir            string
-	Name           string
-	GoFiles        []string
-	CgoFiles       []string
-	SFiles         []string
-	CFiles         []string
-	CXXFiles       []string
-	HFiles         []string
-	SysoFiles      []string
-	MFiles         []string
-	FFiles         []string
-	SwigFiles      []string
-	SwigCXXFiles   []string
-	EmbedFiles     []string
-	TestGoFiles    []string
-	XTestGoFiles   []string
-	InvalidGoFiles []string // files the build takes and cannot load
+	ImportPath   string
+	Dir          string
+	Name         string
+	GoFiles      []string
+	CgoFiles     []string
+	SFiles       []string
+	CFiles       []string
+	CXXFiles     []string
+	HFiles       []string
+	SysoFiles    []string
+	MFiles       []string
+	FFiles       []string
+	SwigFiles    []string
+	SwigCXXFiles []string
+	EmbedFiles   []string
+	TestGoFiles  []string
+	XTestGoFiles []string
+	// The files a package's tests embed, which its own test binary alone links.
+	TestEmbedFiles  []string
+	XTestEmbedFiles []string
+	InvalidGoFiles  []string // files the build takes and cannot load
 	// The files the host's build leaves out.
 	IgnoredGoFiles    []string
 	IgnoredOtherFiles []string
-	Imports           []string
-	TestImports       []string
-	XTestImports      []string
 	Deps              []string
 	Error             *struct{ Err string }
 }
 
+// buildFiles are the files go list reports e's build takes: its sources, the
+// files it embeds and the Go files it cannot load.
+func (e listed) buildFiles() []string {
+	return slices.Concat(e.GoFiles, e.CgoFiles, e.SFiles, e.CFiles, e.CXXFiles, e.HFiles, e.SysoFiles, e.MFiles, e.FFiles, e.SwigFiles, e.SwigCXXFiles, e.EmbedFiles, e.InvalidGoFiles)
+}
+
 // listFields are the fields of listed, as go list's -json flag takes them.
-const listFields = "ImportPath,Dir,Name,GoFiles,CgoFiles,SFiles,CFiles,CXXFiles,HFiles,SysoFiles,MFiles,FFiles,SwigFiles,SwigCXXFiles,EmbedFiles,TestGoFiles,XTestGoFiles,InvalidGoFiles,IgnoredGoFiles,IgnoredOtherFiles,Imports,TestImports,XTestImports,Deps,Error"
+const listFields = "ImportPath,Dir,Name,GoFiles,CgoFiles,SFiles,CFiles,CXXFiles,HFiles,SysoFiles,MFiles,FFiles,SwigFiles,SwigCXXFiles,EmbedFiles,TestGoFiles,XTestGoFiles,TestEmbedFiles,XTestEmbedFiles,InvalidGoFiles,IgnoredGoFiles,IgnoredOtherFiles,Deps,Error"
 
 // goList runs go list -e in dir and returns its entries. With -e the command
 // lists a package it cannot load, with its Error, where it would otherwise
@@ -197,17 +204,26 @@ func goList(ctx context.Context, dir string, env []string, args ...string) ([]li
 	}
 }
 
-// packageSets answers which packages judge a mutant: one listing of the
-// checkout for every mutant with no pkgs file, and one for each word of each
-// distinct pkgs file.
+// packageSets answers which packages judge a mutant. For the mutants with no
+// pkgs file it lists the checkout once, and once more with its tests under each
+// configuration; it lists each distinct pkgs file's words once.
 type packageSets struct {
 	run     *run
 	tracked []listed // the packages that hold a tracked Go file
-	loaded  bool
-	named   map[string][]string // a pkgs file's words, joined, to its packages
+	// links maps a tracked package's directory to the import path of every
+	// package a go test run of it links under some configuration. A package is
+	// none of its own dependencies, so one with no test files is missing from
+	// its own entry.
+	links map[string]map[string]bool
+	// holders maps a file to the import paths of the packages whose build
+	// takes it under some configuration, test variants among them, and
+	// testEmbeds to the directories of the packages whose tests embed it.
+	holders, testEmbeds map[string]map[string]bool
+	loaded              bool
+	named               map[string][]string // a pkgs file's words, joined, to its packages
 }
 
-// load lists the checkout's packages, once when the listing succeeds. A
+// load lists the checkout's packages, once when every listing succeeds. A
 // package with no tracked Go file, whose Go files git ignores once
 // scripts/packages.sh --check passes the checkout, is left out, as that script
 // leaves it out of the suite.
@@ -230,8 +246,56 @@ func (s *packageSets) load(ctx context.Context) error {
 			s.tracked = append(s.tracked, e)
 		}
 	}
+	s.links, s.holders, s.testEmbeds = map[string]map[string]bool{}, map[string]map[string]bool{}, map[string]map[string]bool{}
+	// A configuration's build tags and experiments decide which files a test
+	// run compiles, so a file only a tagged build holds reaches its judges
+	// through that configuration's listing alone.
+	for _, c := range configurations() {
+		args := slices.Concat([]string{"-test"}, c.flags, []string{"./..."})
+		builds, err := goList(ctx, s.run.checkout, c.environment(s.run.env), args...)
+		if err != nil {
+			return fmt.Errorf("listing the checkout's tests under the %s configuration: %w", c.name, err)
+		}
+		for _, e := range builds {
+			if !dirs[e.Dir] {
+				continue
+			}
+			for _, dep := range e.Deps {
+				if path, ok := linkedPath(dep); ok {
+					addTo(s.links, e.Dir, path)
+				}
+			}
+			for _, name := range e.buildFiles() {
+				addTo(s.holders, filepath.Join(e.Dir, filepath.FromSlash(name)), e.ImportPath)
+			}
+			for _, name := range slices.Concat(e.TestEmbedFiles, e.XTestEmbedFiles) {
+				addTo(s.testEmbeds, filepath.Join(e.Dir, filepath.FromSlash(name)), e.Dir)
+			}
+		}
+	}
 	s.loaded = true
 	return nil
+}
+
+// linkedPath returns the import path of the package a go list -test
+// dependency names. go list spells a package that p's test binary compiles
+// again "q [p.test]", and p's external test package "p_test [p.test]", which
+// is no package of the checkout even where a real package has the path p_test.
+func linkedPath(dep string) (string, bool) {
+	path, binary, recompiled := strings.Cut(dep, " [")
+	if recompiled {
+		if tested, ok := strings.CutSuffix(path, "_test"); ok && binary == tested+".test]" {
+			return "", false
+		}
+	}
+	return path, true
+}
+
+func addTo(m map[string]map[string]bool, key, value string) {
+	if m[key] == nil {
+		m[key] = map[string]bool{}
+	}
+	m[key][value] = true
 }
 
 // dotPath spells a package directory of the checkout as go test takes it.
@@ -243,27 +307,55 @@ func (s *packageSets) dotPath(dir string) string {
 	return "./" + filepath.ToSlash(rel)
 }
 
-// computed returns the set of a mutant with no pkgs file: the file's package,
-// each tracked package that imports it from its code or its tests, and the
-// docs package, whose tests judge claims about packages it does not import.
+// computed returns the set of a mutant with no pkgs file: the docs package,
+// whose tests judge claims about packages it does not import, and the
+// packages whose test runs compile the file. A file a tracked package's build
+// takes is compiled by that package and by every tracked package whose go test
+// run links it under some configuration. A file only a package's tests take,
+// and a file no build takes in a package's directory, such as a fixture its
+// tests read, is judged by that package alone.
 func (s *packageSets) computed(ctx context.Context, file string) ([]string, error) {
 	if err := s.load(ctx); err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(s.run.checkout, filepath.Dir(file))
-	target := slices.IndexFunc(s.tracked, func(e listed) bool { return e.Dir == dir })
-	if target < 0 {
-		return nil, fmt.Errorf("names %q, whose directory is no tracked Go package, and has no pkgs file to say which packages judge it", file)
+	path := filepath.Join(s.run.checkout, filepath.FromSlash(file))
+	holders := map[string]bool{}
+	for _, e := range s.tracked {
+		if s.holders[path][e.ImportPath] {
+			holders[e.ImportPath] = true
+		}
 	}
-	path := s.tracked[target].ImportPath
+	tested := maps.Clone(s.testEmbeds[path])
+	if tested == nil {
+		tested = map[string]bool{}
+	}
+	if len(holders)+len(tested) == 0 {
+		dir := filepath.Dir(path)
+		if !slices.ContainsFunc(s.tracked, func(e listed) bool { return e.Dir == dir }) {
+			return nil, fmt.Errorf("names %q, which no tracked Go package's build or tests take, in a directory that holds none, and has no pkgs file to say which packages judge it", file)
+		}
+		tested[dir] = true
+	}
+	docs := filepath.Join(s.run.checkout, "docs")
 	var set []string
 	for _, e := range s.tracked {
-		if e.ImportPath == path || slices.Contains(e.Imports, path) || slices.Contains(e.TestImports, path) || slices.Contains(e.XTestImports, path) || e.Dir == filepath.Join(s.run.checkout, "docs") {
+		if holders[e.ImportPath] || tested[e.Dir] || e.Dir == docs || s.linksAny(e.Dir, holders) {
 			set = append(set, s.dotPath(e.Dir))
 		}
 	}
 	slices.Sort(set)
 	return set, nil
+}
+
+// linksAny reports whether a go test run of the package in dir links one of
+// paths.
+func (s *packageSets) linksAny(dir string, paths map[string]bool) bool {
+	for path := range paths {
+		if s.links[dir][path] {
+			return true
+		}
+	}
+	return false
 }
 
 // namedBy returns the words of a pkgs file after checking that each matches a

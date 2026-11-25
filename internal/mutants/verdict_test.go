@@ -201,10 +201,16 @@ func TestRun_GivesEachMutantItsVerdict(t *testing.T) {
 
 // classified returns a run over packages a, b and c after events and the
 // runners' records, which are keyed by package name.
-func classified(events []testjson.Event, records map[string]record, exit int) *testRun {
+// classified classifies packages a, b and c, each with a test file but those
+// noTests names.
+func classified(events []testjson.Event, records map[string]record, exit int, noTests ...string) *testRun {
 	run := &testRun{state: map[string]string{}, output: map[string][]printed{}, exit: exit}
 	for _, name := range []string{"a", "b", "c"} {
-		run.packages = append(run.packages, listed{ImportPath: name, Dir: name})
+		e := listed{ImportPath: name, Dir: name}
+		if !slices.Contains(noTests, name) {
+			e.TestGoFiles = []string{name + "_test.go"}
+		}
+		run.packages = append(run.packages, e)
 	}
 	for _, e := range events {
 		run.tally.Add(e)
@@ -225,6 +231,7 @@ func TestTestRun_ClassifiesAPackageByItsResultAndItsRecord(t *testing.T) {
 		events  []testjson.Event // package a's
 		record  *record          // package a's binary
 		goFails bool             // go test exits 1 though a's binary exited 0
+		noTests bool             // a has no test files
 		state   string
 		verdict string
 	}{
@@ -252,6 +259,9 @@ func TestTestRun_ClassifiesAPackageByItsResultAndItsRecord(t *testing.T) {
 		{name: "the binary did not start", events: []testjson.Event{{Action: "fail", Package: "a"}}, record: &record{StartError: "fork/exec a.test: no such file or directory"}, state: packageNotStarted, verdict: verdictNoBuild},
 		{name: "reported nothing", state: packageNoResult, verdict: verdictNoBuild},
 		{name: "a pass with no binary run", events: pass("a"), state: "", verdict: verdictError},
+		// Under -cover go test passes a package with no test files and with
+		// statements, and starts no binary.
+		{name: "a pass with no binary run and no test files", events: []testjson.Event{{Action: "pass", Package: "a"}}, noTests: true, state: packageNoFiles, verdict: verdictSurvived},
 		{name: "a pass from a binary that failed", events: pass("a"), record: &record{Exit: 1}, state: "", verdict: verdictError},
 		{name: "a printed failure left by a binary that exited 0 inside a test", events: []testjson.Event{{Action: "fail", Package: "a"}}, record: &ok, state: packageExited, verdict: verdictKilled},
 		{name: "a printed skip from a binary that ran and exited 0", events: []testjson.Event{{Action: "skip", Package: "a"}}, record: &ok, state: packageNoTests, verdict: verdictSurvived},
@@ -270,7 +280,11 @@ func TestTestRun_ClassifiesAPackageByItsResultAndItsRecord(t *testing.T) {
 		if r := row.record; r != nil && r.StartError == "" && r.Exit == 0 && !row.goFails {
 			exit = 0
 		}
-		run := classified(slices.Concat(row.events, others), records, exit)
+		var noTests []string
+		if row.noTests {
+			noTests = []string{"a"}
+		}
+		run := classified(slices.Concat(row.events, others), records, exit, noTests...)
 		if got := run.state["a"]; got != row.state {
 			t.Errorf("%s: the package %q, want %q", row.name, got, row.state)
 		}
