@@ -370,12 +370,22 @@ func (w *worker) listing(ctx context.Context, config configuration, patterns []s
 	return entries, err
 }
 
-// compiled reports whether a test binary among entries compiles file, a path
-// from the tree's root: the file is among the files go list reports a package
-// builds from, an embedded file below the package's directory and a test
-// package's test files among them, and a listed test binary links that
-// package. known reports whether go list names the file in an entry's files.
-func (w *worker) compiled(entries []listed, file string) (compiled, known bool) {
+// A reach is how far the go test run of a mutant's packages takes its file.
+type reach int
+
+const (
+	reachNone   reach = iota // no package the run builds holds the file
+	reachBuilt               // a package the run builds holds it, and no test binary links that package
+	reachTested              // a test binary of a named package links a package that holds it
+)
+
+// compiled returns how far the go test run of entries' patterns takes file, a
+// path from the tree's root, and whether go list names the file in an entry's
+// files. A package holds the file when it is among the files go list reports
+// the package builds from, an embedded file below its directory and a test
+// package's test files among them. go list -deps -test lists only packages go
+// test builds, so a holder is built.
+func (w *worker) compiled(entries []listed, file string) (r reach, known bool) {
 	path := filepath.Join(w.tree.dir, file)
 	// go list names each file from its package's directory.
 	names := func(e listed, lists ...[]string) bool {
@@ -397,14 +407,27 @@ func (w *worker) compiled(entries []listed, file string) (compiled, known bool) 
 			known = true
 		}
 	}
-	known = known || len(holders) > 0
-	// A test binary that fails to load still compiles the file, as one whose
-	// test file names no package does: the mutant is judged.
+	if len(holders) == 0 {
+		return reachNone, known
+	}
+	// A test binary that fails to load still links the file, as one whose test
+	// file names no package does: the mutant is judged.
 	for _, e := range entries {
-		if e.Name == "main" && strings.HasSuffix(e.ImportPath, ".test") &&
-			slices.ContainsFunc(holders, func(holder string) bool { return slices.Contains(e.Deps, holder) }) {
-			return true, true
+		if testBinary(entries, e) && slices.ContainsFunc(holders, func(holder string) bool { return slices.Contains(e.Deps, holder) }) {
+			return reachTested, true
 		}
 	}
-	return false, known
+	return reachBuilt, true
+}
+
+// testBinary reports whether e is the test binary of a package among entries:
+// a main package whose import path is that package's with ".test" added, in
+// that package's directory, where that package has test files. go list gives a
+// test binary its package's directory, and a command in a directory named like
+// a test binary its own.
+func testBinary(entries []listed, e listed) bool {
+	tested, ok := strings.CutSuffix(e.ImportPath, ".test")
+	return ok && e.Name == "main" && slices.ContainsFunc(entries, func(p listed) bool {
+		return p.ImportPath == tested && p.Dir == e.Dir && len(p.TestGoFiles)+len(p.XTestGoFiles) > 0
+	})
 }

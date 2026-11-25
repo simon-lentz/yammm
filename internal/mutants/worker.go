@@ -350,24 +350,34 @@ func (w *worker) judgeChanged(ctx context.Context, j *judgement, m mutant, confi
 }
 
 // configure chooses the configuration m is judged under: the first in which a
-// test binary of its packages compiles its file, in the tree as copied or,
-// failing that, in the tree that holds the mutant. A file go list does not
-// name is judged under the plain build when it is not Go or [goIgnores] holds
-// it to no package. ok is false when err is not nil, or when the file reads
-// NOTCOMPILED, which j then holds.
+// test binary of its packages links its file, in the tree as copied or, failing
+// that, in the tree that holds the mutant; when no configuration has one, the
+// first in which the go test run of its packages builds the file, in the same
+// order. A file go list does not name is judged under the plain build when it
+// is not Go or [goIgnores] holds it to no package. ok is false when err is not
+// nil, or when the file reads NOTCOMPILED, which j then holds.
 func (w *worker) configure(ctx context.Context, j *judgement, m mutant) (config configuration, ok bool, err error) {
 	known := filepath.Ext(m.file) == ".go" && !goIgnores(m.file)
+	var built *configuration
 	for _, changed := range []bool{false, true} {
-		config, found, named, err := w.compiledUnder(ctx, m, changed)
-		if err != nil || found {
-			return config, found, err
+		config, r, named, err := w.compiledUnder(ctx, m, changed)
+		switch {
+		case err != nil:
+			return config, false, err
+		case r == reachTested:
+			return config, true, nil
+		case r == reachBuilt && built == nil:
+			built = &config
 		}
 		if known = known || named; !known {
 			return configurations()[0], true, nil
 		}
 	}
+	if built != nil {
+		return *built, true, nil
+	}
 	j.verdict = verdictNotCompiled
-	fmt.Fprintf(&j.log, "no test binary of the named packages compiles %s on this host, before or after the change, under any configuration\n", m.file)
+	fmt.Fprintf(&j.log, "no go test run of the named packages compiles %s on this host, before or after the change, under any configuration\n", m.file)
 	return config, false, nil
 }
 
@@ -384,29 +394,33 @@ func goIgnores(file string) bool {
 	return false
 }
 
-// compiledUnder returns the first configuration under which a test binary of
-// m's packages compiles m's file, in the tree as copied or with the mutant
-// applied, and whether go list names the file under any.
-func (w *worker) compiledUnder(ctx context.Context, m mutant, changed bool) (config configuration, found, known bool, err error) {
+// compiledUnder returns how far the go test run of m's packages takes m's
+// file, in the tree as copied or with the mutant applied, with the first
+// configuration in which a test binary links it or, when none does, the first
+// in which the run builds it; and whether go list names the file under any.
+func (w *worker) compiledUnder(ctx context.Context, m mutant, changed bool) (config configuration, r reach, known bool, err error) {
 	if changed {
 		undo, _, mutateErr := w.tree.mutate(m)
 		if mutateErr != nil {
-			return config, false, false, mutateErr
+			return config, reachNone, false, mutateErr
 		}
 		defer func() { err = errors.Join(err, undo()) }()
 	}
 	for _, c := range configurations() {
 		entries, err := w.listing(ctx, c, m.packages, changed)
 		if err != nil {
-			return config, false, false, err
+			return config, reachNone, false, err
 		}
-		compiled, named := w.compiled(entries, m.file)
-		if compiled {
-			return c, true, true, nil
+		got, named := w.compiled(entries, m.file)
+		if got == reachTested {
+			return c, reachTested, true, nil
+		}
+		if got == reachBuilt && r == reachNone {
+			config, r = c, reachBuilt
 		}
 		known = known || named
 	}
-	return config, false, known, nil
+	return config, r, known, nil
 }
 
 // restore holds the tree to what was copied and notes in the log what differed.

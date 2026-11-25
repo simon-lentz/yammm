@@ -60,9 +60,6 @@ func TestRun_GivesEachMutantItsVerdict(t *testing.T) {
 		{"judged-by-an-importer", "m/m.go", "a + a }", "a + a + 1 }", "./q/", verdictKilled},
 		{"killed-beside-a-passing-package", "m/m.go", `"n=%s", s`, `"m=%s", s`, "./m/ ./q/", verdictKilled},
 		{"missing-import", "m/m_test.go", "import (\n\t\"fmt\"\n\t\"testing\"\n)", "import (\n\t\"fmt\"\n\t\"testing\"\n\n\t_ \"example.org/missing\"\n)", "./m/", verdictNoBuild},
-		{"main-importer", "m/m.go", "a * 2", "a * 5", "./cmd/tool/", verdictNotCompiled},
-		{"named-like-a-test-binary", "m/m.go", "a * 2", "a * 6", "./tool.test/", verdictNotCompiled},
-		{"embedded-in-no-test-binary", "emb/data.txt", "x", "y", "./emb/", verdictNotCompiled},
 		{"ignored-other-file", "m/x_plan9.s", "plan9", "plan10", "./m/", verdictNotCompiled},
 		{"survived", "m/m.go", "a * 2", "a * 3", "", verdictSurvived},
 		{"nomatch", "m/m.go", "zzz", "y", "./m/", verdictNoMatch},
@@ -75,9 +72,6 @@ func TestRun_GivesEachMutantItsVerdict(t *testing.T) {
 		// go vet's assign check is not one go test runs.
 		{"vet-go-test-does-not-run", "m/m.go", "return a * 2", "a = a; return a * 2", "./m/", verdictSurvived},
 		{"file-in-no-named-binary", "m/m_test.go", "t.Fatal(\"extra\")", "t.Fatal(\"other\")", "./nt/ ./red/", verdictNotCompiled},
-		{"package-with-no-tests", "nt/nt.go", "N = 1", "N = 2", "./nt/", verdictNotCompiled},
-		// ntm compiles m and has no test binary, and red's test binary does not link m.
-		{"compiled-into-no-test-binary", "m/m.go", "a * 2", "a * 4", "./ntm/ ./red/", verdictNotCompiled},
 		{"data-no-test-ran", "data.txt", "one", "two", "./nt/", verdictNoTest},
 		{"data-unread", "data.txt", "one", "two", "./m/", verdictSurvived},
 		{"data-read", "data.txt", "one", "two", "./q/", verdictKilled},
@@ -151,7 +145,7 @@ func TestRun_GivesEachMutantItsVerdict(t *testing.T) {
 	t.Run("a log says why a mutant has no verdict", func(t *testing.T) {
 		t.Parallel()
 		for id, want := range map[string]string{
-			"file-in-no-named-binary":     "no test binary of the named packages compiles m/m_test.go on this host",
+			"file-in-no-named-binary":     "no go test run of the named packages compiles m/m_test.go on this host, before or after the change, under any configuration\n",
 			"production-build":            "the changed tree does not build",
 			"test-build":                  "=== example.com/fx/m was not built\n",
 			"go-test-vet":                 "=== example.com/fx/m was not built\n",
@@ -191,12 +185,108 @@ func TestRun_GivesEachMutantItsVerdict(t *testing.T) {
 		if err != nil || !strings.Contains(string(out), " asis ") {
 			t.Errorf("worker 1's record is %q, %v; want a line for each mutant it judged", out, err)
 		}
-		for _, want := range []string{"mutants: 27, workers: 2\n", "\n  KILLED: 7\n", "\n  NOBUILD: 5\n", "\n  NOTCOMPILED: 7\n", "\n  RED: 2\n", "\n  run seconds, summed: "} {
+		for _, want := range []string{"mutants: 22, workers: 2\n", "\n  KILLED: 7\n", "\n  NOBUILD: 5\n", "\n  NOTCOMPILED: 2\n", "\n  RED: 2\n", "\n  run seconds, summed: "} {
 			if !strings.Contains(r.stdout, want) {
 				t.Errorf("stdout does not hold %q:\n%s", want, r.stdout)
 			}
 		}
 	})
+}
+
+// go test builds a named package with no test files and the packages it
+// imports, so a file such a package builds is judged under the first
+// configuration that builds it: a break reads NOBUILD, and a change that builds
+// reads by what the named packages' tests did.
+func TestRun_JudgesAFileANamedPackageWithNoTestFilesBuilds(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := verdictFixture(t)
+	f.write("nt/extra.go", "//go:build mermaid\n\npackage nt\n\nconst E = 1\n")
+	f.index()
+	want := map[string]string{}
+	configs := map[string]string{}
+	for _, m := range []struct{ id, file, search, replace, pkgs, verdict, config string }{
+		{"package-with-no-tests", "nt/nt.go", "N = 1", "N = 2", "./nt/", verdictNoTest, "default"},
+		{"computed-set-of-a-package-with-no-tests", "nt/nt.go", "N = 1", "N = 3", "", verdictNoTest, "default"},
+		{"beside-a-tested-package", "nt/nt.go", "N = 1", "N = 4", "./nt/ ./q/", verdictSurvived, "default"},
+		{"break-in-a-package-with-no-tests", "nt/nt.go", "N = 1", "N = ", "./nt/", verdictNoBuild, "default"},
+		// Only the mermaid build takes extra.go.
+		{"break-in-a-tagged-file-of-a-package-with-no-tests", "nt/extra.go", "E = 1", "E = ", "./nt/", verdictNoBuild, "mermaid"},
+		// ntm compiles m and has no test binary.
+		{"compiled-into-a-package-with-no-tests", "m/m.go", "a * 2", "a * 4", "./ntm/", verdictNoTest, "default"},
+		{"break-through-a-package-with-no-tests", "m/m.go", "a * 2", "a *", "./ntm/", verdictNoBuild, "default"},
+		{"main-importer", "m/m.go", "a * 2", "a * 5", "./cmd/tool/", verdictNoTest, "default"},
+		{"named-like-a-test-binary", "m/m.go", "a * 2", "a * 6", "./tool.test/", verdictNoTest, "default"},
+		{"embedded-in-a-package-with-no-tests", "emb/data.txt", "x", "y", "./emb/", verdictNoTest, "default"},
+	} {
+		f.mutant(m.id, m.file, m.search, m.replace, m.pkgs)
+		want[m.id], configs[m.id] = m.verdict, m.config
+	}
+
+	r := f.run(f.args("2")...)
+
+	r.wantCode(t, 0)
+	rows := r.wantVerdicts(t, want)
+	for id, config := range configs {
+		if got := rows[id+"/asis"]["configuration"]; got != config {
+			t.Errorf("mutant %s is judged under %q, want %s", id, got, config)
+		}
+	}
+	if got := rows["computed-set-of-a-package-with-no-tests/asis"]["packages"]; got != "./nt" {
+		t.Errorf("the computed set is %q, want ./nt", got)
+	}
+	for id, want := range map[string]string{
+		"package-with-no-tests":            "none ran a test",
+		"break-in-a-package-with-no-tests": "the changed tree does not build",
+	} {
+		if log := r.log(t, id); !strings.Contains(log, want) {
+			t.Errorf("mutant %s: the log does not hold %q:\n%s", id, want, log)
+		}
+	}
+}
+
+// A package whose tests a build tag holds is judged under that tag, though
+// the plain build compiles its file with no test binary: a configuration whose
+// test binary links the file comes before one whose run only builds it.
+func TestRun_JudgesAFileUnderTheConfigurationWhoseTestBinaryLinksIt(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := newFixture(t)
+	f.write("tg/tg.go", "package tg\n\nfunc V() int { return 1 }\n")
+	f.write("tg/tg_test.go", "//go:build mermaid\n\npackage tg\n\nimport \"testing\"\n\nfunc TestV(t *testing.T) {\n\tif V() != 1 {\n\t\tt.Fatal(\"V\")\n\t}\n}\n")
+	f.write("x.test/main.go", "package main\n\nimport \"example.com/fx/tg\"\n\nfunc main() { _ = tg.V() }\n")
+	f.write("xt/xt.go", "package xt\n\nfunc V() int { return 1 }\n")
+	f.write("xt/xt_test.go", "//go:build mermaid\n\npackage xt_test\n\nimport (\n\t\"testing\"\n\n\t\"example.com/fx/xt\"\n)\n\n"+
+		"func TestXV(t *testing.T) {\n\tif xt.V() != 1 {\n\t\tt.Fatal(\"V\")\n\t}\n}\n")
+	// em embeds a test file no build takes; the mutant makes it the mermaid
+	// build's test, so only the changed tree has a test binary linking it.
+	f.write("em/em.go", "package em\n\nimport _ \"embed\"\n\n//go:embed s_test.go\nvar S string\n")
+	f.write("em/s_test.go", "//go:build never\n\npackage em\n\nimport \"testing\"\n\nfunc TestS(t *testing.T) { t.Fatal(\"S\") }\n")
+	f.index()
+	want := map[string]string{}
+	failing := map[string]string{}
+	for _, m := range []struct{ id, file, search, replace, pkgs, failing string }{
+		{"tagged-alone", "tg/tg.go", "return 1", "return 2", "./tg/", "TestV"},
+		{"tagged-beside-a-tested-package", "tg/tg.go", "return 1", "return 3", "./tg/ ./m/", "TestV"},
+		{"tagged-computed", "tg/tg.go", "return 1", "return 4", "", "TestV"},
+		// The command's import path ends in .test, and it is no test binary.
+		{"tagged-beside-a-command-named-like-a-test-binary", "tg/tg.go", "return 1", "return 5", "./tg/ ./x.test/", "TestV"},
+		{"tagged-external-tests-alone", "xt/xt.go", "return 1", "return 2", "./xt/", "TestXV"},
+		{"test-binary-after-the-change", "em/s_test.go", "//go:build never", "//go:build mermaid", "./em/", "TestS"},
+	} {
+		f.mutant(m.id, m.file, m.search, m.replace, m.pkgs)
+		want[m.id], failing[m.id] = verdictKilled, m.failing
+	}
+
+	r := f.run(f.args("2")...)
+
+	r.wantCode(t, 0)
+	rows := r.wantVerdicts(t, want)
+	for id, tests := range failing {
+		if row := rows[id+"/asis"]; row["configuration"] != "mermaid" || row["failing tests"] != tests {
+			t.Errorf("mutant %s is judged under %q, failing %q; want mermaid, failing %s", id, row["configuration"], row["failing tests"], tests)
+		}
+	}
 }
 
 // classified returns a run over packages a, b and c after events and the
@@ -431,34 +521,5 @@ func TestWorker_RecordsNoFoldWhereTheHostHasNoFoldedSpelling(t *testing.T) {
 	w := &worker{tree: &tree{run: &run{asis: "/tmp/", folded: ""}}}
 	if j := w.judge(t.Context(), mutant{id: "m01"}, "folded"); j.verdict != verdictNoFold || j.log.Len() != 0 {
 		t.Errorf("the judgement is %q with the log %q, want NOFOLD and no log", j.verdict, j.log.String())
-	}
-}
-
-// A test binary go list reports it cannot load, as one whose test file names
-// no package, still compiles the file: the mutant is judged, and reads NOBUILD.
-// The entries are go list's at go1.26.0 for such a test file.
-func TestWorker_CompiledHoldsAFileATestBinaryThatFailsToLoadCompiles(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	w := &worker{tree: &tree{dir: dir}}
-	pkg := filepath.Join(dir, "a")
-	broken := &struct{ Err string }{Err: "expected 'IDENT', found 'EOF'"}
-	entries := []listed{
-		{ImportPath: "ex/a", Dir: pkg, Name: "a", GoFiles: []string{"a.go"}, TestGoFiles: []string{"a_test.go", "x_test.go"}, Error: broken},
-		{ImportPath: "ex/a [ex/a.test]", Dir: pkg, Name: "a", GoFiles: []string{"a.go", "a_test.go", "x_test.go"}, Error: broken},
-		{ImportPath: "ex/a.test", Name: "main", Deps: []string{"ex/a [ex/a.test]"}, Error: broken},
-	}
-	if compiled, known := w.compiled(entries, filepath.Join("a", "x_test.go")); !compiled || !known {
-		t.Errorf("x_test.go: compiled %t, known %t; want both", compiled, known)
-	}
-	if compiled, known := w.compiled(entries, filepath.Join("a", "other.go")); compiled || known {
-		t.Errorf("other.go: compiled %t, known %t; want neither", compiled, known)
-	}
-	for _, e := range []listed{{MFiles: []string{"f"}}, {FFiles: []string{"f"}}, {SwigFiles: []string{"f"}}, {SwigCXXFiles: []string{"f"}}, {InvalidGoFiles: []string{"f"}}} {
-		e.ImportPath, e.Dir = "ex/b", filepath.Join(dir, "b")
-		binary := listed{ImportPath: "ex/b.test", Name: "main", Deps: []string{"ex/b"}}
-		if compiled, _ := w.compiled([]listed{e, binary}, filepath.Join("b", "f")); !compiled {
-			t.Errorf("a file go list names in %+v is not held compiled", e)
-		}
 	}
 }

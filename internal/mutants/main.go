@@ -100,9 +100,12 @@
 // benchmarks run before the change only for a mutant they judge, and must pass.
 //
 // A file the go command lists in its package is judged under the first
-// configuration in which a test binary of the named packages compiles it: the
-// plain build, -race, GOEXPERIMENT=jsonv2, -tags=mermaid, then
-// -tags=neo4j_integration. A file go list names for no named package and no
+// configuration in which a test binary of a named package links it, in the
+// order the plain build, -race, GOEXPERIMENT=jsonv2, -tags=mermaid, then
+// -tags=neo4j_integration; a package whose tests a build tag holds is judged
+// under that tag. When no configuration has such a binary, the file is judged
+// under the first in which the go test run builds it: go test builds a named
+// package with no test files, and the packages it imports. A file go list names for no named package and no
 // package their tests link is judged under the plain build when it is not Go
 // or the go command ignores it: its name, or a directory's on its path, is
 // testdata or begins with "." or "_", as a fixture's is. A data file only a
@@ -128,11 +131,11 @@
 //   - NOFOLD: the spelling is folded and the host has none. No log is written.
 //   - NOMATCH: the search is not in the file, or the replacement leaves the
 //     file as it was.
-//   - NOTCOMPILED: no test binary of the named packages compiles the file on
-//     this host, before or after the change, under any configuration, and the
-//     file is a Go file the go command does not ignore or a file go list
-//     names for a named package or a package their tests link.
-//     The tests cannot judge it here.
+//   - NOTCOMPILED: the go test run of the named packages compiles the file on
+//     this host in no package, before or after the change, under any
+//     configuration, and the file is a Go file the go command does not
+//     ignore or a file go list names for a named package or a package their
+//     tests link. The tests cannot judge it here.
 //   - RED: the named packages' tests do not pass before the change, or, for a
 //     mutant the tests leave SURVIVED or NOTEST under a configuration that runs
 //     benchmarks, their benchmarks do not.
