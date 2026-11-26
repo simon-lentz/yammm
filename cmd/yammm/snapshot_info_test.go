@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/location"
 )
 
 // createYSFixture uses snapshot save to create a .ys file from testdata.
@@ -100,9 +101,9 @@ func TestSnapshotInfo_HeaderOnlyNamesAnUnsupportedHashAlgorithm(t *testing.T) {
 	t.Parallel()
 
 	const message = "unrecognized schema hash algorithm version 99; schema hash verification skipped"
-	abs, err := filepath.Abs(hashAlgoFixture)
+	id, err := location.SourceIDFromPath(hashAlgoFixture)
 	require.NoError(t, err)
-	source, err := json.Marshal(abs)
+	source, err := json.Marshal(id.String())
 	require.NoError(t, err)
 
 	code, _, stderr := executeCmdOutput(t, "snapshot", "info", "--header-only", "--json", hashAlgoFixture)

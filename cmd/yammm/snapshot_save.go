@@ -151,12 +151,13 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// written where a reader that discovers snapshots by extension will not find
 	// it. A scan follows a link it finds, so either the host path, which reads
 	// "out.ys/x/.." as out.ys, or the file its links reach is found.
+	// The warning is placed in the file written, as a snapshot read's issues
+	// are, so one run names one file one way in text and in JSON.
 	if !foundByExtension(outputPath) {
 		c := diag.NewCollector(diag.NoLimit)
 		c.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_EXTENSION,
-			fmt.Sprintf("output path %q reaches no file a scan for .ys files finds", outputPath)).
-			WithPath(outputPath, "").Build())
-		sink.Add(c.Result())
+			fmt.Sprintf("output path %q reaches no file a scan for .ys files finds", outputPath)).Build())
+		sink.Add(cli.PlaceIn(outputPath, c.Result()))
 	}
 	return nil
 }

@@ -182,7 +182,7 @@ Builds a graph snapshot from one or more data files and persists it as a `.ys` f
 | `--indent` | Produce indented output |
 | `--into` | Existing `.ys` file to merge new data into. Its `created_at` and metadata are carried forward: `--timestamp` replaces the first, and `-m` overlays the second key by key |
 
-Output is byte-for-byte deterministic unless a `created_at` is written, which happens only through `--timestamp` or `--into`. `W_SNAPSHOT_PATH_EXTENSION` is raised only after the file is written, located at the output path.
+Output is byte-for-byte deterministic unless a `created_at` is written, which happens only through `--timestamp` or `--into`. `W_SNAPSHOT_PATH_EXTENSION` is raised only after the file is written. It is placed in the file the output path reaches, its links followed, as a snapshot read's issues are placed (Diagnostics Go to stderr, below): its span names that file by its source identity, with positions of line 0 and column 0, so text output writes the name relative to the module root when the file lies under that root. A descriptor path such as `/dev/stdout` is named absolute and clean, its link not followed, and a path no source identity names is named by its quoted spelling. The message quotes the output path as typed.
 
 ### snapshot verify
 

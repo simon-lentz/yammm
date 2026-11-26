@@ -1,14 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/location"
 )
 
 // A command that writes back what it read refuses a descriptor path to that
@@ -165,31 +168,99 @@ func TestSnapshotSave_WarnsOnTheExtensionOfTheFileWritten(t *testing.T) {
 	}
 }
 
-// The extension warning names the output path relative to the schema's module
-// root, as every diagnostic of the run names a file under it.
+// The extension warning names the file the output path reaches, relative to the
+// schema's module root, however the path is spelled: through a linked
+// directory, with a ".." element, in another case on a volume that ignores
+// case, as a link to the file, or as the host spells it, which on Windows is
+// with backslashes. Its message quotes the path as typed, and --json places it
+// as a snapshot read's issues are placed: the file's identity as the span's
+// source.
 func TestSnapshotSave_NamesTheOutputUnderTheRootRelatively(t *testing.T) {
 	t.Parallel()
-	// The rule reads text, so the output is spelled as the root's identity
-	// spells the directory, its links resolved.
-	dir, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"valid.yammm", "data.json"} {
-		content, err := os.ReadFile(filepath.Join("testdata", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), content, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	code, _, stderr := executeCmdOutput(t, "snapshot", "save", filepath.Join(dir, "valid.yammm"),
-		filepath.Join(dir, "data.json"), "-o", filepath.Join(dir, "out.dat"))
-	if code != cli.ExitOK {
-		t.Fatalf("exit %d: %s", code, stderr)
-	}
-	if !strings.HasPrefix(stderr, "out.dat: warning[W_SNAPSHOT_PATH_EXTENSION]") {
-		t.Errorf("the warning does not name out.dat relative to the root: %s", stderr)
+	sep := string(filepath.Separator)
+	for _, c := range []struct {
+		name, label string
+		out         func(t *testing.T, dir string) string
+	}{
+		{"as given", "out.dat", func(_ *testing.T, dir string) string { return filepath.Join(dir, "out.dat") }},
+		{"with a .. element", "out.dat", func(t *testing.T, dir string) string {
+			t.Helper()
+			if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(dir, "sub") + sep + ".." + sep + "out.dat"
+		}},
+		{"through a linked directory", "out.dat", func(t *testing.T, dir string) string {
+			t.Helper()
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(dir, alias); err != nil {
+				t.Skipf("no link: %v", err)
+			}
+			return filepath.Join(alias, "out.dat")
+		}},
+		{"as a link to the file", "out.dat", func(t *testing.T, dir string) string {
+			t.Helper()
+			link := filepath.Join(dir, "lnk.dat")
+			if err := os.Symlink("out.dat", link); err != nil {
+				t.Skipf("no link: %v", err)
+			}
+			return link
+		}},
+		{"in another case", "Sub/out.dat", func(t *testing.T, dir string) string {
+			t.Helper()
+			if err := os.Mkdir(filepath.Join(dir, "Sub"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "SUB")); err != nil {
+				t.Skip("the volume tells case apart")
+			}
+			return filepath.Join(dir, "SUB", "out.dat")
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			for _, name := range []string{"valid.yammm", "data.json"} {
+				content, err := os.ReadFile(filepath.Join("testdata", name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, name), content, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out := c.out(t, dir)
+			code, _, stderr := executeCmdOutput(t, "snapshot", "save", filepath.Join(dir, "valid.yammm"),
+				filepath.Join(dir, "data.json"), "-o", out)
+			if code != cli.ExitOK {
+				t.Fatalf("exit %d: %s", code, stderr)
+			}
+			if !strings.HasPrefix(stderr, c.label+": warning[W_SNAPSHOT_PATH_EXTENSION]") {
+				t.Errorf("the warning does not name %s relative to the root: %s", c.label, stderr)
+			}
+			if !strings.Contains(stderr, "output path "+strconv.Quote(out)+" reaches no file") {
+				t.Errorf("the message does not quote the path as typed, %q: %s", out, stderr)
+			}
+
+			want, err := location.SourceIDFromPath(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, stderr = executeCmdOutput(t, "snapshot", "save", "--json", filepath.Join(dir, "valid.yammm"),
+				filepath.Join(dir, "data.json"), "-o", out)
+			var doc struct {
+				Issues []struct {
+					Span       struct{ Source string }
+					SourceName string `json:"sourceName"`
+				}
+			}
+			if err := json.Unmarshal([]byte(stderr), &doc); err != nil || len(doc.Issues) != 1 {
+				t.Fatalf("want one JSON issue (%v): %s", err, stderr)
+			}
+			if got := doc.Issues[0]; got.Span.Source != want.String() || got.SourceName != "" {
+				t.Errorf("--json places the warning at span %q, sourceName %q; want span %q, as a read's issues are placed",
+					got.Span.Source, got.SourceName, want)
+			}
+		})
 	}
 }

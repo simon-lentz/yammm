@@ -189,9 +189,8 @@ func (r *Renderer) location(issue Issue) string {
 // sourceName writes a source name as [Renderer.formatSpanLocation] writes a
 // span's source, so one run names one file one way: a name whose text starts
 // with the root and a separator is written relative to the root, and any other
-// name as it is. The rule reads text alone, so a label spelled under the root,
-// such as an output path, is written relative to it too, and the root itself
-// is written whole.
+// name as it is. The rule reads text alone, so any label spelled under the
+// root is written relative to it, and the root itself is written whole.
 func (r *Renderer) sourceName(name string) string {
 	if r.root.IsZero() {
 		return name
