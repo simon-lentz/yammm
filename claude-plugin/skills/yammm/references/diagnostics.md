@@ -200,7 +200,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Error from every surface that reads the body; `ReadHeader` and `ScanDir` accept the header and draw nothing, and the CLI reports it as a Warning (v0.15+), except beside another header failure |
 | `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `yammm snapshot info --dir` fails to read (v0.3+), or a reader `snapshot.ReadHeader` reads failing with an error that is not a truncation, Fatal (unreleased; on the line after v0.21.0, not in v0.21.1) |
 | `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record, one no structural check refused, for an association the schema declares required (read from the schema, never the record); reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
-| `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |
+| `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written where a scan for `.ys` files does not find it: neither the path nor a link it follows has a name that ends in `.ys` and names a regular file; the write succeeded, and a reader that discovers snapshots by extension will not find it |
 
 ### Neo4j
 

@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/big"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,7 +18,7 @@ import (
 // sliceAccessor returns a SliceStrata value's length and an element reader,
 // accepting both a Go slice and an [immutable.Slice], which reflect cannot
 // index. Elements unwrap one level, so a nested collection stays wrapped for
-// the recursive [Order] call rather than being deep-copied.
+// the recursive order call rather than being deep-copied.
 func sliceAccessor(v any) (int, func(int) any) {
 	if s, ok := v.(immutable.Slice); ok {
 		return s.Len(), func(i int) any { return s.At(i).Any() }
@@ -84,6 +85,29 @@ func IsFinite(f float64) bool {
 // complex shapes are intentionally out of scope; normalize them before ordering if you need
 // stable comparisons.
 func Order(left, right any) (int, error) {
+	return order(left, right, false)
+}
+
+// OrderStored is [Order] for the values a graph stores, which ties two values
+// only when a snapshot writes them the same. It adds a map arm, since a
+// document can hold a JSON object at any property: a non-nil
+// [immutable.Properties] ranks above every list, two compare name by name in
+// name order, each name before its value, and the one whose names run out first
+// ranks first. A nil one is nil, as json writes it. A number ranks by the exact
+// value of the text a snapshot writes for it, then by that text.
+func OrderStored(left, right any) (int, error) {
+	return order(left, right, true)
+}
+
+// order is [Order], and [OrderStored] when stored holds. An expression never
+// orders a map (SPEC's ordered comparisons) and compares numbers by value
+// alone, so only a stored value takes the map arm and the written-text arm.
+func order(left, right any, stored bool) (int, error) {
+	if stored {
+		if c, ok, err := orderMaps(left, right); ok {
+			return c, err
+		}
+	}
 	// If type order is different, no need to compare values.
 	if to, err := TypeOrder(left, right); err != nil {
 		return 0, err
@@ -107,57 +131,10 @@ func Order(left, right any) (int, error) {
 		}
 		return -1, nil
 	case NumericStrata:
-		if isWideInteger(left) || isWideInteger(right) {
-			return compareExact(left, right)
+		if stored {
+			return orderStoredNumbers(left, right)
 		}
-		li, liok := GetInt64(left)
-		lu, luok := GetUint64(left)
-		lf, lfok := GetFloat64(left)
-		ri, riok := GetInt64(right)
-		ru, ruok := GetUint64(right)
-		rf, rfok := GetFloat64(right)
-
-		switch {
-		// Both signed integers
-		case liok && riok:
-			return Int64Compare(li, ri), nil
-
-		// Both unsigned integers (handles values > MaxInt64)
-		case luok && ruok:
-			return Uint64Compare(lu, ru), nil
-
-		// Mixed signed/unsigned: negative signed is always less than unsigned
-		case liok && ruok:
-			if li < 0 {
-				return -1, nil
-			}
-			// Non-negative signed can safely compare as uint64
-			return Uint64Compare(uint64(li), ru), nil
-		case luok && riok:
-			if ri < 0 {
-				return 1, nil
-			}
-			return Uint64Compare(lu, uint64(ri)), nil
-
-		// Float vs signed integer: exact comparison (preserves transitivity for values > 2^53)
-		case lfok && riok:
-			return -CompareInt64Float64(ri, lf), nil
-		case liok && rfok:
-			return CompareInt64Float64(li, rf), nil
-
-		// Float vs unsigned integer: exact comparison (preserves transitivity for values > 2^53)
-		case lfok && ruok:
-			return -CompareUint64Float64(ru, lf), nil
-		case luok && rfok:
-			return CompareUint64Float64(lu, rf), nil
-
-		// Both floats. Last, because a json.Number holding an integer answers
-		// GetFloat64 too: taking this arm for it rounds 2^64-1 up to 2^64 and
-		// the order lies at every power of two above 2^53.
-		case lfok && rfok:
-			return Float64Compare(lf, rf), nil
-		}
-		return 0, fmt.Errorf("value: expected numeric values (left %T, right %T)", left, right)
+		return orderNumbers(left, right)
 
 	case StringStrata:
 		// TypeStrata reports StringStrata only for a value GetString reads.
@@ -172,7 +149,7 @@ func Order(left, right any) (int, error) {
 		for i := range minLen {
 			leftVal := leftAt(i)
 			rightVal := rightAt(i)
-			which, err := Order(leftVal, rightVal)
+			which, err := order(leftVal, rightVal, stored)
 			if err != nil {
 				return 0, err
 			}
@@ -191,6 +168,214 @@ func Order(left, right any) (int, error) {
 		return -1, nil
 	}
 	return 0, fmt.Errorf("value: unknown strata for comparison between %T and %T", left, right)
+}
+
+// compareOverflow orders left and right when either is a number literal past
+// every finite float64 ([overflowLiteral]), and reports false when neither is.
+// Such a literal ranks beyond every finite number on its side of zero and
+// inside the infinities; two literals compare as decimals.
+func compareOverflow(left, right any) (int, bool) {
+	ln, lok := overflowLiteral(left)
+	rn, rok := overflowLiteral(right)
+	switch {
+	case lok && rok:
+		return compareDecimal(string(ln), string(rn)), true
+	case lok:
+		return overflowAgainst(ln, right), true
+	case rok:
+		return -overflowAgainst(rn, left), true
+	}
+	return 0, false
+}
+
+// overflowAgainst orders the overflowing literal n against other, a number of
+// no such literal.
+func overflowAgainst(n json.Number, other any) int {
+	if w, ok := wideInteger(other); ok {
+		return compareDecimal(string(n), string(w))
+	}
+	if f, ok := floatOf(other); ok {
+		switch {
+		case math.IsNaN(f) || math.IsInf(f, 1):
+			return -1
+		case math.IsInf(f, -1):
+			return 1
+		}
+	}
+	if strings.HasPrefix(string(n), "-") {
+		return -1
+	}
+	return 1
+}
+
+// overflowLiteral returns the number literal v holds when it is no integer
+// literal and its magnitude passes every finite float64, which the reader
+// keeps as written.
+func overflowLiteral(v any) (json.Number, bool) {
+	n, ok := NumberLiteral(v)
+	if !ok || IsIntegerLiteral(n) {
+		return "", false
+	}
+	_, err := strconv.ParseFloat(string(n), 64)
+	return n, errors.Is(err, strconv.ErrRange)
+}
+
+// compareDecimal orders two JSON number literals by exact value. It reads each
+// as a sign, its significant digits and a decimal exponent, so its cost follows
+// the literals' length and not their magnitude: 1e1000000000 holds no number
+// it materializes.
+func compareDecimal(a, b string) int {
+	an, ad, ae := decimalParts(a)
+	bn, bd, be := decimalParts(b)
+	as, bs := decimalSign(an, ad), decimalSign(bn, bd)
+	if as != bs || as == 0 {
+		return cmp.Compare(as, bs)
+	}
+	c := ae.Cmp(be)
+	if c == 0 {
+		c = strings.Compare(ad, bd)
+	}
+	return as * c
+}
+
+// decimalSign returns -1, 0 or 1 for a literal's parts.
+func decimalSign(neg bool, digits string) int {
+	switch {
+	case digits == "":
+		return 0
+	case neg:
+		return -1
+	}
+	return 1
+}
+
+// decimalParts reads a JSON number literal as the value 0.digits × 10^exp:
+// digits holds no leading or trailing zero, and is empty for zero.
+func decimalParts(s string) (bool, string, *big.Int) {
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	mantissa, expText, _ := strings.Cut(strings.ToLower(s), "e")
+	whole, frac, _ := strings.Cut(mantissa, ".")
+	digits := whole + frac
+	point := int64(len(whole))
+	trimmed := strings.TrimLeft(digits, "0")
+	point -= int64(len(digits) - len(trimmed))
+	digits = strings.TrimRight(trimmed, "0")
+	exp := big.NewInt(point)
+	if expText != "" {
+		// NumberLiteral admits only RFC 8259 literals, whose exponent is
+		// decimal digits after an optional sign, so it parses.
+		e, _ := new(big.Int).SetString(expText, 10)
+		exp.Add(exp, e)
+	}
+	return neg, digits, exp
+}
+
+// floatOf returns v's value when its kind is a float, and false for an integer
+// and a number literal.
+func floatOf(v any) (float64, bool) {
+	rv := reflect.ValueOf(v)
+	if k := rv.Kind(); k == reflect.Float32 || k == reflect.Float64 {
+		return rv.Float(), true
+	}
+	return 0, false
+}
+
+// orderNumbers orders two values of [NumericStrata] by value.
+func orderNumbers(left, right any) (int, error) {
+	if c, ok := compareOverflow(left, right); ok {
+		return c, nil
+	}
+	if isWideInteger(left) || isWideInteger(right) {
+		return compareExact(left, right)
+	}
+	li, liok := GetInt64(left)
+	lu, luok := GetUint64(left)
+	lf, lfok := GetFloat64(left)
+	ri, riok := GetInt64(right)
+	ru, ruok := GetUint64(right)
+	rf, rfok := GetFloat64(right)
+
+	switch {
+	// Both signed integers
+	case liok && riok:
+		return Int64Compare(li, ri), nil
+
+	// Both unsigned integers (handles values > MaxInt64)
+	case luok && ruok:
+		return Uint64Compare(lu, ru), nil
+
+	// Mixed signed/unsigned: negative signed is always less than unsigned
+	case liok && ruok:
+		if li < 0 {
+			return -1, nil
+		}
+		// Non-negative signed can safely compare as uint64
+		return Uint64Compare(uint64(li), ru), nil
+	case luok && riok:
+		if ri < 0 {
+			return 1, nil
+		}
+		return Uint64Compare(lu, uint64(ri)), nil
+
+	// Float vs signed integer: exact comparison (preserves transitivity for values > 2^53)
+	case lfok && riok:
+		return -CompareInt64Float64(ri, lf), nil
+	case liok && rfok:
+		return CompareInt64Float64(li, rf), nil
+
+	// Float vs unsigned integer: exact comparison (preserves transitivity for values > 2^53)
+	case lfok && ruok:
+		return -CompareUint64Float64(ru, lf), nil
+	case luok && rfok:
+		return CompareUint64Float64(lu, rf), nil
+
+	// Both floats. Last, because a json.Number holding an integer answers
+	// GetFloat64 too: taking this arm for it rounds 2^64-1 up to 2^64 and
+	// the order lies at every power of two above 2^53.
+	case lfok && rfok:
+		return Float64Compare(lf, rf), nil
+	}
+	return 0, fmt.Errorf("value: expected numeric values (left %T, right %T)", left, right)
+}
+
+// orderMaps orders left and right when either is a non-nil
+// [immutable.Properties], and reports false when neither is. A map ranks above
+// every value of a strata; any other value refuses as [TypeOrder] refuses it.
+func orderMaps(left, right any) (int, bool, error) {
+	lm, lok := left.(immutable.Properties)
+	rm, rok := right.(immutable.Properties)
+	lok = lok && !immutable.IsNilContainer(lm)
+	rok = rok && !immutable.IsNilContainer(rm)
+	switch {
+	case !lok && !rok:
+		return 0, false, nil
+	case !rok:
+		if TypeStrata(right) == InvalidStrata {
+			return 0, true, fmt.Errorf("value: unsupported type comparison between %T and %T", left, right)
+		}
+		return 1, true, nil
+	case !lok:
+		if TypeStrata(left) == InvalidStrata {
+			return 0, true, fmt.Errorf("value: unsupported type comparison between %T and %T", left, right)
+		}
+		return -1, true, nil
+	}
+	// Keys yields a Properties' names in the order it sorts once and keeps.
+	ln := slices.Collect(lm.Keys())
+	rn := slices.Collect(rm.Keys())
+	for i := range min(len(ln), len(rn)) {
+		if c := strings.Compare(ln[i], rn[i]); c != 0 {
+			return c, true, nil
+		}
+		lv, _ := lm.Get(ln[i])
+		rv, _ := rm.Get(rn[i])
+		c, err := order(lv.Any(), rv.Any(), true)
+		if err != nil || c != 0 {
+			return c, true, err
+		}
+	}
+	return cmp.Compare(len(ln), len(rn)), true, nil
 }
 
 // isWideInteger reports whether v is a json.Number integer literal, read as

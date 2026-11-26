@@ -59,6 +59,10 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	if err := cli.CheckOperand("snapshot file", args[0]); err != nil {
 		return err
 	}
+	// What the read draws names the file relative to where info was run.
+	if wd, err := os.Getwd(); err == nil {
+		sink.SetSource(nil, wd)
+	}
 
 	f, err := cli.Open(args[0])
 	if err != nil {
@@ -71,9 +75,9 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	if headerOnly, _ := cmd.Flags().GetBool("header-only"); headerOnly {
 		header, err := snapshot.ReadHeader(cmd.Context(), r)
 		if err != nil {
-			return sink.AddSnapshot(err)
+			return sink.AddSnapshotRead(args[0], err)
 		}
-		sink.Add(headerResult(header, nil))
+		sink.Add(cli.PlaceIn(args[0], headerResult(header, nil)))
 
 		sink.Flush()
 		w := cmd.OutOrStdout()
@@ -98,7 +102,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// A document that decodes and fails a structural check has a summary
 	// beside its errors: the summary prints, and the result decides the exit.
 	info, statErr := snapshot.Stat(cmd.Context(), data)
-	exit := sink.AddSnapshot(statErr)
+	exit := sink.AddSnapshotRead(args[0], statErr)
 	if info == nil {
 		return exit
 	}
@@ -359,13 +363,7 @@ func diagnosticWire(result diag.Result) json.RawMessage {
 }
 
 func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath string) error {
-	// A directory that climbs out of the working directory is made absolute
-	// first, so the scan reads the directory the loader's rule names.
-	host, err := cli.HostPath(dirPath)
-	if err != nil {
-		return cli.Runtimef("open dir %q: %v", dirPath, err)
-	}
-	entries, result := scanDir(cmd.Context(), host)
+	entries, result := scanDir(cmd.Context(), dirPath)
 	sink.Add(result)
 	if cli.Failed(result) {
 		return cli.Exit(cli.ExitForResult(result))

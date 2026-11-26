@@ -29,7 +29,9 @@ import (
 type ScanEntry struct {
 	// Name is the basename of the file (e.g., "CA.ys").
 	Name string
-	// Path is the full filesystem path, equivalent to filepath.Join(dir, Name).
+	// Path is the path the scan opened: filepath.Join(dir, Name) when dir is
+	// absolute or stays in the working directory, and absolute when dir climbs
+	// out of it.
 	Path string
 	// Header holds the parsed header; nil whenever Err is not.
 	Header *Header
@@ -65,13 +67,16 @@ type ScanEntry struct {
 // not accept a misshapen document by omission — it does not see one. Use
 // [Stat], [Verify] or [Unmarshal] when that matters.
 //
-// dir is cleaned before it is read, so a ".." cancels the element before it
-// rather than following a symbolic link, and each yielded Path names an entry
-// of the directory listed. An empty dir names no directory: it fails as a missing
-// one does, and never lists the working directory. A cleaned dir whose element
-// is not a directory, or sits under one that is not, fails with an error
-// matching [syscall.ENOTDIR] on every host. An element a ".." cancels is never
-// read, so "a.ys/.." lists the directory that holds a.ys.
+// dir is read at the path [WriteFile] writes and the loader reads: cleaned, so a
+// ".." cancels the element before it rather than following a symbolic link,
+// and made absolute when it climbs out of the working directory. Each yielded
+// Path names an entry of the directory listed, so a dir that climbs yields
+// absolute paths, and a climbing dir whose absolute path is longer than the host
+// allows fails, as WriteFile's does. An empty dir names no directory: it fails as a missing one
+// does, and never lists the working directory. A cleaned dir whose element is
+// not a directory, or sits under one that is not, fails with an error matching
+// [syscall.ENOTDIR] on every host. An element a ".." cancels is never read, so
+// "a.ys/.." lists the directory that holds a.ys.
 //
 // Filtering:
 //   - Only regular files and symlinks are included, and a symlink only
@@ -94,9 +99,9 @@ type ScanEntry struct {
 // The iterator's second yielded value is non-nil ONLY for
 // operation-level failures that end iteration:
 //   - Dir-open error (ENOENT, EACCES, ...): yields exactly one
-//     (ScanEntry{}, err) pair wrapping the os error and ends; a dir whose
-//     element is a file, or sits under one, wraps hostpath.ErrNotDirectory
-//     in its place.
+//     (ScanEntry{}, err) pair and ends. err is an *[fs.PathError] with Op
+//     "open", dir as passed, and the host's cause; a dir whose element is a
+//     file, or sits under one, carries hostpath.ErrNotDirectory as the cause.
 //   - Context cancellation observed at entry or between files: yields exactly
 //     one (ScanEntry{}, ctx.Err()) pair (context.Canceled or
 //     context.DeadlineExceeded) and ends.
@@ -126,16 +131,14 @@ func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error] {
 			yield(ScanEntry{}, err)
 			return
 		}
-		// Cleaned as the yielded paths are, so a ".." cancels the element before
-		// it rather than following a link, and each Path names an entry of the
-		// directory read. Clean turns "" into ".", which os.ReadDir would list.
-		listed := dir
-		if dir != "" {
-			listed = filepath.Clean(dir)
+		listed, err := hostpath.Text(dir)
+		if err != nil {
+			yield(ScanEntry{}, &fs.PathError{Op: "open", Path: dir, Err: err})
+			return
 		}
 		dirents, err := os.ReadDir(listed)
 		if err != nil {
-			yield(ScanEntry{}, fmt.Errorf("open dir %q: %w", dir, notDirectory(listed, err)))
+			yield(ScanEntry{}, &fs.PathError{Op: "open", Path: dir, Err: notDirectory(listed, err)})
 			return
 		}
 		for _, dirent := range dirents {
@@ -149,7 +152,7 @@ func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error] {
 			if !strings.HasSuffix(name, ".ys") {
 				continue
 			}
-			path := filepath.Join(dir, name)
+			path := filepath.Join(listed, name)
 			if !isRegular(dirent, path) {
 				continue
 			}
@@ -226,16 +229,20 @@ func scanFile(ctx context.Context, name, path string) ScanEntry {
 	return ScanEntry{Name: name, Path: path, Header: header, Err: err, FileSize: size, ModTime: modTime}
 }
 
-// notDirectory returns err with [hostpath.ErrNotDirectory] in place of the
-// host's error when listed, read as a directory, names a file or sits under
-// one. Windows answers such a read ERROR_PATH_NOT_FOUND, which reads as a
-// missing path.
+// notDirectory returns the cause of err, a read of listed as a directory:
+// [hostpath.ErrNotDirectory] when listed names a file or sits under one, and
+// the host's error otherwise. Windows answers such a read
+// ERROR_PATH_NOT_FOUND, which reads as a missing path.
 func notDirectory(listed string, err error) error {
+	cause := err
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		cause = pe.Err
+	}
 	if listed == "" || !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
-		return err
+		return cause
 	}
 	if hostpath.RefusedRead(listed+string(filepath.Separator)) == nil {
-		return err
+		return cause
 	}
-	return &fs.PathError{Op: "open", Path: listed, Err: hostpath.ErrNotDirectory}
+	return hostpath.ErrNotDirectory
 }

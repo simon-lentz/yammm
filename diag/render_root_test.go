@@ -16,7 +16,8 @@ import (
 
 // TestModuleRoot_TextLocations holds text locations over file-backed sources
 // to one rule: the root a caller passes is a host path, and a source under it
-// is written relative to it, whatever bytes the host gives the root.
+// is written relative to it, whatever bytes the host gives the root, whether a
+// span or a source name names it.
 func TestModuleRoot_TextLocations(t *testing.T) {
 	t.Parallel()
 
@@ -185,10 +186,46 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 			out := formatIssue(NewRenderer(WithModuleRoot(root)),
 				NewIssue(Error, E_SYNTAX, "msg").WithSpan(location.Span{Source: src, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).Build())
 			got, _, _ := strings.Cut(out, ": error[")
-			if want += ":1:1"; got != want {
-				t.Errorf("location under root %q\n got %q\nwant %q", root, got, want)
+			if got != want+":1:1" {
+				t.Errorf("location under root %q\n got %q\nwant %q", root, got, want+":1:1")
+			}
+			// A source named without a span, as an issue about a whole data
+			// file is, is written by the same rule.
+			out = formatIssue(NewRenderer(WithModuleRoot(root)),
+				NewIssue(Error, E_SYNTAX, "msg").WithPath(src.String(), "$").Build())
+			got, _, _ = strings.Cut(out, ": error[")
+			if got != want+" $" {
+				t.Errorf("span-less location under root %q\n got %q\nwant %q", root, got, want+" $")
 			}
 		})
+	}
+}
+
+// TestModuleRoot_ASourceNameIsReadAsText holds a span-less source name to a
+// text rule: a name under the root and a separator is written relative to it,
+// a label spelled under the root among them, and the root itself is written
+// whole, since no file of the run is named by nothing.
+func TestModuleRoot_ASourceNameIsReadAsText(t *testing.T) {
+	t.Parallel()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootID, err := location.SourceIDFromPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slashed := strings.TrimSuffix(rootID.String(), "/")
+	for _, c := range []struct{ name, want string }{
+		{slashed + "/sub/../out.dat", "sub/../out.dat"},
+		{slashed + "/", slashed + "/"},
+		{slashed, slashed},
+		{"elsewhere/out.dat", "elsewhere/out.dat"},
+	} {
+		out := formatIssue(NewRenderer(WithModuleRoot(root)), NewIssue(Error, E_SYNTAX, "msg").WithPath(c.name, "$").Build())
+		if got, _, _ := strings.Cut(out, ": error["); got != c.want+" $" {
+			t.Errorf("source name %q under root %q\n got %q\nwant %q", c.name, root, got, c.want+" $")
+		}
 	}
 }
 

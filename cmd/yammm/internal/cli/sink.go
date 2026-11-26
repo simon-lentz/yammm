@@ -3,8 +3,10 @@ package cli
 import (
 	"errors"
 	"io"
+	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -138,7 +140,7 @@ func (s *DiagnosticSink) SchemaLoadOptions() []schema.Option {
 func (s *DiagnosticSink) AddSchemaLoad(err error) error {
 	load := s.load
 	s.load = nil
-	return s.addCall(load, err)
+	return s.addCall(load, err, "")
 }
 
 // SnapshotWarnings returns the option that keeps each warning a snapshot read
@@ -156,12 +158,21 @@ func (s *DiagnosticSink) SnapshotWarnings() snapshot.Option {
 func (s *DiagnosticSink) AddSnapshot(err error) error {
 	read := s.read
 	s.read = nil
-	return s.addCall(read, err)
+	return s.addCall(read, err, "")
+}
+
+// AddSnapshotRead is [DiagnosticSink.AddSnapshot] for a call that read the
+// .ys file at path: each issue is placed in that file, by [PlaceIn].
+func (s *DiagnosticSink) AddSnapshotRead(path string, err error) error {
+	read := s.read
+	s.read = nil
+	return s.addCall(read, err, path)
 }
 
 // addCall adds the result of one call: what c kept of its warnings, c nil for
-// a call that kept none, and the failures err holds.
-func (s *DiagnosticSink) addCall(c *diag.Collector, err error) error {
+// a call that kept none, and the failures err holds, placed in the file at path
+// when path is not empty.
+func (s *DiagnosticSink) addCall(c *diag.Collector, err error, path string) error {
 	if c == nil {
 		c = diag.NewCollector(callIssueLimit)
 	}
@@ -173,8 +184,46 @@ func (s *DiagnosticSink) addCall(c *diag.Collector, err error) error {
 		c.Merge(re.Result)
 	}
 	result := c.Result()
+	if path != "" {
+		result = PlaceIn(path, result)
+	}
 	s.Add(result)
 	return Exit(ExitForResult(result))
+}
+
+// SourceOf returns the source that names the file at path in a diagnostic: the
+// file's identity, or for a path no identity names, such as one that is not
+// valid UTF-8 or resolves past the host's path limit, its quoted spelling, as
+// gofmt names a file as typed.
+func SourceOf(path string) location.SourceID {
+	if id, err := location.SourceIDFromPath(path); err == nil {
+		return id
+	}
+	// strconv.Quote writes a non-empty, printable, valid UTF-8 name that
+	// starts with a quote, which NewSourceID accepts.
+	id, _ := location.NewSourceID(strconv.Quote(path))
+	return id
+}
+
+// PlaceIn returns result with each issue that has no span placed in the file at
+// path, named by [SourceOf]: a snapshot read judges bytes, as a JSON decoder
+// does, so its issues name no source. E_SNAPSHOT_IO names its own path, and a
+// cancellation or an internal fault is no fact of the file; each stays as it
+// is.
+func PlaceIn(path string, result diag.Result) diag.Result {
+	id := SourceOf(path)
+	c := diag.NewCollector(diag.NoLimit)
+	c.MergeFunc(result, func(iss diag.Issue) diag.Issue {
+		switch {
+		case iss.HasSpan(),
+			iss.Code() == diag.E_SNAPSHOT_IO,
+			iss.Code() == diag.E_CONTEXT_CANCELLED,
+			iss.Code() == diag.E_INTERNAL:
+			return iss
+		}
+		return diag.FromIssue(iss).WithSpan(location.Span{Source: id}).Build()
+	})
+	return c.Result()
 }
 
 // CapturedSources returns the sources the last captured load read, or the zero Sources.

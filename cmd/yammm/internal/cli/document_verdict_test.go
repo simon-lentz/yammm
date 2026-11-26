@@ -183,10 +183,10 @@ type Person {
 		var g *graph.Graph
 		if split > 0 {
 			validated, _ := ValidateInstances(t.Context(), s, raws(base))
-			g, _ = BuildGraph(t.Context(), s, nil, validated)
+			g, _ = BuildGraph(t.Context(), s, nil, validated, diag.Result{})
 		}
 		validated, validateResult := ValidateInstances(t.Context(), s, raws(doc))
-		_, graphResult := BuildGraph(t.Context(), s, g, validated)
+		_, graphResult := BuildGraph(t.Context(), s, g, validated, diag.Result{})
 		got := observed(MergeResults(validateResult, graphResult))
 		want := model(base, doc)
 		if got.duplicates != want.duplicates || !slices.Equal(got.missing, want.missing) || !slices.Equal(got.absent, want.absent) {
@@ -250,7 +250,7 @@ func TestBuildGraph_TypesAMissingTargetByItsRelation(t *testing.T) {
 		{"a refused Person", teamRaws(nil, []map[string]any{member, {"id": "t", "team": map[string]any{"_target_id": "t"}}}), 1},
 	} {
 		validated, _ := ValidateInstances(t.Context(), s, tc.raws)
-		_, result := BuildGraph(t.Context(), s, nil, validated)
+		_, result := BuildGraph(t.Context(), s, nil, validated, diag.Result{})
 		if got := codeCount(result, diag.E_UNRESOLVED_REQUIRED); got != tc.wantMissing {
 			t.Errorf("%s: %d E_UNRESOLVED_REQUIRED, want %d\n%s", tc.name, got, tc.wantMissing, result)
 		}
@@ -269,7 +269,7 @@ func TestBuildGraph_ReportsADuplicateAsTheGraphDoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	validated, _ := ValidateInstances(t.Context(), s, teamRaws([]map[string]any{{"id": "t"}, {"id": "t", "name": "A"}, {"id": "t", "name": "B"}}, nil))
-	_, result := BuildGraph(t.Context(), s, nil, validated)
+	_, result := BuildGraph(t.Context(), s, nil, validated, diag.Result{})
 	var issues []diag.Issue
 	for issue := range result.Issues() {
 		if issue.Code() == diag.E_DUPLICATE_PK {
@@ -289,7 +289,7 @@ func TestBuildGraph_ReportsADuplicateAsTheGraphDoes(t *testing.T) {
 
 	// The refused holder is the duplicate when it comes second.
 	validated, _ = ValidateInstances(t.Context(), s, teamRaws([]map[string]any{{"id": "t", "name": "A"}, {"id": "t"}}, nil))
-	_, result = BuildGraph(t.Context(), s, nil, validated)
+	_, result = BuildGraph(t.Context(), s, nil, validated, diag.Result{})
 	var refused []diag.Issue
 	for issue := range result.Issues() {
 		if issue.Code() == diag.E_DUPLICATE_PK {
@@ -316,7 +316,7 @@ func TestBuildGraph_JudgesNothingOnACancelledContext(t *testing.T) {
 	validated, _ := ValidateInstances(t.Context(), s, teamRaws([]map[string]any{{"id": "t"}, {"id": "t", "name": "A"}}, nil))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, result := BuildGraph(ctx, s, nil, validated)
+	_, result := BuildGraph(ctx, s, nil, validated, diag.Result{})
 	if !result.HasCode(diag.E_CONTEXT_CANCELLED) {
 		t.Fatalf("a cancelled build reported no cancellation:\n%s", result)
 	}

@@ -75,6 +75,6 @@ func runSnapshotVerify(cmd *cobra.Command, args []string, sink *cli.DiagnosticSi
 
 	// The exit answers for everything the sink holds, the schema load's
 	// warnings among it.
-	verifyErr := sink.AddSnapshot(snapshot.Verify(cmd.Context(), data, s, opts...))
+	verifyErr := sink.AddSnapshotRead(snapshotPath, snapshot.Verify(cmd.Context(), data, s, opts...))
 	return cli.JoinExitErrors(verifyErr, cli.Exit(cli.ExitForResult(sink.Result())))
 }

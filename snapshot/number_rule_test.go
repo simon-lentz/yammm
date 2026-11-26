@@ -185,14 +185,16 @@ func TestLoad_RevalidationRefusesAnIntegerPastInt64AtAnInteger(t *testing.T) {
 
 // A key component the value rule reads at another rendering than its document's
 // is no key, wherever a document states one, and a component is held to its key
-// property by kind: the integer 1 and the float 1.0 render alike and differ.
+// property by kind: the integer 1 and the float 1.0 render alike and differ. A
+// root stored under a number is refused whatever its property holds, because
+// its key property stores text.
 func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 	t.Parallel()
 	s, gauge := loadNumberRuleSchema(t)
 	root := func(key, id any) snapparts.Instance {
 		return snapparts.Instance{TypeID: gauge, PrimaryKey: immutable.WrapKey([]any{key}), Properties: immutable.WrapProperties(map[string]any{"id": id})}
 	}
-	sound := root(json.Number("1"), json.Number("1"))
+	sound := root("g1", "g1")
 	for _, c := range []struct {
 		name   string
 		parts  snapparts.Parts
@@ -235,7 +237,7 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 		{"an edge's target key past int64", snapparts.Parts{
 			Instances: []snapparts.Instance{sound},
 			Edges: []snapparts.Edge{{
-				Relation: "LINK", SourceType: gauge, SourceKey: immutable.WrapKey([]any{json.Number("1")}),
+				Relation: "LINK", SourceType: gauge, SourceKey: immutable.WrapKey([]any{"g1"}),
 				TargetKey: immutable.WrapKey([]any{json.Number("9223372036854775808")}),
 			}},
 		}, `carries target key [9223372036854775808], whose component 0`},
@@ -260,20 +262,15 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 		})
 	}
 
-	doc := snappartstest.Document(t, s, snapparts.Parts{Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{sound}})
-	if err := snapshot.Verify(t.Context(), rehashDocument(t, doc), s); err != nil {
-		t.Errorf("a key 1 whose property is 1 was refused: %s", err)
-	}
-
 	withDup := string(snappartstest.Document(t, s, snapparts.Parts{
 		Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{sound}, Duplicates: []snapparts.Instance{sound},
 	}))
 	if err := snapshot.Verify(t.Context(), rehashDocument(t, []byte(withDup)), s); err != nil {
-		t.Errorf("a duplicate of the key 1 was refused: %s", err)
+		t.Errorf("a duplicate of the key g1 was refused: %s", err)
 	}
 	for name, edit := range map[string][2]string{
-		"a duplicate record's key 1.0": {`"duplicates":[{"type":0,"key":[1],`, `"duplicates":[{"type":0,"key":[1.0],`},
-		"a conflict key 1.0":           {`"conflict":{"type":0,"key":[1]}`, `"conflict":{"type":0,"key":[1.0]}`},
+		"a duplicate record's key 1.0": {`"duplicates":[{"type":0,"key":["g1"],`, `"duplicates":[{"type":0,"key":[1.0],`},
+		"a conflict key 1.0":           {`"conflict":{"type":0,"key":["g1"]}`, `"conflict":{"type":0,"key":[1.0]}`},
 	} {
 		res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
 			return snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withDup, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
@@ -285,14 +282,14 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 
 	// A refused reference key addresses nothing, so the record draws no second
 	// issue for the address it would name: a duplicate's key [1.0] beside its
-	// instance's key [2], and a conflict key [1.0] where no root stands at [1].
-	two := root(json.Number("2"), json.Number("2"))
+	// instance's key ["g2"], and a conflict key [1.0] where no root stands.
+	two := root("g2", "g2")
 	withDupOfTwo := string(snappartstest.Document(t, s, snapparts.Parts{
 		Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{two}, Duplicates: []snapparts.Instance{two},
 	}))
 	for name, edit := range map[string][2]string{
-		"a duplicate record's key 1.0 beside its instance's key 2": {`"duplicates":[{"type":0,"key":[2],`, `"duplicates":[{"type":0,"key":[1.0],`},
-		"a conflict key 1.0 naming no root":                        {`"conflict":{"type":0,"key":[2]}`, `"conflict":{"type":0,"key":[1.0]}`},
+		"a duplicate record's key 1.0 beside its instance's key g2": {`"duplicates":[{"type":0,"key":["g2"],`, `"duplicates":[{"type":0,"key":[1.0],`},
+		"a conflict key 1.0 naming no root":                         {`"conflict":{"type":0,"key":["g2"]}`, `"conflict":{"type":0,"key":[1.0]}`},
 	} {
 		res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
 			return snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withDupOfTwo, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
@@ -318,12 +315,15 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 		t.Errorf("a record of an unresolved row with source key 1.0: want both refusals: %s", res)
 	}
 
-	// A key property may spell its component's number otherwise, as long as both
-	// read to one value of one kind.
-	for _, kp := range [][2]json.Number{{"1.5", "1.50"}, {"0", "-0"}, {"100", "100"}} {
+	// A number the key and its property read to one value of one kind is still
+	// no text, whatever the spelling.
+	for _, kp := range [][2]json.Number{{"1", "1"}, {"1.5", "1.50"}, {"0", "-0"}, {"100", "100"}} {
 		doc := snappartstest.Document(t, s, snapparts.Parts{Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{root(kp[0], kp[1])}})
-		if err := snapshot.Verify(t.Context(), rehashDocument(t, doc), s); err != nil {
-			t.Errorf("key [%s] with property %s was refused: %s", kp[0], kp[1], err)
+		res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), rehashDocument(t, doc), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+		})
+		if sbFailures(res) != 1 || !strings.Contains(res.String(), `holds component 0 as a JSON number; its key property "id" stores text`) {
+			t.Errorf("key [%s] with property %s: want its one refusal by kind: %s", kp[0], kp[1], res)
 		}
 	}
 }

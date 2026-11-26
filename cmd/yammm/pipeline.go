@@ -5,6 +5,7 @@ import (
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -26,12 +27,14 @@ func checkDataOperands(paths ...string) error {
 // diagnostics reach sink as it is read.
 func assembleGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.Schema, paths []string, base *graph.Graph) (*graph.Graph, error) {
 	parsed := make(map[string]jsondata.Batch)
+	var read []diag.Result
 	for _, path := range paths {
 		fileParsed, parseResult, err := cli.LoadAndParseJSON(cmd.Context(), path)
 		if err != nil {
 			return nil, err
 		}
 		sink.Add(parseResult)
+		read = append(read, parseResult)
 		// A type keeps the source of the first file that holds its array.
 		for typeName, batch := range fileParsed {
 			if held, ok := parsed[typeName]; ok {
@@ -42,7 +45,7 @@ func assembleGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.Schema
 		}
 	}
 	doc, validateResult := cli.ValidateInstances(cmd.Context(), s, parsed)
-	g, graphResult := cli.BuildGraph(cmd.Context(), s, base, doc)
+	g, graphResult := cli.BuildGraph(cmd.Context(), s, base, doc, cli.MergeResults(read...))
 	sink.Add(validateResult, graphResult)
 	return g, nil
 }

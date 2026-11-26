@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"maps"
+	"os"
 	"strings"
 	"time"
 
@@ -96,8 +98,11 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	var g *graph.Graph
 	var imported *snapshot.Header
 	if intoPath != "" {
+		if err := cli.CheckRewrite(outputPath, intoPath); err != nil {
+			return cli.Runtime(err)
+		}
 		snap, header, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
-		if err := sink.AddSnapshot(loadErr); err != nil {
+		if err := sink.AddSnapshotRead(intoPath, loadErr); err != nil {
 			return err
 		}
 		g = graph.NewFromSnapshot(snap)
@@ -143,11 +148,13 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	}
 
 	// Raised only once the file exists: the code states that a snapshot was
-	// written where a reader that discovers snapshots by extension will not find it.
-	if !strings.HasSuffix(outputPath, ".ys") {
+	// written where a reader that discovers snapshots by extension will not find
+	// it. A scan follows a link it finds, so either the host path, which reads
+	// "out.ys/x/.." as out.ys, or the file its links reach is found.
+	if !foundByExtension(outputPath) {
 		c := diag.NewCollector(diag.NoLimit)
 		c.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_EXTENSION,
-			fmt.Sprintf("output path %q does not use the .ys extension", outputPath)).
+			fmt.Sprintf("output path %q reaches no file a scan for .ys files finds", outputPath)).
 			WithPath(outputPath, "").Build())
 		sink.Add(c.Result())
 	}
@@ -184,4 +191,36 @@ func parseMetadata(raw []string) (map[string]string, error) {
 		m[k] = v
 	}
 	return m, nil
+}
+
+// foundByExtension reports whether a scan for .ys files can find what a write
+// to path wrote: a name the write passes through, the path or a link it
+// follows, ends in .ys and is an entry [snapshot.ScanDir] admits. A path it
+// cannot resolve or stat is reported found, so no warning rests on a guess.
+func foundByExtension(path string) bool {
+	names, err := cli.WrittenNames(path)
+	if err != nil {
+		return true
+	}
+	for _, name := range names {
+		if strings.HasSuffix(name, ".ys") && scanAdmits(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// scanAdmits reports whether [snapshot.ScanDir] admits the entry name names: a
+// regular file, or a link whose target is one or cannot be stat'd. A name it
+// cannot stat is admitted, as foundByExtension reports it found.
+func scanAdmits(name string) bool {
+	info, err := os.Lstat(name)
+	switch {
+	case err != nil || info.Mode().IsRegular():
+		return true
+	case info.Mode()&fs.ModeSymlink == 0:
+		return false
+	}
+	target, err := os.Stat(name)
+	return err != nil || target.Mode().IsRegular()
 }

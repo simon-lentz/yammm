@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -83,8 +84,9 @@ type Holder {
 	requireReadersRefuse(t, doc, s, diag.E_SNAPSHOT_MALFORMED)
 }
 
-// A bool key component agrees with its key property by value, as any other does.
-func TestRead_RefusesABoolKeyThatDisagreesWithItsProperty(t *testing.T) {
+// A bool key component is held to its key property by value, as any other is,
+// and one that agrees is still refused: its key property stores text.
+func TestRead_RefusesABoolKey(t *testing.T) {
 	t.Parallel()
 	s := loadFactSchema(t, `schema "facts"
 
@@ -100,8 +102,11 @@ type Item {
 		}}}
 	}
 	requireReadersRefuse(t, snappartstest.Document(t, s, parts(true, false)), s, diag.E_SNAPSHOT_MALFORMED)
-	if _, err := snapshot.Unmarshal(t.Context(), snappartstest.Document(t, s, parts(true, true)), s); err != nil {
-		t.Errorf("a key that agrees with its property: Load = %s, want no error", err)
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), snappartstest.Document(t, s, parts(true, true)), s, snapshot.WithWarnings(warn))
+	})
+	if !strings.Contains(res.String(), `holds component 0 as a JSON boolean; its key property "id" stores text`) {
+		t.Errorf("a bool key that agrees with its property: Load = %s, want its refusal by kind", res)
 	}
 }
 

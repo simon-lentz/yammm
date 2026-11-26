@@ -12,7 +12,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/format"
 	"github.com/simon-lentz/yammm/internal/termtext"
-	"github.com/simon-lentz/yammm/location"
 )
 
 func newFmtCmd() *cobra.Command {
@@ -53,7 +52,13 @@ func runFmt(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	// leaves every file as it was; each refusal is named.
 	refusals := make([]error, 0, len(args))
 	for _, path := range args {
-		refusals = append(refusals, cli.CheckOperand("schema file", path))
+		err := cli.CheckOperand("schema file", path)
+		if err == nil && write {
+			if rerr := cli.CheckRewrite(path, path); rerr != nil {
+				err = cli.Runtime(rerr)
+			}
+		}
+		refusals = append(refusals, err)
 	}
 	if err := cli.JoinExitErrors(refusals...); err != nil {
 		return err
@@ -104,17 +109,14 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, list, wr
 }
 
 // syntaxResult places the formatter's syntax diagnostic in the file at path,
-// whose bytes are content: the formatter parses text, so its issue names no
-// source. It reports false when the issue has no position or the path names
-// no source.
+// whose bytes are content, named by [cli.SourceOf]: the formatter parses text,
+// so its issue names no source. It reports false when the issue has no
+// position.
 func syntaxResult(path string, content []byte, iss diag.Issue) (diag.Result, bool) {
 	if !iss.HasSpan() {
 		return diag.Result{}, false
 	}
-	source, err := location.SourceIDFromPath(path)
-	if err != nil {
-		return diag.Result{}, false
-	}
+	source := cli.SourceOf(path)
 	span := iss.Span()
 	span.Source = source
 	span.Start.Offset = fileOffset(content, span.Start.Offset)

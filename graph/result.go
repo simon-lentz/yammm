@@ -62,11 +62,12 @@ type Attestation struct {
 //
 // No two edges and no two unresolved records tie: a graph holds one of each per
 // source, association and target. Each sort compares every arm its tuple names.
-// A properties arm compares a rendering that writes each value as %T|%#v, so
-// records that rendering makes equal tie in that arm.
+// A properties arm ties two sets only when a snapshot writes them the same: a
+// number by the exact value of the text a snapshot writes for it, then by that
+// text, so 1 before 1.0 and -0.0 before 0; a nil list or map, and a zero
+// Properties, as null.
 // A provenance arm compares the source name, the path a document writes, and the
-// span. Among the ties are float64(1) and int64(1) inside a list or map, and a
-// zero and an empty Properties.
+// span.
 //
 // No instance map is exposed, so there is no iteration order to be surprised
 // by: [Snapshot.Instances] yields every root instance in the order above,

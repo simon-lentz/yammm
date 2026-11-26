@@ -1075,6 +1075,10 @@ func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 					i, pk.Name(), diag.CutValue(literalWireKey([]any{prop})))
 				break
 			}
+			if text, ok := untextReason(i, inst.Key[i], pk.Name()); ok {
+				reason = text
+				break
+			}
 			if text, ok := respelled(inst.Key[i], c); ok {
 				reason = respelledReason(wireKeyPosition{index: i, constraint: c, name: pk.Name()}, text)
 				break
@@ -1177,11 +1181,12 @@ func literalWireKey(key []any) string {
 }
 
 // checkReferenceKey refuses a key a record states to name a root of the type at
-// row when a component does not read back as written, or is not the text its
-// kind stores, as the root's own stored key would be refused: [1.0] names no
-// root, though it renders as the key [1]. what names the record and its key. A
-// row of -1 names no type, and judges reading back alone. It reports whether
-// the key stands.
+// row when a component does not read back as written, or is a string its kind
+// stores as other text: [1.0] names no root, though it renders as the key [1].
+// A component that is not a string names no root, which the reference check
+// reports, unlike a root's own stored key, which is refused for it. what names
+// the record and its key. A row of -1 names no type, and judges reading back
+// alone. It reports whether the key stands.
 func (sd *streamDecoder) checkReferenceKey(what string, row int, key []any) bool {
 	if i := unreadableWireComponent(key); i >= 0 {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
@@ -1244,6 +1249,24 @@ func (sd *streamDecoder) respelledAt(row int, key []any) (wireKeyPosition, strin
 		}
 	}
 	return wireKeyPosition{}, "", false
+}
+
+// untextReason states why stored key component i, under the key property name,
+// is refused, and reports false for a component that is a JSON string. Every
+// primary-key kind stores text (SPEC's Primary Key Types), so the validator
+// builds no root whose key holds another JSON form.
+func untextReason(i int, component any, name string) (string, bool) {
+	// A key decodes its numbers as json.Number, a null component fails its
+	// property's agreement first, and unreadableWireComponent refuses a list or
+	// a map first, so any other form is a number.
+	form := "number"
+	switch component.(type) {
+	case string:
+		return "", false
+	case bool:
+		form = "boolean"
+	}
+	return fmt.Sprintf("holds component %d as a JSON %s; its key property %q stores text", i, form, name), true
 }
 
 func readsBack(written string) bool {
@@ -2141,12 +2164,23 @@ func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) bool {
 			fmt.Sprintf("unresolved record %d states reason %q but carries a target key %s",
 				ui, u.Reason, diag.CutValue(formatWireKey(u.TargetKey)))).Build())
 	}
-	if len(u.Properties) > 0 {
+	if holdsAValue(u.Properties) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("unresolved record %d states reason %q but carries edge properties",
 				ui, u.Reason)).Build())
 	}
 	return true
+}
+
+// holdsAValue reports whether a member of m holds a value. A member stored null
+// is the member left out, as [readEdgeProperties] reads it.
+func holdsAValue(m map[string]any) bool {
+	for _, v := range m {
+		if v != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // warnUnresolvedRequired reports an unresolved record under a required
@@ -2699,13 +2733,18 @@ func copyWireValue(v any) any {
 
 // readProperties reads each property of a materialized instance at the
 // constraint t declares for it, so a number at a Float is a float64 whatever its
-// spelling. The caller owns m: a list or a map in it is rewritten in place.
+// spelling. A property stored as null is the member left out, as the validator
+// reads a nil value, so the next Marshal writes no member for it. The caller
+// owns m: a list or a map in it is rewritten in place.
 func readProperties(m map[string]any, t schema.Type) map[string]any {
 	if m == nil {
 		return nil
 	}
 	result := make(map[string]any, len(m))
 	for k, v := range m {
+		if v == nil {
+			continue
+		}
 		p, _ := t.Property(k)
 		result[k] = value.ReadAt(v, p.Constraint())
 	}
@@ -2720,6 +2759,9 @@ func readEdgeProperties(m map[string]any, rel schema.Relation) map[string]any {
 	}
 	result := make(map[string]any, len(m))
 	for k, v := range m {
+		if v == nil {
+			continue
+		}
 		p, _ := rel.Property(k)
 		result[k] = value.ReadAt(v, p.Constraint())
 	}

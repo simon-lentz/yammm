@@ -2,6 +2,7 @@ package main
 
 import (
 	"maps"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -28,7 +29,9 @@ check the instances of the body: the verified hash seals the body a writer
 wrote, and snapshot info checks it whole.
 
 A regular file is replaced atomically (tmp+fsync+rename) and keeps its
-permission bits; a FIFO or a device is written through.`,
+permission bits. A FIFO, a device or a descriptor path such as /dev/fd/3 is
+refused before it is read: a write through it would append a second document
+after the first.`,
 		Args: cobra.ExactArgs(1),
 		RunE: withDiagnostics(runSnapshotUpdateMetadata),
 	}
@@ -65,6 +68,13 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 	if err := cli.CheckOperand("snapshot file", path); err != nil {
 		return err
 	}
+	// What the read draws names the file relative to where the command was run.
+	if wd, err := os.Getwd(); err == nil {
+		sink.SetSource(nil, wd)
+	}
+	if err := cli.CheckRewrite(path, path); err != nil {
+		return cli.Runtime(err)
+	}
 	data, err := cli.ReadFile(path)
 	if err != nil {
 		return cli.Runtimef("read %q: %v", path, err)
@@ -77,7 +87,7 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 	// header of any size.
 	read, headerErr := snapread.HeaderOf(ctx, data)
 	if headerErr != nil {
-		return sink.AddSnapshot(headerErr)
+		return sink.AddSnapshotRead(path, headerErr)
 	}
 	header := read.(*snapshot.Header)
 
@@ -95,7 +105,7 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 	// UpdateMetadata refuses a document whose hash does not verify, so a
 	// tampered file is never sealed under a fresh hash.
 	out, updateErr := snapshot.UpdateMetadata(ctx, data, newMeta)
-	if err := sink.AddSnapshot(updateErr); err != nil {
+	if err := sink.AddSnapshotRead(path, updateErr); err != nil {
 		return err
 	}
 

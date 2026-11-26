@@ -18,7 +18,7 @@ func TestBuildGraph_ReportsALongDuplicateKeyAsTheGraphDoes(t *testing.T) {
 	}
 	long := strings.Repeat("t", 100)
 	validated, _ := ValidateInstances(t.Context(), s, teamRaws([]map[string]any{{"id": long}, {"id": long, "name": "A"}, {"id": long, "name": "B"}}, nil))
-	_, result := BuildGraph(t.Context(), s, nil, validated)
+	_, result := BuildGraph(t.Context(), s, nil, validated, diag.Result{})
 	want := `duplicate primary key ["` + long[:30] + `… (104 bytes) for type "Team"`
 	n := 0
 	for issue := range result.Issues() {

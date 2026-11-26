@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -402,4 +403,47 @@ func TestScanDir_SharedTmpSuffixConstantContract(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1, "expected exactly foo.ys, not the sibling .tmp staging file")
 	assert.Equal(t, "foo.ys", entries[0].Name)
+}
+
+// A directory the process may not read fails with the cause the open gave,
+// named once.
+func TestScanDir_AnUnreadableDirectoryNamesItsCauseOnce(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a host and a user that permission bits bind")
+	}
+	dir := filepath.Join(t.TempDir(), "locked")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	// An empty directory is removed by its parent's permission, so the
+	// test's cleanup needs no mode restored.
+	require.NoError(t, os.Chmod(dir, 0))
+	_, err := collectScanDir(t.Context(), dir)
+	var pathErr *fs.PathError
+	require.ErrorAs(t, err, &pathErr)
+	assert.Equal(t, dir, pathErr.Path)
+	require.ErrorIs(t, err, fs.ErrPermission)
+	var inner *fs.PathError
+	assert.NotErrorAs(t, pathErr.Err, &inner, "the cause wraps a second path: %v", err)
+}
+
+// A directory that does not open fails as os.ReadDir fails: one *fs.PathError
+// naming dir as the caller passed it, once.
+func TestScanDir_ADirectoryErrorNamesTheDirOnceAsPassed(t *testing.T) {
+	t.Parallel()
+	file := filepath.Join(t.TempDir(), "a.ys")
+	require.NoError(t, os.WriteFile(file, []byte("x"), 0o600))
+	for _, dir := range []string{
+		filepath.Join(t.TempDir(), "missing"),
+		file + string(filepath.Separator) + "." + string(filepath.Separator),
+		file + string(filepath.Separator) + "under",
+	} {
+		_, err := collectScanDir(t.Context(), dir)
+		var pathErr *fs.PathError
+		require.ErrorAs(t, err, &pathErr, dir)
+		assert.Equal(t, "open", pathErr.Op, dir)
+		assert.Equal(t, dir, pathErr.Path, dir)
+		assert.Equal(t, 1, strings.Count(err.Error(), filepath.Clean(dir)), "%s: %v", dir, err)
+		var inner *fs.PathError
+		assert.NotErrorAs(t, pathErr.Err, &inner, "%s: the cause wraps a second path: %v", dir, err)
+	}
 }

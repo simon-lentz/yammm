@@ -158,12 +158,14 @@
 // surface on [ScanEntry.Err] and iteration continues. A failed stat raises
 // nothing and leaves the entry's size and modification time zero. Files whose
 // basename ends with [TmpSuffix] are skipped so crash-residual
-// staging files are not confused for complete snapshots. A directory name that is
-// not empty is cleaned before the read, so each [ScanEntry.Path] names an entry of
-// the listed directory. An empty name fails as a missing directory does, and a
-// cleaned name whose element is not a directory, or sits under one that is not,
-// fails with an error matching [syscall.ENOTDIR] on every host; an element a
-// ".." cancels is never read.
+// staging files are not confused for complete snapshots. A directory name is read
+// at the path [WriteFile] writes: cleaned, and made absolute when it climbs out of
+// the working directory, so each [ScanEntry.Path] names an entry of the listed
+// directory. An empty name fails as a missing directory does, and a cleaned name
+// whose element is not a directory, or sits under one that is not, fails with an
+// error matching [syscall.ENOTDIR] on every host; an element a ".." cancels is
+// never read. A directory that does not open fails as one [fs.PathError] naming
+// the directory as passed.
 //
 // [UpdateMetadata] replaces the metadata of an existing .ys document and
 // recomputes its integrity hash, keeping every byte outside the header. The
@@ -244,7 +246,8 @@
 // Stat resolves no schema, so a document it summarizes cleanly can still fail
 // [Unmarshal] or [Verify] on the schema hash, on schema resolution, on each check
 // of the graph package doc's "Structural facts" that needs a schema, on a
-// Timestamp, Date or UUID key component its kind stores as other text, and under
+// Timestamp, Date or UUID key component its kind stores as other text, on a
+// root's stored key holding a component that is not a JSON string, and under
 // [WithRevalidation] on the values. Stat compares keys as written, so it reports
 // such a component only where it parts two keys that name one address: a
 // reference and the root it names as a dangling reference, a duplicate's key and
@@ -274,8 +277,9 @@
 // The read, write and update functions return an error: nil on success, an
 // error naming a refused option, or a *[diag.ResultError] whose Result holds
 // the failures. Read it with errors.AsType, and test a code with errors.Is.
-// [WriteFile] returns its own error, and [ScanDir] yields a per-entry error in
-// [ScanEntry.Err]. An issue below failure severity is never in an error: only
+// [WriteFile] returns its own error. [ScanDir] yields a per-entry error in
+// [ScanEntry.Err], and an *[fs.PathError] or the context's error when the
+// scan stops. An issue below failure severity is never in an error: only
 // [Unmarshal] and [Verify] draw one, and they send it to [WithWarnings].
 //
 //   - Fatal: an I/O failure, a cancelled context, or a broken invariant

@@ -12,7 +12,7 @@ import (
 
 // A data command's verdict is about the document it reads, while the graph
 // answers for the instances it was given, and it is given only the ones the
-// validator accepted and [graph.Graph.Add] installed. Two answers differ:
+// validator accepted and [graph.Graph.Add] installed. Three answers differ:
 //
 //   - A required association whose target the document holds, but which the
 //     pipeline refused, is reported by [graph.Graph.Check] as a missing target.
@@ -21,6 +21,9 @@ import (
 //   - A key the document states twice, where one of the two was refused, never
 //     reaches the graph's duplicate check. The command reports E_DUPLICATE_PK
 //     at every later holder of the key the graph did not already report.
+//   - After an E_DATA_PARSE the read stopped or refused an element, which may
+//     be a target's instance, so the command drops every E_UNRESOLVED_REQUIRED
+//     that reports a missing target.
 //
 // A root the pipeline refused counts only when [instance.Validator.PrimaryKeyOf]
 // reads its key. The graph API is unchanged: its answer is true of the graph.
@@ -174,6 +177,33 @@ func (v verdict) explain(check diag.Result) diag.Result {
 		collector.Collect(issue)
 	}
 	return collector.Result()
+}
+
+// withoutMissingTargets returns check without each E_UNRESOLVED_REQUIRED whose
+// reason is target_missing. A truncated check is returned as it is, since a
+// filter cannot keep its dropped counts.
+func withoutMissingTargets(check diag.Result) diag.Result {
+	if !check.HasCode(diag.E_UNRESOLVED_REQUIRED) || check.LimitReached() {
+		return check
+	}
+	collector := diag.NewCollector(diag.NoLimit)
+	for issue := range check.Issues() {
+		if issue.Code() == diag.E_UNRESOLVED_REQUIRED && reasonOf(issue) == "target_missing" {
+			continue
+		}
+		collector.Collect(issue)
+	}
+	return collector.Result()
+}
+
+// reasonOf returns the reason detail an issue carries, or "".
+func reasonOf(issue diag.Issue) string {
+	for _, d := range issue.Details() {
+		if d.Key == diag.DetailKeyReason {
+			return d.Value
+		}
+	}
+	return ""
 }
 
 // missingTarget returns the target an E_UNRESOLVED_REQUIRED names as missing,

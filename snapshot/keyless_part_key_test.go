@@ -214,7 +214,7 @@ func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 					continue
 				}
 				at := name + ", " + shape.name + ", " + kc.name
-				held := kc.readable && (shape.keyed || len(kc.components) == 0)
+				held := kc.readable && kc.validatorStates(shape)
 				b := build(shape, kc.components)
 				if diagtest.Err(b.res) != nil {
 					refused++

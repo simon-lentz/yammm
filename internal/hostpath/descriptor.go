@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -24,6 +26,27 @@ func Descriptor(path string) bool {
 		return sameFile(dir, "/dev/fd") || procDescriptorTable(dir)
 	}
 	return false
+}
+
+// DescriptorNumber returns the number of the process's own descriptor that path
+// names, as [Descriptor] judges the path: 0, 1 and 2 for /dev/stdin,
+// /dev/stdout and /dev/stderr, and N for /dev/fd/N. A descriptor table of
+// another process names no descriptor of this one.
+func DescriptorNumber(path string) (int, bool) {
+	if runtime.GOOS == "windows" {
+		return 0, false
+	}
+	dir := Parent(path)
+	switch base := filepath.Base(path); base {
+	case "stdin", "stdout", "stderr":
+		return slices.Index([]string{"stdin", "stdout", "stderr"}, base), sameFile(dir, "/dev")
+	default:
+		if strings.Trim(base, "0123456789") != "" {
+			return 0, false
+		}
+		n, err := strconv.Atoi(base)
+		return n, err == nil && sameFile(dir, "/dev/fd")
+	}
 }
 
 // sameFile reports whether a and b both stat and name one file.

@@ -523,7 +523,8 @@ part type K {
 // that number is a reference to the address the refused root states. A negative zero
 // and an integer past int64 do not read back, so each states no address and a
 // reference spelled so is its own break: a duplicate's stored key and its
-// conflict key are two.
+// conflict key are two. A duplicate stored under a number is refused by kind,
+// since its key property stores text.
 func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 	t.Parallel()
 	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
@@ -582,7 +583,7 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 		{"1 and an edge to 1", [][2]string{stated(`1`), edgeTo(`1`)}, 1},
 		{"a number past int64 and an edge to its nearest float, which is no key", [][2]string{stated(`18446744073709551615`), edgeTo(`18446744073709552000`)}, 2},
 		{"1.0 and a record of 1", [][2]string{stated(`1.0`), recordOf(`1`)}, 1},
-		{"1.0 and a duplicate whose conflict is 1", [][2]string{stated(`1.0`), dupOf(`1`)}, 1},
+		{"1.0 and a duplicate whose conflict is 1", [][2]string{stated(`1.0`), dupOf(`1`)}, 2},
 		{"-0.0 and a duplicate whose conflict is -0.0", [][2]string{stated(`-0.0`), dupOf(`-0.0`)}, 3},
 		{"-0e0 and a duplicate whose conflict is -0e0", [][2]string{stated(`-0e0`), dupOf(`-0e0`)}, 3},
 		{"-0.0 and a record of -0.0", [][2]string{stated(`-0.0`), recordOf(`-0.0`)}, 2},

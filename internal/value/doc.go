@@ -25,8 +25,9 @@
 //   - integers: int, int8-64, uint, uint8-64, uintptr
 //   - floats: float32, float64 (with special handling: -Inf < finite < +Inf < NaN)
 //   - [encoding/json.Number] that is a JSON number literal, as the integer it
-//     spells when it is an integer literal and as a float otherwise; one
-//     holding other text is no number and has no strata
+//     spells when it is an integer literal, as a float when a finite float64
+//     holds it, and past every finite number on its side of zero when none
+//     does; one holding other text is no number and has no strata
 //   - string
 //   - slices of supported types (lexicographic comparison)
 //
@@ -122,7 +123,9 @@
 //
 // An integer takes the exact path whatever carries it: a JSON integer literal
 // that an int64 or a uint64 holds is compared as that integer, and any other
-// JSON number literal is compared as a float. An integer literal neither int64
+// JSON number literal is compared as a float, save one no finite float64 holds,
+// which ranks past every finite number on its side of zero and inside the
+// infinities, two such literals compared as decimals. An integer literal neither int64
 // nor uint64 holds is compared exactly, as
 // a rational, so it equals a float64 only when that float64 is the same integer
 // exactly (2^64 is; the float64 nearest 2^64+1 is not). The order is therefore

@@ -177,7 +177,11 @@
 //     of a stored key, a target key, a record's source key, or a duplicate's key
 //     or conflict key that its kind can render is the text its kind stores, so
 //     every address compares as written; a component its kind cannot render is
-//     no address of an instance of that kind, which revalidation judges. Two roots of one type never share a canonical address.
+//     no address of an instance of that kind, which revalidation judges. Every
+//     primary-key kind stores text, so a root's stored key holds only JSON
+//     strings: a number or a boolean there is refused even where its key
+//     property agrees. A reference key that holds one names no root, and
+//     revalidation judges an unresolved record's. Two roots of one type never share a canonical address.
 //   - Names. Every stored property and edge property name is declared.
 //   - Associations. Every edge and unresolved record is under an association
 //     its source's type declares. An edge's target is an instance of that
@@ -446,11 +450,13 @@
 // move when one schema text is loaded from another directory.
 // A graph holds one edge or record per source, association and target, so no two
 // edges and no two unresolved records tie. Each sort compares every arm its tuple
-// names. A properties arm compares a rendering that writes each value as %T|%#v,
-// so records that rendering makes equal tie in that arm.
+// names. A properties arm compares the two sets by the order of stored values, so two
+// sets tie in that arm only when a snapshot writes them the same: a number by
+// the exact value of the text a snapshot writes for it, then by that text, so 1
+// before 1.0 and -0.0 before 0; a nil list or map, and a zero Properties, as
+// null.
 // A provenance arm compares the source name, the path a document writes, and the
-// span. Among the ties are float64(1) and int64(1) inside a list or map, and a
-// zero and an empty Properties.
+// span.
 //
 // Sorting is established when the Snapshot is constructed — by [Graph.Snapshot]
 // and by the snapshot package's reader alike, which reach it through one place —

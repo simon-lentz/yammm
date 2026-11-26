@@ -178,12 +178,29 @@ func (r *Renderer) location(issue Issue) string {
 	case issue.HasSpan():
 		return r.formatSpanLocation(issue.Span())
 	case issue.Path() != "" && issue.SourceName() != "":
-		return issue.SourceName() + " " + issue.Path()
+		return r.sourceName(issue.SourceName()) + " " + issue.Path()
 	case issue.Path() != "":
 		return issue.Path()
 	default:
-		return issue.SourceName()
+		return r.sourceName(issue.SourceName())
 	}
+}
+
+// sourceName writes a source name as [Renderer.formatSpanLocation] writes a
+// span's source, so one run names one file one way: a name whose text starts
+// with the root and a separator is written relative to the root, and any other
+// name as it is. The rule reads text alone, so a label spelled under the root,
+// such as an output path, is written relative to it too, and the root itself
+// is written whole.
+func (r *Renderer) sourceName(name string) string {
+	if r.root.IsZero() {
+		return name
+	}
+	under := strings.TrimSuffix(r.root.String(), "/") + "/"
+	if rel, ok := strings.CutPrefix(name, under); ok && rel != "" {
+		return rel
+	}
+	return name
 }
 
 func (r *Renderer) formatSpanLocation(span location.Span) string {

@@ -147,8 +147,11 @@ func (d Validated) Valids() []instance.ValidInstance {
 
 // BuildGraph adds the document's valid instances to base, or to a new graph
 // when base is nil, runs the graph-level checks, and returns the graph with a
-// verdict about the document (see [documentVerdict]).
-func BuildGraph(ctx context.Context, s schema.Schema, base *graph.Graph, doc Validated) (*graph.Graph, diag.Result) {
+// verdict about the document (see [documentVerdict]). read is what reading the
+// document drew: after an E_DATA_PARSE no target is reported missing, since
+// the fault stopped the read or refused an element, which may be the target's
+// instance.
+func BuildGraph(ctx context.Context, s schema.Schema, base *graph.Graph, doc Validated, read diag.Result) (*graph.Graph, diag.Result) {
 	g := base
 	if g == nil {
 		g = graph.New(s)
@@ -167,6 +170,9 @@ func BuildGraph(ctx context.Context, s schema.Schema, base *graph.Graph, doc Val
 	if ctx.Err() == nil && (refusals || len(valids) < doc.rootCount()) {
 		dv = documentVerdict(s, g, base != nil, doc, added)
 		check = dv.explain(check)
+	}
+	if read.HasCode(diag.E_DATA_PARSE) {
+		check = withoutMissingTargets(check)
 	}
 	for _, valid := range valids {
 		if !dv.renamed[valid] {

@@ -238,3 +238,51 @@ func TestWriteFile_ClimbsFromTheWorkingDirectoryAsSpelled(t *testing.T) {
 		t.Errorf("the file beside the directory the link reached was written: %q", got)
 	}
 }
+
+// A climbing dir is listed where WriteFile writes and the loader reads, beside
+// the link's own directory, and each yielded Path is absolute, so a caller that
+// opens or writes it reaches the file listed from any working directory.
+func TestScanDir_ClimbsFromTheWorkingDirectoryAsSpelled(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{filepath.Join("phys", "inner"), filepath.Join("phys", "snaps"), filepath.Join("logical", "snaps")} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "logical", "snaps", "logical.ys"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "phys", "snaps", "phys.ys"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(root, "logical", "cwd")
+	if err := os.Symlink(filepath.Join(root, "phys", "inner"), cwd); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Chdir(cwd)
+	var paths []string
+	for entry, err := range snapshot.ScanDir(t.Context(), filepath.Join("..", "snaps")) {
+		if err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		paths = append(paths, entry.Path)
+	}
+	want := filepath.Join(root, "logical", "snaps", "logical.ys")
+	if len(paths) != 1 || !sameFile(t, paths[0], want) || !filepath.IsAbs(paths[0]) {
+		t.Errorf("ScanDir(../snaps) yields %q, want the absolute path of %s", paths, want)
+	}
+}
+
+// sameFile reports whether a and b name one file.
+func sameFile(t *testing.T, a, b string) bool {
+	t.Helper()
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return os.SameFile(ai, bi)
+}

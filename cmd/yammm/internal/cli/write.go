@@ -32,6 +32,8 @@ type writeTarget struct {
 	path    string      // the file a replacement lands on: the named path, its symlinks followed
 	mode    fs.FileMode // the mode a replacement carries
 	through bool        // written through the named path in place rather than replaced
+	stream  string      // for a write through, the link hop that names the descriptor, FIFO or device
+	names   []string    // the named path, then each link destination the write follows
 }
 
 // resolveWriteTarget follows the symlinks of path, which [HostPath] gave, and
@@ -45,14 +47,15 @@ type writeTarget struct {
 // file it reaches.
 func resolveWriteTarget(path string) (writeTarget, error) {
 	resolved := path
+	names := []string{path}
 	for hops := 0; ; hops++ {
 		if hostpath.Descriptor(resolved) {
-			return writeTarget{path: path, through: true}, nil
+			return writeTarget{path: path, through: true, stream: resolved, names: names}, nil
 		}
 		info, err := os.Lstat(resolved)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			return writeTarget{path: resolved, mode: NewFileMode}, nil
+			return writeTarget{path: resolved, mode: NewFileMode, names: names}, nil
 		case err != nil:
 			return writeTarget{}, bare(err)
 		case info.Mode()&fs.ModeSymlink != 0:
@@ -67,12 +70,13 @@ func resolveWriteTarget(path string) (writeTarget, error) {
 			if err := hostpath.RefusedWrite(resolved); err != nil {
 				return writeTarget{}, err
 			}
+			names = append(names, resolved)
 		case info.IsDir():
 			return writeTarget{}, syscall.EISDIR
 		case !info.Mode().IsRegular():
 			// Opening a FIFO to test permission would block until a reader
 			// attaches, so the write itself is the test.
-			return writeTarget{path: path, through: true}, nil
+			return writeTarget{path: path, through: true, stream: resolved, names: names}, nil
 		default:
 			// A rename needs write permission on the directory and none on the
 			// file, so without this a read-only file would become replaceable.
@@ -81,7 +85,7 @@ func resolveWriteTarget(path string) (writeTarget, error) {
 				return writeTarget{}, bare(err)
 			}
 			f.Close() //nolint:gosec // opened only to test permission
-			return writeTarget{path: resolved, mode: info.Mode().Perm()}, nil
+			return writeTarget{path: resolved, mode: info.Mode().Perm(), names: names}, nil
 		}
 	}
 }
@@ -116,6 +120,21 @@ func WriteFile(path string, data []byte) error {
 		return &fs.PathError{Op: "write", Path: path, Err: err}
 	}
 	return nil
+}
+
+// WrittenNames returns the names a [WriteFile] of path reaches its file
+// through: the path [HostPath] gives, then each symlink destination it follows,
+// up to the file, or to the descriptor path, FIFO or device it writes through.
+func WrittenNames(path string) ([]string, error) {
+	host, err := HostPath(path)
+	if err != nil {
+		return nil, err
+	}
+	t, err := resolveWriteTarget(host)
+	if err != nil {
+		return nil, err
+	}
+	return t.names, nil
 }
 
 // replace stages data beside t.path and renames it over t.path. A staging

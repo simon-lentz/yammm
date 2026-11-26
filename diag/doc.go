@@ -28,8 +28,9 @@
 //
 // # Entry Point Pattern
 //
-// A YAMMM operation that produces a value returns (T, error), and one that
-// produces none returns an error. A failure is one *[ResultError] holding the
+// A YAMMM operation that can fail returns (T, error), and one that produces no
+// value returns an error alone; one whose caller needs no reason, such as
+// instance.Validator.PrimaryKeyOf, returns false as its last value. A failure is one *[ResultError] holding the
 // Fatal and Error issues the call drew, and the call returns the zero T beside
 // it unless its doc states a partial value. A call that can draw an issue below
 // failure severity takes a WithWarnings option in its package's Option type: the

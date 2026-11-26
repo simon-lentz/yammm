@@ -60,7 +60,17 @@ only a mode's write bit); an existing one keeps its permission bits, and loses s
 stream, however the path reaches that directory: through a link to `/dev`, or
 on Linux through any descriptor table under `/proc`, such as `/proc/self/fd/N`.
 Behind `>> log` the bytes are
-appended and the log keeps its history. Any other path
+appended and the log keeps its history. A command that writes back the file it read
+refuses such a stream at exit 3 before it reads, since a write through it
+would append a second document: `fmt -w`, `snapshot
+update-metadata`, and `snapshot save` when its output is its `--into` file or
+reaches it, whether the descriptor is open for reading or, as `>>` opens it,
+for writing alone. The refusal holds for a file that needs no change, where
+`gofmt -w` reads first and rewrites only a file that changed, so `fmt -w
+/dev/fd/N` on a formatted file exits 3 where v0.21.1 exited 0. `fmt -w` judges
+every operand before it formats any, so a refused stream leaves every file as
+it was. `--into` a stream with `-o` naming another file reads the stream
+and writes that file. Any other path
 under `/dev/`, such as a file under Linux's `/dev/shm`, is decided by the file
 it reaches. Anything else is refused at exit 3, naming the path: a
 read-only file, a directory, a looping link, or a file whose directory cannot
@@ -105,15 +115,16 @@ each file it rewrites. v0.21.1's `--check` exited 1 when it listed a file; `-l`
 replaces it. Where `gofmt -l` prints a path's bytes, `-l` writes a control
 character, DEL, a bidi control or a byte that is not valid UTF-8 in a path as
 the text renderer writes it in a diagnostic, so a file's name cannot act on the
-terminal. An empty operand is a usage error before any path is read; otherwise every
-path is read, so one run lists every file that differs, and a
+terminal. An empty operand is a usage error before any path is read, and under
+`-w` an operand that is a stream (see above) is refused before any path is read;
+otherwise every path is read, so one run lists every file that differs, and a
 file's diagnostics are written, in text output, before the next file is formatted; under
 `--json` every file's diagnostics are in the one document written last. A file the grammar does not match, or that holds an escape the
 language does not have outside an invariant expression or an annotation
 argument, is reported as the positioned `E_SYNTAX` diagnostic `validate`
-reports, naming the file, and exits 1; a path that is not valid UTF-8 names no
-source, so there the failure is reported without a position, as a command
-failure, and still exits 1. Any other diagnostic `validate` reports
+reports, naming the file, and exits 1. A path no source identity names, such
+as one that is not valid UTF-8 or that resolves past the host's path limit, is
+named by its quoted spelling, at the same position. Any other diagnostic `validate` reports
 does not stop `fmt`.
 
 When formatting would change a schema's tokens or comments, `fmt` refuses. The
@@ -146,7 +157,7 @@ yammm check schema.yammm data.json
 yammm check schema.yammm people.json cars.json
 ```
 
-Validates data against a schema and writes nothing. Several data files are one document, as `snapshot save` reads them. It checks every instance, primary-key uniqueness, and every required association's target. Reports instance and graph diagnostics, the validator's at most 100 for one instance, among them constraint violations, missing and unknown fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the document the data files form: a target the document holds but the validator refuses, or that holds a string `E_DATA_PARSE` refuses, is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data reads each data file as JSON or JSONC, whatever its name, so `/dev/stdin` serves on Linux and macOS, on a pipe or a redirected file. A file that is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, holds a string that is not valid UTF-8 or holds a `\u` escape that is half of no surrogate pair, or nests deeper than the decoder's 10,000-level limit draws `E_DATA_PARSE`. An instance that holds such a string is refused and not validated, so its other breaks are reported once its strings are the text the file states, and a key that holds one is no key. A JSON object is read as that document, so a `.ys` snapshot draws `E_INVALID_TYPE_TAG` for each of its top-level keys, here and at `snapshot save`.
+Validates data against a schema and writes nothing. Several data files are one document, as `snapshot save` reads them. It checks every instance, primary-key uniqueness, and every required association's target. Reports instance and graph diagnostics, the validator's at most 100 for one instance, among them constraint violations, missing and unknown fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the document the data files form: a target the document holds but the validator refuses, or that holds a string `E_DATA_PARSE` refuses, is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data reads each data file as JSON or JSONC, whatever its name, so `/dev/stdin` serves on Linux and macOS, on a pipe or a redirected file. A data file whose path resolves past the host's path limit (PATH_MAX, 1024 bytes on darwin), through symbolic links, is refused at exit 3 although the kernel reads it: such a path has no source identity, and the positions of a data file's diagnostics name the file by it. `fmt` and the snapshot commands, whose diagnostics are placed in the file after the read, name such a path by its quoted spelling. A file that is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, holds a string that is not valid UTF-8 or holds a `\u` escape that is half of no surrogate pair, or nests deeper than the decoder's 10,000-level limit draws `E_DATA_PARSE`. After any `E_DATA_PARSE` no target is reported missing (`E_UNRESOLVED_REQUIRED` with the reason `target_missing`), as `go build` checks no types after a syntax error: the fault stopped the read or refused an element, and that element may be the target's instance. The fault of one data file holds for every file of the document. A required association an instance leaves out or holds empty is still reported. A type tag refused with `E_INVALID_TYPE_TAG` names no declared type, so its element is no target, and a missing target is still reported. An instance that holds such a string is refused and not validated, so its other breaks are reported once its strings are the text the file states, and a key that holds one is no key. A JSON object is read as that document, so a `.ys` snapshot draws `E_INVALID_TYPE_TAG` for each of its top-level keys, here and at `snapshot save`.
 
 ---
 
@@ -194,7 +205,7 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
-`--header-only` reads the header and the types table alone. The single-file modes and each `--dir` JSON entry report the file's size as its stat states it, and 0 when the argument is not a regular file, such as a pipe; a `--dir` text row states no size. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--json`, each `--dir` entry carries what its read drew, its failures or the CLI's hash-algorithm warning, under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning. A document that decodes and fails a structural check, such as an integrity mismatch, still has a summary: it prints beside the errors, in both modes, and the command exits 1.
+`--header-only` reads the header and the types table alone. The single-file modes and each `--dir` JSON entry report the file's size as its stat states it, and 0 when the argument is not a regular file, such as a pipe; a `--dir` text row states no size. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. A `<path>` that climbs out of the working directory is scanned where the loader reads it, so each entry's path is absolute; a directory that does not open is named once, as typed. For one file, the text and `--json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--json`, each `--dir` entry carries what its read drew, its failures or the CLI's hash-algorithm warning, under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning. A document that decodes and fails a structural check, such as an integrity mismatch, still has a summary: it prints beside the errors, in both modes, and the command exits 1.
 
 ### snapshot update-metadata
 
@@ -344,10 +355,12 @@ command prints, and names what some commands find and do not print.
   match, it reports the first place that does not match. A file the grammar
   matches is formatted, and `fmt` prints none of the diagnostics
   `yammm validate` reports for it, such as inverted bounds.
-- **`yammm check` and `yammm snapshot save` leave out one consequence.** When
+- **`yammm check` and `yammm snapshot save` leave out two consequences.** When
   the document holds a root the pipeline refused, the `E_UNRESOLVED_REQUIRED`
   that names that root as a missing target is not printed. The refusal of the
-  root is.
+  root is. After any `E_DATA_PARSE`, no `E_UNRESOLVED_REQUIRED` that names a
+  missing target is printed, since the fault stopped the read or refused an
+  element, which may be the target's.
 - **A schema that passes can still print.** The `-_`-in-a-constraint-bound
   warning (`E_INVALID_CONSTRAINT`, "minus sign before
   '_' (unbounded) has no effect") is one. `yammm snapshot verify
@@ -371,7 +384,14 @@ a clean run included, so a consumer parses stderr unconditionally. A `help`,
 topic no command answers, and `completion` given no shell or one it does not
 know, exit 2 and write the refusal as any usage error. A failure that is not itself a diagnostic — a bad flag, an
 unreadable path, a lost connection — is inside that document as an
-`E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code. A
-diagnostic's span is `{"source", "start", "end"}`, and each position is
+`E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code.
+A file the CLI opens or reads itself fails as `E_COMMAND_FAILED`; a read inside
+the snapshot library, as `snapshot info --header-only` and `--dir` make, fails
+as `E_SNAPSHOT_IO`. Both exit 3. A diagnostic's span is `{"source", "start", "end"}`, and each position is
 `{"line", "column", "offset"}`, `offset` being the 0-based byte offset; v0.21.1
-named it `"byte"`.
+named it `"byte"`. A snapshot command that reads one `.ys` file (`snapshot info` without `--dir`,
+`verify`, `update-metadata`, and `save --into`) places each issue the read draws in that
+file (a `--dir` entry carries its issues beside its name and path instead): its span names the file, with positions of line 0 and column 0 and no
+`offset`, and text output prefixes the file's name. `E_SNAPSHOT_IO` names its
+path in its message instead, and a cancellation or an internal fault names no
+file.

@@ -2,13 +2,13 @@ package graph
 
 import (
 	"cmp"
-	"fmt"
 	"slices"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/typeorder"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -159,45 +159,18 @@ func compareEdges(o typeorder.Order, a, b Edge) int {
 	return cmp.Compare(a.target.primaryKey.String(), b.target.primaryKey.String())
 }
 
-// compareProps orders two property sets by walking both in sorted key order.
-//
-// It compares field by field rather than rendering each set to one string:
-// a "name=value;" rendering collides whenever a value holds the separators, so
-// an ordinary String property containing ';' or '=' made two distinct sets
-// compare equal and put map-iteration order back into the document. Values are
-// discriminated by type before value, so an int64 1 and the string "1" do not
-// tie.
-//
-// What this does not promise: two values of one type whose %v forms are equal
-// still tie. For the scalar types a property can hold, %#v is injective.
-// A composite renders by its content (see renderValue), so allocation never
-// decides, and quoting keeps one string apart from two.
+// compareProps orders two property sets as [value.OrderStored] ranks two maps:
+// name by name in name order, each name before its value, so a value holding a
+// separator never collides with another set. Two sets tie only when a snapshot
+// writes them the same, so a set orders the same after a Marshal and an
+// Unmarshal. A graph holds only values a validator builds or a reader decodes,
+// which OrderStored ranks, so an error is a defect.
 func compareProps(a, b immutable.Properties) int {
-	// Keys reads the order a Properties sorts once and keeps, so collecting it
-	// costs one allocation after that sort; a pair of iter.Pull2 coroutines
-	// costs more per call.
-	an := slices.Collect(a.Keys())
-	bn := slices.Collect(b.Keys())
-	for i := range min(len(an), len(bn)) {
-		if c := cmp.Compare(an[i], bn[i]); c != 0 {
-			return c
-		}
-		av, _ := a.Get(an[i])
-		bv, _ := b.Get(bn[i])
-		if c := cmp.Compare(renderValue(av), renderValue(bv)); c != 0 {
-			return c
-		}
+	c, err := value.OrderStored(a, b)
+	if err != nil {
+		panic("graph: a property value the total order cannot rank: " + err.Error())
 	}
-	return cmp.Compare(len(an), len(bn))
-}
-
-// renderValue renders one property value with its stored type and its content,
-// so values of different types never compare equal. A Go type name holds no '|',
-// so the split is unambiguous. The content is the value's clone written with
-// %#v, which quotes strings and writes a nil container apart from an empty one; a
-// container's own %v would print its address.
-func renderValue(v immutable.Value) string {
-	return fmt.Sprintf("%T|%#v", v.Any(), v.Clone())
+	return c
 }
 
 // compareUnresolved orders unresolved records by (sourceType, sourceKey,

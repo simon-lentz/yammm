@@ -1,10 +1,6 @@
 package snapshot
 
 import (
-	"bytes"
-	"math"
-	"strconv"
-
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
@@ -16,34 +12,12 @@ import (
 // Vector element.
 type wireFloat float64
 
-// MarshalJSON emits the value exactly as encoding/json's float encoder would,
-// then appends ".0" when the output carries no float indicator. A held float is
-// finite: the validator refuses another, and a document spells none.
-//
-// Delegating to json.Marshal instead would be shorter but slower, and
-// allocates more for a whole value, on the path every float in a document
-// takes. [TestWireFloat_MatchesEncodingJSON] holds the two in
-// lockstep so this copy cannot drift from the encoder it mirrors.
+// MarshalJSON emits the value as [value.AppendWrittenFloat] writes it, the text
+// the stored-value order ranks. A held float is finite: the validator refuses
+// another, and a document spells none. [TestWireFloat_MatchesEncodingJSON]
+// holds the text to encoding/json's float encoder.
 func (f wireFloat) MarshalJSON() ([]byte, error) {
-	v := float64(f)
-	abs := math.Abs(v)
-	format := byte('f')
-	if abs != 0 && (abs < 1e-6 || abs >= 1e21) {
-		format = 'e'
-	}
-	b := strconv.AppendFloat(nil, v, format, -1, 64)
-	if format == 'e' {
-		// Trim a zero-padded exponent (e-09 → e-9), as encoding/json does.
-		if n := len(b); n >= 4 && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
-			b[n-2] = b[n-1]
-			b = b[:n-1]
-		}
-		return b, nil
-	}
-	if !bytes.ContainsAny(b, ".eE") {
-		b = append(b, '.', '0')
-	}
-	return b, nil
+	return value.AppendWrittenFloat(nil, float64(f)), nil
 }
 
 // typeByWireID resolves a persisted identity — the declaring schema's name and

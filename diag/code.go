@@ -481,11 +481,13 @@ var (
 	// diagnostic.
 	W_SNAPSHOT_UNRESOLVED_REQUIRED = NewCode("W_SNAPSHOT_UNRESOLVED_REQUIRED")
 
-	// W_SNAPSHOT_PATH_EXTENSION indicates a snapshot was written to a path
-	// that does not end in .ys. The document is correct and the write
-	// succeeded; the warning exists because every reader that discovers
-	// snapshots by extension — a directory scan among them — will not find
-	// this one. Warning severity: the caller named the path deliberately, and
-	// refusing it would make a documented workflow fail rather than work.
+	// W_SNAPSHOT_PATH_EXTENSION indicates a snapshot was written where a scan
+	// for .ys files does not find it: neither the path nor a link it follows
+	// has a name that ends in .ys and names a regular file. The document is
+	// correct and the write succeeded; the warning exists because every reader
+	// that discovers snapshots by extension — a directory scan among them — will
+	// not find this one. Warning severity: the caller named the path
+	// deliberately, and refusing it would make a documented workflow fail
+	// rather than work.
 	W_SNAPSHOT_PATH_EXTENSION = NewCode("W_SNAPSHOT_PATH_EXTENSION")
 )

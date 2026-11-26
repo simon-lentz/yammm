@@ -94,16 +94,21 @@ func TestSnapshotInfo_AStructuralErrorPrecedesTheSummary(t *testing.T) {
 
 // TestSnapshotInfo_HeaderOnlyNamesAnUnsupportedHashAlgorithm pins the warning a
 // header-only read gives a document whose schema hash algorithm this build
-// does not read: its exact message, and the algorithm version as its one
-// detail, in both output formats.
+// does not read: its exact message, the algorithm version as its one detail,
+// and the file it read, in both output formats.
 func TestSnapshotInfo_HeaderOnlyNamesAnUnsupportedHashAlgorithm(t *testing.T) {
 	t.Parallel()
 
 	const message = "unrecognized schema hash algorithm version 99; schema hash verification skipped"
+	abs, err := filepath.Abs(hashAlgoFixture)
+	require.NoError(t, err)
+	source, err := json.Marshal(abs)
+	require.NoError(t, err)
 
 	code, _, stderr := executeCmdOutput(t, "snapshot", "info", "--header-only", "--json", hashAlgoFixture)
 	assert.Equal(t, cli.ExitOK, code)
 	assert.JSONEq(t, `{"issues":[{
+		"span": {"source": `+string(source)+`, "start": {"line": 0, "column": 0}, "end": {"line": 0, "column": 0}},
 		"severity": "warning",
 		"code": "E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM",
 		"message": "`+message+`",
@@ -112,5 +117,24 @@ func TestSnapshotInfo_HeaderOnlyNamesAnUnsupportedHashAlgorithm(t *testing.T) {
 
 	code, _, stderr = executeCmdOutput(t, "snapshot", "info", "--header-only", hashAlgoFixture)
 	assert.Equal(t, cli.ExitOK, code)
-	assert.Equal(t, "warning[E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM]: "+message+"\n", stderr)
+	assert.Equal(t, filepath.ToSlash(hashAlgoFixture)+": warning[E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM]: "+message+"\n", stderr)
+}
+
+// A --dir that climbs out of the working directory is scanned where the loader
+// reads, and a directory that does not open is named once, as typed.
+func TestSnapshotInfoDir_NamesAClimbingDirectoryAsTyped(t *testing.T) {
+	root := t.TempDir()
+	cwd := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(cwd, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+	typed := filepath.Join("..", "..", "missing")
+	code, _, stderr := runCLI(t, "snapshot", "info", "--dir", typed)
+	if code != cli.ExitRuntime {
+		t.Errorf("exit %d, want %d: %s", code, cli.ExitRuntime, stderr)
+	}
+	if !strings.Contains(stderr, "open "+typed+":") || strings.Count(stderr, "missing") != 1 {
+		t.Errorf("want the directory named once, as typed (%s): %s", typed, stderr)
+	}
 }
