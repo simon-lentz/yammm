@@ -48,6 +48,11 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	if uri == "" {
 		return cli.Usagef("--uri is required (or set YAMMM_NEO4J_URI)")
 	}
+	driver, err := cli.NewNeo4jDriver(cmd.Context(), uri, username, password)
+	if err != nil {
+		return err
+	}
+	defer driver.Close(cmd.Context())
 	c, err := constraintConfig(cmd)
 	if err != nil {
 		return err
@@ -69,12 +74,11 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 		return err
 	}
 
-	connect := func(ctx context.Context) (cli.QueryRunner, func(context.Context) error, error) {
-		driver, err := cli.ConnectNeo4j(ctx, uri, username, password)
-		if err != nil {
-			return nil, nil, err
+	connect := func(ctx context.Context) (cli.QueryRunner, error) {
+		if err := cli.VerifyNeo4j(ctx, driver, uri); err != nil {
+			return nil, err
 		}
-		return cli.DriverQueries(driver), driver.Close, nil
+		return cli.DriverQueries(driver), nil
 	}
 	return diffSchema(cmd.Context(), cmd.OutOrStdout(), sink, connect, database, c, s)
 }
@@ -84,7 +88,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 // reads the remote state, plans it and reports the plan to w. A schema the
 // generators refuse is reported without a connection.
 func diffSchema(ctx context.Context, w io.Writer, sink *cli.DiagnosticSink,
-	connect func(context.Context) (cli.QueryRunner, func(context.Context) error, error), database string,
+	connect func(context.Context) (cli.QueryRunner, error), database string,
 	c cypher.Config, s schema.Schema,
 ) error {
 	_, _, generated := generateCypher(c, s)
@@ -94,11 +98,10 @@ func diffSchema(ctx context.Context, w io.Writer, sink *cli.DiagnosticSink,
 	}
 	sink.Flush()
 
-	run, connClose, err := connect(ctx)
+	run, err := connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer connClose(ctx)
 
 	state, err := fetchRemoteState(ctx, run, database)
 	if err != nil {
@@ -119,7 +122,20 @@ func diffSchema(ctx context.Context, w io.Writer, sink *cli.DiagnosticSink,
 	// owned label in the report, by membership rather than a guess parsed back
 	// out of the remote object's label.
 	reportPlan(w, plan, c.OwnedLabels(s))
-	return cli.Exit(neo4jDiffExit(plan))
+	return cli.ExitBecause(neo4jDiffExit(plan), neo4jDiffReason(plan))
+}
+
+// neo4jDiffReason states what [neo4jDiffExit] reads in plan: the changes
+// that would bring the database to the schema, or the indexes it could not
+// verify.
+func neo4jDiffReason(plan neo4j.Plan) string {
+	cs, is := plan.Constraints, plan.Indexes
+	constraints := len(cs.Drift) + len(cs.Create) + len(cs.Drop)
+	indexes := len(is.Drift) + len(is.Create) + len(is.Drop)
+	if constraints+indexes > 0 {
+		return fmt.Sprintf("the database differs from the schema: %d constraint and %d index change(s) in the plan", constraints, indexes)
+	}
+	return fmt.Sprintf("%d index(es) could not be verified", len(is.Unverified))
 }
 
 // remoteRowIssues keeps the issues of result that judge a remote row.

@@ -270,6 +270,8 @@ Per-target flags are enforced with a usage error: `--package`/`--initialisms` ap
 | `--password` | `$YAMMM_NEO4J_PASSWORD` | -- | Password |
 | `--database` | `$YAMMM_NEO4J_DATABASE` | `neo4j` | Database name |
 
+A `--uri` that names no server on its text is a usage error, exit 2, judged before the schema is read: one the driver refuses, such as a scheme it does not support or a port that is not a number, and one whose address no dial can use: no host, an address that does not split into a host and a port (a colon in the host outside brackets, as in `bolt://::1`, or `bolt://h:`, which the driver dials as `h::7687`), a port above 65535, or a `bolt+unix` URI with no socket path. A port with no host before it, `bolt://:7687`, names this host. A server that does not answer at a well-formed URI exits 3.
+
 The supported floor is Neo4j 5.26: every statement the CLI emits runs on it in the edition `--edition` names.
 
 ### gen --to cypher
@@ -323,7 +325,7 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 | ---- | ------- |
 | 0 | Success (no errors) |
 | 1 | An error in the input (a validation failure, a constraint violation, a schema `fmt` cannot parse), or drift `neo4j diff` finds |
-| 2 | Usage error (bad flags, missing or extra arguments, an unknown command or help topic, an empty path operand or path flag, a schema, data or module-root path that is not valid UTF-8 given to a command that loads the schema; `fmt` opens its operand as given, so such a path it cannot open exits 3) |
+| 2 | Usage error (bad flags, missing or extra arguments, an unknown command or help topic, an empty path operand or path flag, a schema, data or module-root path that is not valid UTF-8 given to a command that loads the schema; `fmt` opens its operand as given, so such a path it cannot open exits 3; a metadata key or value that is not valid UTF-8; a `--uri` that names no server on its text) |
 | 3 | Runtime error (connection failure, I/O error, a path the filesystem refuses, a `neo4j diff` comparison that could not be verified, a database object `neo4j diff` cannot classify, an internal fault, a failure the command did not classify) |
 
 ---
@@ -385,6 +387,9 @@ topic no command answers, and `completion` given no shell or one it does not
 know, exit 2 and write the refusal as any usage error. A failure that is not itself a diagnostic — a bad flag, an
 unreadable path, a lost connection — is inside that document as an
 `E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code.
+So is an exit code the document's issues do not earn: `neo4j diff` drift or an
+index it could not verify, and a `snapshot info --dir` entry that failed, whose
+issues are in the stdout report; the issue states what the exit reads.
 A file the CLI opens or reads itself fails as `E_COMMAND_FAILED`; a read inside
 the snapshot library, as `snapshot info --header-only` and `--dir` make, fails
 as `E_SNAPSHOT_IO`. Both exit 3. A diagnostic's span is `{"source", "start", "end"}`, and each position is

@@ -2,26 +2,63 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"net/url"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
-// ConnectNeo4j creates a new Neo4j driver with basic authentication. A URI the
-// driver refuses before it dials, such as one with an unsupported scheme, is a
-// usage error; a server that cannot be reached is a runtime one.
-func ConnectNeo4j(ctx context.Context, uri, username, password string) (neo4j.Driver, error) {
+// NewNeo4jDriver creates a Neo4j driver with basic authentication and dials
+// nothing. A URI that names no server on its text is a usage error: one the
+// driver refuses, such as an unsupported scheme, and one whose address no dial
+// can use ([checkNeo4jAddress]). A command calls it where it judges its flags,
+// before any read, and [VerifyNeo4j] dials.
+func NewNeo4jDriver(ctx context.Context, uri, username, password string) (neo4j.Driver, error) {
 	driver, err := neo4j.NewDriver(uri, neo4j.BasicAuth(username, password, ""))
 	if err != nil {
-		return nil, Usagef("connect to neo4j at %s: %w", uri, err)
+		return nil, Usagef("connect to neo4j at %q: %w", uri, err)
 	}
-
-	if err := driver.VerifyConnectivity(ctx); err != nil {
+	if err := checkNeo4jAddress(ctx, driver.Target()); err != nil {
 		_ = driver.Close(ctx)
-		return nil, Runtimef("verify neo4j connectivity at %s: %w", uri, err)
+		return nil, Usagef("connect to neo4j at %q: %w", uri, err)
 	}
-
 	return driver, nil
+}
+
+// checkNeo4jAddress refuses a target the driver accepted and no dial can use:
+// an empty socket path, an empty network address, one net cannot split into a
+// host and a port, and a port net cannot look up. The driver writes its default
+// port onto a host that names none, so "bolt://h:" reaches here as "h::7687".
+func checkNeo4jAddress(ctx context.Context, target url.URL) error {
+	if target.Scheme == "bolt+unix" {
+		if target.Path == "" {
+			return errors.New("the URI names no socket path")
+		}
+		return nil
+	}
+	if target.Host == "" {
+		return errors.New("the URI names no host")
+	}
+	_, port, err := net.SplitHostPort(target.Host)
+	if err != nil {
+		return fmt.Errorf("the URI's address: %w", err)
+	}
+	if _, err := net.DefaultResolver.LookupPort(ctx, "tcp", port); err != nil {
+		return fmt.Errorf("the URI's port: %w", err)
+	}
+	return nil
+}
+
+// VerifyNeo4j reports a server that cannot be reached at uri as a runtime
+// failure. The driver connects lazily, so without it a command holds a driver
+// for a server that is not there and fails inside its first query.
+func VerifyNeo4j(ctx context.Context, driver neo4j.Driver, uri string) error {
+	if err := driver.VerifyConnectivity(ctx); err != nil {
+		return Runtimef("verify neo4j connectivity at %q: %w", uri, err)
+	}
+	return nil
 }
 
 // QueryRunner executes one read query and returns its records.

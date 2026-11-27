@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -336,8 +337,8 @@ func TestDiffSchema_PrintsEachGenerationWarningOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	empty := func(context.Context, string, string) ([]map[string]any, error) { return nil, nil }
-	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
-		return empty, func(context.Context) error { return nil }, nil
+	connect := func(context.Context) (cli.QueryRunner, error) {
+		return empty, nil
 	}
 
 	var stderr, stdout bytes.Buffer
@@ -363,9 +364,9 @@ func TestDiffSchema_RefusesTheDesiredSideBeforeConnecting(t *testing.T) {
 	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
-	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
+	connect := func(context.Context) (cli.QueryRunner, error) {
 		t.Error("diffSchema connected for a schema the generators refuse")
-		return nil, nil, context.Canceled
+		return nil, context.Canceled
 	}
 
 	var stderr, stdout bytes.Buffer
@@ -444,22 +445,20 @@ func TestPrintIndexDiff_ADropNamesItsLabel(t *testing.T) {
 	assert.Contains(t, buf.String(), "index drop: i3 (RANGE on test__Foo|test__Bar)\n")
 }
 
-// diffSchema reads both introspection queries from the database it is given
-// and closes the connection it opened.
-func TestDiffSchema_ReadsTheNamedDatabaseAndCloses(t *testing.T) {
+// diffSchema reads both introspection queries from the database it is given.
+func TestDiffSchema_ReadsTheNamedDatabase(t *testing.T) {
 	t.Parallel()
 	s, loadErr := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n}\n", "app.yammm")
 	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	var databases []string
-	closed := 0
-	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
+	connect := func(context.Context) (cli.QueryRunner, error) {
 		run := func(_ context.Context, database, _ string) ([]map[string]any, error) {
 			databases = append(databases, database)
 			return nil, nil
 		}
-		return run, func(context.Context) error { closed++; return nil }, nil
+		return run, nil
 	}
 
 	var stderr, stdout bytes.Buffer
@@ -470,9 +469,6 @@ func TestDiffSchema_ReadsTheNamedDatabaseAndCloses(t *testing.T) {
 	if want := []string{"mydb", "mydb"}; !slices.Equal(databases, want) {
 		t.Errorf("queried databases %q, want %q", databases, want)
 	}
-	if closed != 1 {
-		t.Errorf("closed the connection %d times, want once", closed)
-	}
 }
 
 // On one stream, a generation warning prints before the plan it belongs to.
@@ -482,9 +478,9 @@ func TestDiffSchema_FlushesWarningsBeforeThePlan(t *testing.T) {
 	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
-	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
+	connect := func(context.Context) (cli.QueryRunner, error) {
 		run := func(context.Context, string, string) ([]map[string]any, error) { return nil, nil }
-		return run, func(context.Context) error { return nil }, nil
+		return run, nil
 	}
 
 	var out bytes.Buffer
@@ -506,9 +502,9 @@ func TestDiffSchema_ReportsConstraintWarningsBesideAnIndexError(t *testing.T) {
 	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
-	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
+	connect := func(context.Context) (cli.QueryRunner, error) {
 		t.Error("diffSchema connected for a schema the generators refuse")
-		return nil, nil, context.Canceled
+		return nil, context.Canceled
 	}
 
 	var stderr, stdout bytes.Buffer
@@ -534,8 +530,8 @@ func TestDiffSchema_ReportsGenerationWarningsWhenTheConnectionFails(t *testing.T
 		t.Fatal(err)
 	}
 	refused := errors.New("connection refused")
-	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
-		return nil, nil, refused
+	connect := func(context.Context) (cli.QueryRunner, error) {
+		return nil, refused
 	}
 
 	var stderr, stdout bytes.Buffer
@@ -561,14 +557,14 @@ func TestDiffSchema_ReportsARemoteRowDiffRefusesAtExitThree(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := map[string]any{"name": "y", "type": "RANGE", "entityType": "NODE", "labelsOrTypes": []any{"other__U"}, "properties": []any{"q"}, "state": "ONLINE"}
-	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
+	connect := func(context.Context) (cli.QueryRunner, error) {
 		run := func(_ context.Context, _, query string) ([]map[string]any, error) {
 			if query == neo4j.ShowIndexes {
 				return []map[string]any{row, row}, nil
 			}
 			return nil, nil
 		}
-		return run, func(context.Context) error { return nil }, nil
+		return run, nil
 	}
 
 	var stderr, stdout bytes.Buffer
@@ -691,4 +687,66 @@ func TestPrintDiffSummary_ABlankLineSetsTheSummaryOff(t *testing.T) {
 	var buf bytes.Buffer
 	printConstraintDiff(&buf, &neo4j.ConstraintDiff{})
 	assert.True(t, strings.HasPrefix(buf.String(), "\nsummary: "), "got %q", buf.String())
+}
+
+// TestDiffSchema_JSONDocumentStatesTheDrift pins that a plan with drift, whose
+// exit no diagnostic states, is accounted for in the --json document.
+func TestDiffSchema_JSONDocumentStatesTheDrift(t *testing.T) {
+	t.Parallel()
+	s, loadErr := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n}\n", "app.yammm")
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	connect := func(context.Context) (cli.QueryRunner, error) {
+		return func(context.Context, string, string) ([]map[string]any, error) { return nil, nil }, nil
+	}
+
+	var stderr, stdout bytes.Buffer
+	sink := cli.NewDiagnosticSink(&stderr, cli.FormatJSON, true, false)
+	err := sink.Close(diffSchema(t.Context(), &stdout, sink, connect, "neo4j", cypher.Config{}, s))
+
+	if got := cli.ExitForError(err); got != cli.ExitValidation {
+		t.Fatalf("exit = %d, want %d", got, cli.ExitValidation)
+	}
+	assertStatesTheExit(t, stderr.String(), "1", "the database differs from the schema")
+}
+
+// TestNeo4jDiffReason_StatesWhatTheExitReads pins the reason for each failing
+// exit of [neo4jDiffExit]: the changes of each half, or the unverified
+// indexes.
+func TestNeo4jDiffReason_StatesWhatTheExitReads(t *testing.T) {
+	t.Parallel()
+	changes := func(constraints, indexes int) string {
+		return fmt.Sprintf("the database differs from the schema: %d constraint and %d index change(s) in the plan", constraints, indexes)
+	}
+	tests := []struct {
+		name string
+		plan neo4j.Plan
+		want string
+	}{
+		{
+			"changes in both halves",
+			neo4j.Plan{
+				Constraints: neo4j.ConstraintDiff{Create: []cypher.Constraint{{}, {}}, Drop: []neo4j.RemoteConstraint{{}}},
+				Indexes:     neo4j.IndexDiff{Drift: []neo4j.IndexDrift{{}}, Unverified: []neo4j.IndexUnverified{{}}},
+			},
+			"the database differs from the schema: 3 constraint and 1 index change(s) in the plan",
+		},
+		{
+			"unverified indexes alone",
+			neo4j.Plan{Indexes: neo4j.IndexDiff{Unverified: []neo4j.IndexUnverified{{}, {}}}},
+			"2 index(es) could not be verified",
+		},
+		{"a constraint drift alone", neo4j.Plan{Constraints: neo4j.ConstraintDiff{Drift: []neo4j.ConstraintDrift{{}}}}, changes(1, 0)},
+		{"a constraint create alone", neo4j.Plan{Constraints: neo4j.ConstraintDiff{Create: []cypher.Constraint{{}}}}, changes(1, 0)},
+		{"a constraint drop alone", neo4j.Plan{Constraints: neo4j.ConstraintDiff{Drop: []neo4j.RemoteConstraint{{}}}}, changes(1, 0)},
+		{"an index drift alone", neo4j.Plan{Indexes: neo4j.IndexDiff{Drift: []neo4j.IndexDrift{{}}}}, changes(0, 1)},
+		{"an index create alone", neo4j.Plan{Indexes: neo4j.IndexDiff{Create: []cypher.Index{{}}}}, changes(0, 1)},
+		{"an index drop alone", neo4j.Plan{Indexes: neo4j.IndexDiff{Drop: []neo4j.RemoteIndex{{}}}}, changes(0, 1)},
+	}
+	for _, tt := range tests {
+		if got := neo4jDiffReason(tt.plan); got != tt.want {
+			t.Errorf("%s: neo4jDiffReason = %q, want %q", tt.name, got, tt.want)
+		}
+	}
 }

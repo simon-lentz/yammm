@@ -57,6 +57,16 @@ func ExitForResult(result diag.Result) int {
 	return ExitOK
 }
 
+// earnedExit returns the exit code results earn together, as [ExitForResult]
+// of their merge does, without merging them.
+func earnedExit(results []diag.Result) int {
+	code := ExitOK
+	for _, r := range results {
+		code = max(code, ExitForResult(r))
+	}
+	return code
+}
+
 // Failed reports whether result saw a Fatal or Error issue, stored or dropped.
 func Failed(result diag.Result) bool {
 	counts := result.SeverityCounts()
@@ -82,12 +92,13 @@ func ExitForError(err error) int {
 	return ExitRuntime
 }
 
-// exitError is a failure of the CLI: its exit code, which is ExitValidation,
-// ExitUsage or ExitRuntime, and the error that caused it. One with no cause is
-// a bare exit signal ([Exit]); no exitError's cause is itself an exitError.
+// exitError is a failure of the CLI: its exit code, the error that caused it,
+// and for a bare exit signal ([Exit]), which has no cause, the reason
+// [ExitBecause] gives it. No exitError's cause is itself an exitError.
 type exitError struct {
-	code int
-	err  error
+	code   int
+	err    error
+	reason string
 }
 
 func (e *exitError) Error() string {
@@ -122,6 +133,33 @@ func Exit(code int) error {
 		return &exitError{code: code}
 	}
 	panic(fmt.Sprintf("cli: %d is not an exit code of the CLI", code))
+}
+
+// ExitBecause is [Exit] for a command whose exit code the diagnostics it added
+// do not earn, such as drift `neo4j diff` finds: under --json
+// [DiagnosticSink.Close] states reason as the [diag.E_COMMAND_FAILED] issue
+// that carries the code. Text output prints nothing for it, as for any bare
+// signal.
+func ExitBecause(code int, reason string) error {
+	err := Exit(code)
+	if e, ok := err.(*exitError); ok { //nolint:errorlint // Exit returns an *exitError itself or nil
+		e.reason = reason
+	}
+	return err
+}
+
+// unaccountedExit returns the [diag.E_COMMAND_FAILED] issue that states a
+// failing exit the document's issues do not earn: err's reason
+// ([ExitBecause]), or the code's own text when it carries none.
+func unaccountedExit(err error) diag.Result {
+	code := ExitForError(err)
+	msg := codeText(code)
+	if e, ok := errors.AsType[*exitError](err); ok && e.reason != "" {
+		msg = e.reason
+	}
+	c := diag.NewCollector(diag.NoLimit)
+	c.Collect(diag.NewIssue(diag.Error, diag.E_COMMAND_FAILED, msg).WithDetail(diag.DetailKeyExitCode, strconv.Itoa(code)).Build())
+	return c.Result()
 }
 
 // Usage returns err as a usage failure under its own message. A nil err is nil,

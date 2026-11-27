@@ -87,7 +87,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | Code | Meaning |
 | ---- | ------- |
 | `E_INTERNAL` | Unexpected internal failure (likely a bug) |
-| `E_COMMAND_FAILED` | A command-line failure that is not itself a diagnostic, carried into a `--json` document; its `exit_code` detail is the process exit code |
+| `E_COMMAND_FAILED` | A command-line failure that is not itself a diagnostic, or an exit code the document's issues do not earn (such as `neo4j diff` drift), carried into a `--json` document; its `exit_code` detail is the process exit code |
 | `E_CONTEXT_CANCELLED` | Operation cancelled via context |
 
 ### Syntax

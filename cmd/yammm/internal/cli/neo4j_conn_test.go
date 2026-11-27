@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 	"net"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -26,45 +28,135 @@ func closedPort(t *testing.T) string {
 	return addr
 }
 
-// TestConnectNeo4j_RefusesAnUnreachableServer pins the VerifyConnectivity
-// guard. The driver is created lazily, so without the guard ConnectNeo4j returns a driver
-// and a nil error for a server that is not there — and the failure surfaces
-// later, inside the first query, as something other than a connection problem.
-func TestConnectNeo4j_RefusesAnUnreachableServer(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	driver, err := ConnectNeo4j(ctx, "neo4j://"+closedPort(t), "neo4j", "password")
+// refusedBeforeAnySocket reports whether a dial of the address the driver
+// would dial for uri fails before net creates a socket, asked of the driver
+// and of net and not of this package. A bolt+unix target dials its path. The
+// hosts are IP literals, so no name is looked up.
+func refusedBeforeAnySocket(t *testing.T, uri string) bool {
+	t.Helper()
+	driver, err := neo4j.NewDriver(uri, neo4j.BasicAuth("a", "b", ""))
+	if err != nil {
+		return true
+	}
+	defer driver.Close(t.Context())
+	target := driver.Target()
+	network, address := "tcp", target.Host
+	if target.Scheme == "bolt+unix" {
+		network, address = "unix", target.Path
+	}
+	sockets := 0
+	dialer := net.Dialer{Timeout: 5 * time.Second, Control: func(string, string, syscall.RawConn) error {
+		sockets++
+		return nil
+	}}
+	conn, err := dialer.DialContext(t.Context(), network, address)
 	if err == nil {
-		if driver != nil {
-			_ = driver.Close(ctx)
-		}
-		t.Fatal("ConnectNeo4j returned no error for a server that is not listening")
+		_ = conn.Close()
+		return false
 	}
-	if driver != nil {
-		t.Error("a failed connection must not hand back a driver")
+	return sockets == 0
+}
+
+// TestNewNeo4jDriver_JudgesTheURIOnItsText holds the usage class of a --uri to
+// one question: can its text name a server. Each row's answer is written here
+// and then asked of the driver and of net, so a URI the driver accepts and no
+// dial can use is a usage error as one the driver refuses is, and a URI
+// nothing listens at is not.
+func TestNewNeo4jDriver_JudgesTheURIOnItsText(t *testing.T) {
+	t.Parallel()
+	closed := closedPort(t)
+	_, closedPortNumber, err := net.SplitHostPort(closed)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "verify neo4j connectivity") {
-		t.Errorf("error %q does not name the check that failed", err)
+	tests := []struct {
+		name  string
+		uri   string
+		usage bool
+		says  string // what the refusal states after the URI, "" when the driver words it
+	}{
+		{"no host", "bolt://", true, "the URI names no host"},
+		{"no host, routing scheme", "neo4j://", true, "the URI names no host"},
+		{"no host, a path", "bolt:///db", true, "the URI names no host"},
+		{"an empty port, which the driver joins to its default", "bolt://127.0.0.1:", true, "the URI's address"},
+		{"a port above the range", "bolt://127.0.0.1:99999", true, "the URI's port"},
+		{"a port above the range, IPv6", "bolt://[::1]:65536", true, "the URI's port"},
+		{"a negative port", "bolt://127.0.0.1:-1", true, ""},
+		{"a port that is no number and no service", "bolt://127.0.0.1:notaport", true, ""},
+		{"an unsupported scheme", "bogus://127.0.0.1", true, ""},
+		{"no scheme", "127.0.0.1:7687", true, ""},
+		{"a routing context on a direct scheme", "bolt://127.0.0.1:1?x=y", true, ""},
+		{"a space in the host", "bolt:// x", true, ""},
+		{"an IPv6 literal without brackets", "bolt://::1", true, ""},
+		{"no socket path", "bolt+unix://", true, "the URI names no socket path"},
+		{"a socket path nothing listens at", "bolt+unix:///nonexistent/neo4j.sock", false, ""},
+		{"nothing listening", "bolt://" + closed, false, ""},
+		{"nothing listening, routing scheme", "neo4j://" + closed, false, ""},
+		{"an empty host before a port, which dials this host", "bolt://:" + closedPortNumber, false, ""},
+		{"the highest port", "bolt://127.0.0.1:65535", false, ""},
+		{"the default port", "bolt://127.0.0.1", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if oracle := refusedBeforeAnySocket(t, tt.uri); oracle != tt.usage {
+				t.Fatalf("the driver and net refuse %q before any socket: %v, and the row says %v", tt.uri, oracle, tt.usage)
+			}
+			driver, err := NewNeo4jDriver(t.Context(), tt.uri, "a", "b")
+			if driver != nil {
+				defer driver.Close(t.Context())
+			}
+			assertURIVerdict(t, tt.uri, driver, err, tt.usage)
+			if err != nil && !strings.Contains(err.Error(), tt.says) {
+				t.Errorf("NewNeo4jDriver(%q): error %q does not state %q", tt.uri, err, tt.says)
+			}
+		})
 	}
 }
 
-// TestConnectNeo4j_RejectsAMalformedURI covers the other failure arm, so the
-// two are told apart by their messages rather than by both being "an error".
-func TestConnectNeo4j_RejectsAMalformedURI(t *testing.T) {
+// assertURIVerdict checks what [NewNeo4jDriver] answered for uri against the
+// verdict usage: a refusal hands back no driver, exits 2 and names the URI.
+func assertURIVerdict(t *testing.T, uri string, driver neo4j.Driver, err error, usage bool) {
+	t.Helper()
+	if (err != nil) != usage {
+		t.Fatalf("NewNeo4jDriver(%q) error = %v, want a refusal: %v", uri, err, usage)
+	}
+	if err == nil {
+		return
+	}
+	if driver != nil {
+		t.Errorf("NewNeo4jDriver(%q) refused the URI and handed back a driver", uri)
+	}
+	if got := ExitForError(err); got != ExitUsage {
+		t.Errorf("NewNeo4jDriver(%q): exit = %d, want %d", uri, got, ExitUsage)
+	}
+	if want := "connect to neo4j at " + strconv.Quote(uri); !strings.Contains(err.Error(), want) {
+		t.Errorf("NewNeo4jDriver(%q): error %q does not contain %q", uri, err, want)
+	}
+}
+
+// TestVerifyNeo4j_RefusesAnUnreachableServer pins the connectivity check: a
+// driver for a server that is not listening is a runtime failure that names
+// the check.
+func TestVerifyNeo4j_RefusesAnUnreachableServer(t *testing.T) {
 	t.Parallel()
 
-	driver, err := ConnectNeo4j(context.Background(), "not-a-scheme://x", "neo4j", "password")
-	if err == nil {
-		if driver != nil {
-			_ = driver.Close(context.Background())
-		}
-		t.Fatal("ConnectNeo4j accepted a URI with no usable scheme")
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	uri := "neo4j://" + closedPort(t)
+	driver, err := NewNeo4jDriver(ctx, uri, "neo4j", "password")
+	if err != nil {
+		t.Fatalf("NewNeo4jDriver(%q) = %v, want a driver", uri, err)
 	}
-	if !strings.Contains(err.Error(), "connect to neo4j") {
-		t.Errorf("error %q does not name the construction step", err)
+	defer driver.Close(ctx)
+
+	err = VerifyNeo4j(ctx, driver, uri)
+	if got := ExitForError(err); got != ExitRuntime {
+		t.Fatalf("VerifyNeo4j: exit = %d (%v), want %d", got, err, ExitRuntime)
+	}
+	if want := "verify neo4j connectivity at " + strconv.Quote(uri); !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not contain %q", err, want)
 	}
 }
 

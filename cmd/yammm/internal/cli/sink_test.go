@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -18,6 +19,14 @@ import (
 func warningResult(message string) diag.Result {
 	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, message).Build())
+	return c.Result()
+}
+
+// fatalIOResult returns a result carrying one Fatal E_SNAPSHOT_IO, which earns
+// [ExitRuntime].
+func fatalIOResult() diag.Result {
+	c := diag.NewCollector(diag.NoLimit)
+	c.Collect(diag.NewIssue(diag.Fatal, diag.E_SNAPSHOT_IO, "read failed").Build())
 	return c.Result()
 }
 
@@ -254,6 +263,99 @@ func TestDiagnosticSink_CloseFoldsAFailureIntoTheDocument(t *testing.T) {
 	}
 	if !sawWarning || !sawFailure {
 		t.Errorf("the document lacks the warning (%v) or the failure with its exit code (%v):\n%s", sawWarning, sawFailure, out.String())
+	}
+}
+
+// TestDiagnosticSink_CloseAccountsForTheExitCode pins that a JSON document
+// accounts for every failing exit: a bare signal whose code the added issues
+// do not earn joins it as one E_COMMAND_FAILED Error, stating the reason
+// [ExitBecause] gave or the code's own text, and a signal they earn adds
+// nothing.
+func TestDiagnosticSink_CloseAccountsForTheExitCode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		results []diag.Result
+		err     error
+		want    string // the E_COMMAND_FAILED message, "" for none
+		code    int
+	}{
+		{"a reason beside a warning", []diag.Result{warningResult("a warning")}, ExitBecause(ExitValidation, "2 of 3 entries failed"), "2 of 3 entries failed", ExitValidation},
+		{"no reason", nil, Exit(ExitRuntime), "runtime error", ExitRuntime},
+		{"an Error earns it", []diag.Result{errorResult("bad value")}, ExitBecause(ExitValidation, "unstated"), "", ExitValidation},
+		{"a Fatal earns it", []diag.Result{fatalIOResult()}, Exit(ExitRuntime), "", ExitRuntime},
+		{"an Error before a warning earns it", []diag.Result{errorResult("bad value"), warningResult("a warning")}, Exit(ExitValidation), "", ExitValidation},
+		{"an Error earns another code", []diag.Result{errorResult("bad value")}, ExitBecause(ExitRuntime, "2 index(es) could not be verified"), "2 index(es) could not be verified", ExitRuntime},
+		{"a success", nil, ExitBecause(ExitOK, "unstated"), "", ExitOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var out strings.Builder
+			sink := NewDiagnosticSink(&out, FormatJSON, true, false)
+			sink.Add(tt.results...)
+			err := sink.Close(tt.err)
+
+			if got := ExitForError(err); got != tt.code {
+				t.Errorf("exit code = %d, want %d", got, tt.code)
+			}
+			var reported strings.Builder
+			ReportError(&reported, err)
+			if reported.Len() != 0 {
+				t.Errorf("Close returned a failure that prints beside the document: %q", reported.String())
+			}
+			var doc struct {
+				Issues []struct {
+					Severity string `json:"severity"`
+					Code     string `json:"code"`
+					Message  string `json:"message"`
+					Details  []struct {
+						Key   string `json:"key"`
+						Value string `json:"value"`
+					} `json:"details"`
+				} `json:"issues"`
+			}
+			if err := json.Unmarshal([]byte(assertOneJSONDocument(t, out.String())), &doc); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			var messages []string
+			for _, iss := range doc.Issues {
+				if iss.Code != diag.E_COMMAND_FAILED.String() {
+					continue
+				}
+				messages = append(messages, iss.Message)
+				if iss.Severity != "error" {
+					t.Errorf("E_COMMAND_FAILED severity = %q, want error", iss.Severity)
+				}
+				if len(iss.Details) != 1 || iss.Details[0].Key != diag.DetailKeyExitCode || iss.Details[0].Value != strconv.Itoa(tt.code) {
+					t.Errorf("E_COMMAND_FAILED details = %+v, want exit_code %d alone", iss.Details, tt.code)
+				}
+			}
+			switch {
+			case tt.want == "" && len(messages) != 0:
+				t.Errorf("document holds E_COMMAND_FAILED %q, want none:\n%s", messages, out.String())
+			case tt.want != "" && (len(messages) != 1 || messages[0] != tt.want):
+				t.Errorf("document holds E_COMMAND_FAILED %q, want one stating %q:\n%s", messages, tt.want, out.String())
+			}
+		})
+	}
+}
+
+// TestDiagnosticSink_TextCloseLeavesAReasonUnprinted pins the text half of
+// [ExitBecause]: its reason reaches no stream, so text output is what a bare
+// signal writes, nothing.
+func TestDiagnosticSink_TextCloseLeavesAReasonUnprinted(t *testing.T) {
+	t.Parallel()
+
+	var out, reported strings.Builder
+	sink := NewDiagnosticSink(&out, FormatText, true, false)
+	err := sink.Close(ExitBecause(ExitValidation, "2 of 3 entries failed"))
+	ReportError(&reported, err)
+	if out.Len() != 0 || reported.Len() != 0 {
+		t.Errorf("text output printed the reason: sink %q, report %q", out.String(), reported.String())
+	}
+	if got := ExitForError(err); got != ExitValidation {
+		t.Errorf("exit code = %d, want %d", got, ExitValidation)
 	}
 }
 

@@ -20,9 +20,10 @@ type diagnosticDocument struct {
 }
 
 type documentIssue struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Span    *struct {
+	Severity string `json:"severity"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Span     *struct {
 		Source string `json:"source"`
 		Start  struct {
 			Line int `json:"line"`

@@ -7,8 +7,10 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
@@ -43,7 +45,7 @@ merged file's own created_at forward.`,
 
 func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	outputPath, _ := cmd.Flags().GetString("output")
-	metadataRaw, _ := cmd.Flags().GetStringArray("metadata")
+	metadataRaw := stringArrayFlag(cmd, "metadata")
 	timestamp, _ := cmd.Flags().GetBool("timestamp")
 	indent, _ := cmd.Flags().GetBool("indent")
 	intoPath, _ := cmd.Flags().GetString("into")
@@ -174,20 +176,30 @@ func mergeMetadata(imported *snapshot.Header, flags map[string]string) map[strin
 	return merged
 }
 
+// stringArrayFlag returns the values a repeatable flag was given, each as
+// typed. pflag's GetStringArray reads them back through their CSV form, which
+// drops a lone empty value and turns a CR LF inside one into LF.
+func stringArrayFlag(cmd *cobra.Command, name string) []string {
+	return cmd.Flags().Lookup(name).Value.(pflag.SliceValue).GetSlice()
+}
+
 // parseMetadata parses key=value metadata pairs from --metadata flag values.
-// Returns an empty (non-nil) map when raw is empty.
+// Returns an empty (non-nil) map when raw is empty. A pair whose key or value
+// is not valid UTF-8 is a usage error, judged before any read, though
+// [snapshot.Marshal] would refuse it after the load.
 func parseMetadata(raw []string) (map[string]string, error) {
 	m := make(map[string]string, len(raw))
-	if len(raw) == 0 {
-		return m, nil
-	}
 	for _, kv := range raw {
 		k, v, ok := strings.Cut(kv, "=")
-		if !ok {
+		switch {
+		case !ok:
 			return nil, cli.Usagef("invalid metadata %q: expected key=value format", kv)
-		}
-		if k == "" {
+		case k == "":
 			return nil, cli.Usagef("invalid metadata %q: key must not be empty", kv)
+		case !utf8.ValidString(k):
+			return nil, cli.Usagef("invalid metadata %q: key is not valid UTF-8", kv)
+		case !utf8.ValidString(v):
+			return nil, cli.Usagef("invalid metadata %q: value is not valid UTF-8", kv)
 		}
 		m[k] = v
 	}

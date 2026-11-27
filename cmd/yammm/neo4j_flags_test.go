@@ -1,6 +1,9 @@
 package main
 
 import (
+	"net"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -86,6 +89,63 @@ func TestRun_DiffRefusesAMissingURIBeforeLoading(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "--uri is required") || strings.Contains(stderr, "W_ANNOTATION_SHADOWED") {
 		t.Errorf("want the --uri refusal before any load; stderr:\n%s", stderr)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want nothing", stdout)
+	}
+}
+
+// TestRun_DiffJudgesTheURIBeforeAnyRead: a --uri that names no server on its
+// text is a usage error judged right after the required check, so the exit is
+// 2 whatever the schema holds, and nothing dials.
+func TestRun_DiffJudgesTheURIBeforeAnyRead(t *testing.T) {
+	uris := []string{"bogus://127.0.0.1", "bolt://", "bolt://127.0.0.1:", "bolt://127.0.0.1:99999", "bolt+unix://"}
+	schemas := map[string]string{
+		"a valid schema":             "testdata/valid.yammm",
+		"a schema that is invalid":   "testdata/invalid.yammm",
+		"a schema that is not there": filepath.Join(t.TempDir(), "missing.yammm"),
+	}
+	for _, uri := range uris {
+		for schemaName, schemaPath := range schemas {
+			t.Run(uri+", "+schemaName, func(t *testing.T) {
+				code, stdout, stderr := runCLI(t, "neo4j", "diff", "--uri", uri, schemaPath)
+				if code != cli.ExitUsage {
+					t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitUsage, stderr)
+				}
+				if want := "connect to neo4j at " + strconv.Quote(uri); !strings.Contains(stderr, want) {
+					t.Errorf("stderr lacks %q:\n%s", want, stderr)
+				}
+				if strings.Contains(stderr, "[E_") || strings.Contains(stderr, "verify neo4j connectivity") {
+					t.Errorf("neo4j diff read the schema or dialed before it judged the URI:\n%s", stderr)
+				}
+				if stdout != "" {
+					t.Errorf("stdout = %q, want nothing", stdout)
+				}
+			})
+		}
+	}
+}
+
+// TestRun_DiffVerifiesTheServerBeforeItQueries pins that `neo4j diff` asks
+// the server whether it answers before its first query, so an unreachable one
+// fails at once, naming the check, and not after the driver's retry window.
+func TestRun_DiffVerifiesTheServerBeforeItQueries(t *testing.T) {
+	var lc net.ListenConfig
+	listener, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve a port: %v", err)
+	}
+	uri := "bolt://" + listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("release the port: %v", err)
+	}
+
+	code, stdout, stderr := runCLI(t, "neo4j", "diff", "--uri", uri, "testdata/valid.yammm")
+	if code != cli.ExitRuntime {
+		t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitRuntime, stderr)
+	}
+	if want := "verify neo4j connectivity at " + strconv.Quote(uri); !strings.Contains(stderr, want) {
+		t.Errorf("stderr lacks %q:\n%s", want, stderr)
 	}
 	if stdout != "" {
 		t.Errorf("stdout = %q, want nothing", stdout)

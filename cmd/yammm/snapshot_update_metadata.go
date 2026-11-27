@@ -3,6 +3,7 @@ package main
 import (
 	"maps"
 	"os"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -43,8 +44,8 @@ after the first.`,
 }
 
 func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
-	setRaw, _ := cmd.Flags().GetStringArray("set")
-	unsetKeys, _ := cmd.Flags().GetStringArray("unset")
+	setRaw := stringArrayFlag(cmd, "set")
+	unsetKeys := stringArrayFlag(cmd, "unset")
 
 	if len(setRaw) == 0 && len(unsetKeys) == 0 {
 		return cli.Usagef("at least one --set or --unset is required")
@@ -55,10 +56,14 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 		return err
 	}
 
-	// Applying --set then --unset on one key deleted it, exited 0, and reported
-	// the count as if nothing had been asked. Documenting a precedence would
-	// turn a silent contradiction into a documented one, so it is refused.
 	for _, k := range unsetKeys {
+		if !utf8.ValidString(k) {
+			return cli.Usagef("invalid --unset %q: key is not valid UTF-8", k)
+		}
+		// Applying --set then --unset on one key deleted it, exited 0, and
+		// reported the count as if nothing had been asked. Documenting a
+		// precedence would turn a silent contradiction into a documented one,
+		// so it is refused.
 		if _, both := setPairs[k]; both {
 			return cli.Usagef("--set and --unset both name %q; pass one or the other", k)
 		}

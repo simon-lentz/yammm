@@ -449,13 +449,25 @@ func entryResult(entry snapshot.ScanEntry) diag.Result {
 // in it, so gating on that alone exits 0 over a directory whose every entry is
 // malformed — while the same file named on its own exits 1. The entries'
 // results decide together, so an I/O failure outranks a malformed file as it
-// does everywhere else.
+// does everywhere else. The entries' issues are in the report alone, so the
+// exit states how many entries failed.
 func dirEntriesExit(entries []snapshot.ScanEntry) error {
 	results := make([]diag.Result, 0, len(entries))
 	for _, entry := range entries {
 		results = append(results, entryResult(entry))
 	}
-	return cli.Exit(cli.ExitForResult(cli.MergeResults(results...)))
+	code := cli.ExitForResult(cli.MergeResults(results...))
+	if code == cli.ExitOK {
+		return nil
+	}
+	failed := 0
+	for _, result := range results {
+		if cli.ExitForResult(result) != cli.ExitOK {
+			failed++
+		}
+	}
+	return cli.ExitBecause(code,
+		fmt.Sprintf("%d of %d snapshot files failed; each entry's diagnostics are in the report", failed, len(entries)))
 }
 
 func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {

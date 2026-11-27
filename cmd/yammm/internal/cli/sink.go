@@ -87,10 +87,13 @@ func (s *DiagnosticSink) Flush() {
 // reports. The RunE wrapper calls it once, last.
 //
 // Under [FormatJSON] Close writes the command's one document, a clean run
-// included. A failure that carries a message joins it as
-// [diag.E_COMMAND_FAILED], and Close returns that failure's bare exit signal,
-// so nothing is printed beside the document. A second call writes nothing and
-// returns err unchanged.
+// included, and the document accounts for every failing exit. A failure that
+// carries a message joins it as [diag.E_COMMAND_FAILED], and Close returns
+// that failure's bare exit signal, so nothing is printed beside the document.
+// A bare signal whose code the added results do not earn ([ExitForResult])
+// joins it as one E_COMMAND_FAILED that states the signal's reason
+// ([ExitBecause]). A second
+// call writes nothing and returns err unchanged.
 func (s *DiagnosticSink) Close(err error) error {
 	if s.closed {
 		return err
@@ -99,6 +102,8 @@ func (s *DiagnosticSink) Close(err error) error {
 		if failure, ok := FailureResult(err); ok {
 			s.results = append(s.results, failure)
 			err = Exit(ExitForError(err))
+		} else if err != nil && earnedExit(s.results) != ExitForError(err) {
+			s.results = append(s.results, unaccountedExit(err))
 		}
 		// Under FormatJSON nothing is flushed before Close, and the one
 		// document is written even when no result was added.

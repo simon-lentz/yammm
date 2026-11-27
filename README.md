@@ -369,8 +369,9 @@ A command writes the diagnostics it prints to **stderr**, at every severity,
 and stdout holds a command's own output. One report differs:
 `yammm snapshot info --dir` states each file's result in its stdout report —
 in text the file's first error or first warning, under `--json` its
-diagnostics — and prints on stderr the diagnostics of the directory read
-alone. A command that succeeds prints nothing but its own output and its
+diagnostics — and prints on stderr the diagnostics of the directory read,
+never an entry's. Under `--json`, a scan that fails on an entry also adds one
+`E_COMMAND_FAILED` to the stderr document, stating how many entries failed. A command that succeeds prints nothing but its own output and its
 diagnostics, so `yammm snapshot save` and `yammm snapshot update-metadata` print
 nothing else.
 `yammm validate` exits `0` for a schema that draws warnings and no error, so

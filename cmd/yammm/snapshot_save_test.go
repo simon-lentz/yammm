@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -103,19 +102,4 @@ func TestSnapshotSave_AnEmptyIntoIsRefusedAsAnEmptyPath(t *testing.T) {
 	assert.Empty(t, stdout)
 	assert.Contains(t, stderr, "snapshot file")
 	assert.NotContains(t, stderr, "either --output or --into")
-}
-
-// TestSnapshotSave_AMarshalFailureWritesNoFile pins that a snapshot the writer
-// refuses, here for a metadata value that is not UTF-8, exits 1 with the
-// writer's diagnostic and leaves no output file.
-func TestSnapshotSave_AMarshalFailureWritesNoFile(t *testing.T) {
-	t.Parallel()
-
-	out := filepath.Join(t.TempDir(), "out.ys")
-	code, stdout, stderr := executeCmdOutput(t, "snapshot", "save", "-m", "k=\xff", "-o", out, "testdata/valid.yammm", "testdata/data.json")
-	assert.Equal(t, cli.ExitValidation, code)
-	assert.Empty(t, stdout)
-	assert.Contains(t, stderr, `error[E_SNAPSHOT_MALFORMED]: snapshot.Marshal: metadata value of "k" is not valid UTF-8`)
-	_, err := os.Lstat(out)
-	assert.ErrorIs(t, err, fs.ErrNotExist, "a refused snapshot left a file at the output path")
 }

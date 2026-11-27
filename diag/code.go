@@ -66,7 +66,8 @@ var (
 	E_INTERNAL = NewCode("E_INTERNAL")
 
 	// E_COMMAND_FAILED carries a command-line failure that is not itself a
-	// diagnostic — a bad flag, an unreadable path, a lost connection — into a
+	// diagnostic — a bad flag, an unreadable path, a lost connection, an exit
+	// code the document's issues do not earn, such as neo4j diff's drift — into a
 	// --json document, so a machine consumer reads it by code rather
 	// than as prose beside the document. Its exit_code detail is the code the
 	// process exits with.
@@ -458,9 +459,11 @@ var (
 
 	// E_SNAPSHOT_IO indicates an I/O failure reading a snapshot: a file that
 	// fails to open (os.Open, on snapshot.ScanDir's per-file path), a reader
-	// that fails inside snapshot.ReadHeader with an error that is not and does
-	// not wrap io.EOF or io.ErrUnexpectedEOF, or, at yammm snapshot info --dir,
-	// a directory that fails to read. A header that ends early is ReadHeader's
+	// error that stops snapshot.ReadHeader's decode and is not and does not
+	// wrap io.EOF or io.ErrUnexpectedEOF (an error that arrives with or after
+	// the types table's last byte is not read), or, at yammm snapshot info
+	// --dir, a directory that fails to
+	// read. A header that ends early is ReadHeader's
 	// Error-severity E_SNAPSHOT_MALFORMED, never this code.
 	// Per-file emissions land on ScanEntry.Err so the iterator
 	// continues to the next file rather than aborting.
