@@ -520,6 +520,8 @@ func TestTree_RestoreFailsWhileAWriterAddsFiles(t *testing.T) {
 	tree := copied(t)
 	gittree.WriteFile(t, tree.dir, "m/m.go", []byte("package m\n"), 0o600)
 	stop, started, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	// The writer remakes ten names restore removes, so a write between its reads
+	// adds a file, and the copy never grows past ten extra files.
 	go func() {
 		defer close(done)
 		for i := 0; ; i++ {
@@ -527,26 +529,46 @@ func TestTree_RestoreFailsWhileAWriterAddsFiles(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				_ = os.WriteFile(filepath.Join(tree.dir, fmt.Sprintf("w%d.txt", i)), nil, 0o600)
+				_ = os.WriteFile(filepath.Join(tree.dir, fmt.Sprintf("w%d.txt", i%10)), nil, 0o600)
 				if i == 0 {
 					close(started)
 				}
 			}
 		}
 	}()
+	defer func() {
+		close(stop)
+		<-done
+	}()
 	<-started
-	differed, err := tree.restore(t.Context())
-	close(stop)
-	<-done
 	// Windows refuses to remove a file the writer holds open, so restore can
 	// fail there before its last read.
 	want := tree.dir + " cannot be restored: the copy still differs from what was copied after putting back "
 	if runtime.GOOS == "windows" {
 		want = tree.dir + " cannot be restored: "
 	}
-	if err == nil || !strings.HasPrefix(err.Error(), want) || strings.Count(err.Error(), "cannot be restored") != 1 {
-		t.Errorf("restore returned %q, %v; want an error that starts %q", differed, err, want)
+	// A call fails only when a write lands between its two reads, and the writer
+	// can sit idle through one call, so a success is checked and the next runs.
+	changed := map[string]bool{"m/m.go": true}
+	for i := range 10 {
+		changed[fmt.Sprintf("w%d.txt", i)] = true
 	}
+	const calls = 1000
+	for range calls {
+		differed, err := tree.restore(t.Context())
+		if err != nil {
+			if !strings.HasPrefix(err.Error(), want) || strings.Count(err.Error(), "cannot be restored") != 1 {
+				t.Errorf("restore failed with %v; want an error that starts %q", err, want)
+			}
+			return
+		}
+		for _, name := range differed {
+			if !changed[name] {
+				t.Fatalf("restore put back %q, which neither the test nor the writer changed (all: %q)", name, differed)
+			}
+		}
+	}
+	t.Errorf("restore succeeded %d times while a writer added files; want it to fail once a write lands between its reads", calls)
 }
 
 // A directory a test left without read or search permission is given its mode
