@@ -64,9 +64,19 @@ func AssertProcessFreeNames(t TB, root string) (paths, tests int) {
 // relative to root, testdata included. Outside a work tree it walks the
 // filesystem and skips node_modules and dot-directories.
 func trackedPaths(ctx context.Context, root string) ([]string, error) {
-	if gitTracks(ctx, root) {
+	tracks, err := gitTracks(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	if tracks {
 		gittree.MarkTrackedFiles()
-		out, err := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z").Output()
+		env, err := gitEnv(root)
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z")
+		cmd.Env = env
+		out, err := cmd.Output()
 		if err != nil {
 			return nil, fmt.Errorf("listing the tracked paths of %s: %w", root, err)
 		}
@@ -79,7 +89,7 @@ func trackedPaths(ctx context.Context, root string) ([]string, error) {
 		return paths, nil
 	}
 	var paths []string
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

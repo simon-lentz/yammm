@@ -10,6 +10,7 @@ package gittree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -42,10 +43,63 @@ func WithoutRepositoryVars(t *testing.T, env []string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return without(env, vars)
+}
+
+func without(env, vars []string) []string {
 	return slices.DeleteFunc(env, func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
 		return slices.Contains(vars, name)
 	})
+}
+
+// Env returns the environment for a git command that reads root. Root keeps
+// the repository variables only when it is the top of the work tree this
+// process runs in, where a hook's variables name the tree being committed. Any
+// other root has a repository of its own or none, and an absolute GIT_DIR, as
+// a linked worktree's hook exports, points git at the enclosing repository
+// wherever it runs.
+func Env(root string) ([]string, error) {
+	vars, err := repositoryVars()
+	if err != nil {
+		return nil, err
+	}
+	env := os.Environ()
+	top, err := enclosingTop()
+	if err != nil {
+		return nil, err
+	}
+	if top != "" && sameDir(root, top) {
+		return env, nil
+	}
+	return without(env, vars), nil
+}
+
+// enclosingTop is the top of the work tree git finds from this process's
+// working directory with the repository variables removed, or "" outside one.
+var enclosingTop = sync.OnceValues(func() (string, error) {
+	vars, err := repositoryVars()
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(context.Background(), "git", "rev-parse", "--show-toplevel")
+	cmd.Env = without(os.Environ(), vars)
+	out, err := cmd.Output()
+	if exit := (*exec.ExitError)(nil); errors.As(err, &exit) {
+		return "", nil // outside a work tree there is no enclosing repository
+	} else if err != nil {
+		return "", fmt.Errorf("git rev-parse --show-toplevel: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+})
+
+func sameDir(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
 }
 
 // WriteFile writes content with mode to rel, a slash-separated path under dir,

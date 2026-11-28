@@ -60,8 +60,40 @@ func TestIndex_AddsTheNamedPathsOrEveryFile(t *testing.T) {
 	if got := lsFiles(t, dir); got != "a.txt\nsub/b.txt\n" {
 		t.Errorf("after Index() the index holds %q, want both files", got)
 	}
-	if out, err := exec.CommandContext(t.Context(), "git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD").Output(); err == nil {
+	head := exec.CommandContext(t.Context(), "git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD")
+	head.Env = WithoutRepositoryVars(t, os.Environ())
+	if out, err := head.Output(); err == nil {
 		t.Errorf("Index committed: HEAD is %s", strings.TrimSpace(string(out)))
+	}
+}
+
+// Not parallel: it sets GIT_DIR for the whole process, as a linked worktree's
+// hook does.
+func TestEnv_KeepsTheRepositoryVariablesAtTheEnclosingTopAlone(t *testing.T) {
+	top, err := enclosingTop()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if top == "" {
+		t.Skip("no enclosing repository: the tree is not a git work tree")
+	}
+	const gitDir = "GIT_DIR=/elsewhere/.git"
+	t.Setenv("GIT_DIR", "/elsewhere/.git")
+	for _, tt := range []struct {
+		root string
+		keep bool
+	}{
+		{root: top, keep: true},
+		{root: filepath.Join(top, "internal"), keep: false},
+		{root: t.TempDir(), keep: false},
+	} {
+		env, err := Env(tt.root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := slices.Contains(env, gitDir); got != tt.keep {
+			t.Errorf("Env(%s) holds %s: %v, want %v", tt.root, gitDir, got, tt.keep)
+		}
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // storedModuleFile is the name a fixture under testdata gives each of its
@@ -25,6 +27,7 @@ func materialize(t *testing.T, name string) string {
 	dir := t.TempDir()
 	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--is-inside-work-tree")
 	cmd.Dir = dir
+	cmd.Env = gittree.WithoutRepositoryVars(t, os.Environ())
 	if out, err := cmd.Output(); err == nil && strings.TrimSpace(string(out)) == "true" {
 		t.Fatalf("the temporary directory %s lies inside a git work tree; set TMPDIR outside one", dir)
 	}

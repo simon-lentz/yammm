@@ -202,11 +202,28 @@ func isTestFile(name string) bool { return strings.HasSuffix(name, "_test.go") }
 // gitTracks reports whether git can list root's tracked files: the binary
 // exists and root is inside a work tree. Neither absence is a failure to read
 // the module — both mean there is no tracked set — so neither is an error.
-func gitTracks(ctx context.Context, root string) bool {
-	if _, err := exec.LookPath("git"); err != nil {
-		return false
+func gitTracks(ctx context.Context, root string) (bool, error) {
+	if _, err := exec.LookPath("git"); errors.Is(err, exec.ErrNotFound) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("looking up git: %w", err)
 	}
-	return exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--is-inside-work-tree").Run() == nil
+	env, err := gitEnv(root)
+	if err != nil {
+		return false, err
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--is-inside-work-tree")
+	cmd.Env = env
+	return cmd.Run() == nil, nil
+}
+
+// gitEnv is the environment for git over root, as [gittree.Env] gives it.
+func gitEnv(root string) ([]string, error) {
+	env, err := gittree.Env(root)
+	if err != nil {
+		return nil, fmt.Errorf("the environment for git in %s: %w", root, err)
+	}
+	return env, nil
 }
 
 // trackedGoFiles returns every .go file git tracks under root, keyed by its
@@ -215,11 +232,17 @@ func gitTracks(ctx context.Context, root string) bool {
 // and the caller then walks the filesystem, which is what keeps the gate
 // runnable outside a checkout.
 func trackedGoFiles(ctx context.Context, root string) (tracked map[string]bool, ok bool, err error) {
-	if !gitTracks(ctx, root) {
-		return nil, false, nil
+	if ok, err := gitTracks(ctx, root); err != nil || !ok {
+		return nil, false, err
 	}
 	gittree.MarkTrackedFiles()
-	out, err := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z", "--", "*.go").Output()
+	env, err := gitEnv(root)
+	if err != nil {
+		return nil, false, err
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z", "--", "*.go")
+	cmd.Env = env
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, false, fmt.Errorf("listing the tracked files of %s: %w", root, err)
 	}

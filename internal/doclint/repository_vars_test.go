@@ -46,6 +46,25 @@ func isolateFromEnclosingRepository(t *testing.T) {
 	}
 }
 
+// A hook in a linked worktree runs with GIT_DIR naming the worktree's git
+// directory, absolute, and git then reads that repository from any directory.
+// A child run of this test binary repeats every other test with the variable
+// naming this checkout's git directory.
+func TestPackage_PassesUnderAnAbsoluteGitDir(t *testing.T) {
+	t.Parallel()
+	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--absolute-git-dir")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Skip("no enclosing repository: the tree is not a git work tree")
+	}
+	//nolint:gosec // runs this test binary again
+	child := exec.CommandContext(t.Context(), os.Args[0], "-test.count=1", "-test.skip=^"+t.Name()+"$")
+	child.Env = append(os.Environ(), "GIT_DIR="+strings.TrimSpace(string(out)))
+	if out, err := child.CombinedOutput(); err != nil {
+		t.Errorf("the package fails under GIT_DIR: %v\n%s", err, out)
+	}
+}
+
 // TestFixtureRepositories_IgnoreTheEnclosingRepositorysIndex runs the tests
 // that build their own repository in a child of this test binary, with
 // GIT_INDEX_FILE naming another repository's index, as a hook would.
