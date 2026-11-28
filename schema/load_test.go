@@ -17,6 +17,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/expr"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -1755,7 +1756,7 @@ func TestModuleRoot_Recorded(t *testing.T) {
 		// A marker in the entry file's OWN directory makes this assertion
 		// independent of whatever sits above the temp root, and the nearest-
 		// ancestor rule means it names exactly the directory asserted below.
-		require.NoError(t, os.WriteFile(filepath.Join(dir, schema.ModuleRootMarker), nil, 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, moduleroot.Marker), nil, 0o600))
 		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
 			return schema.Load(ctx, path, schema.WithWarnings(warn))
 		})

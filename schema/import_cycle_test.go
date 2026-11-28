@@ -9,6 +9,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -38,7 +39,7 @@ func sortIssueSites(sites []issueSite) {
 // its E_DUPLICATE_IMPORT.
 func TestImportCycle_ReportedOnTheClosingImport(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	type site struct {
 		code diag.Code

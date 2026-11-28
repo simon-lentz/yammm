@@ -185,7 +185,7 @@ func (s Schema) Sources() Sources {
 // ModuleRoot returns the canonicalized module root the load resolved
 // module-style imports against: for a plain Load the WithModuleRoot value when
 // given, then the directory of the nearest ancestor holding a
-// [ModuleRootMarker] file and failing that the entry file's own directory,
+// yammm.mod marker file and failing that the entry file's own directory,
 // and for LoadSourcesWithEntry the canonicalized [WithModuleRoot] value
 // (including the "." form).
 // A load under [WithSyntheticRoot] reports the synthetic root, which is the

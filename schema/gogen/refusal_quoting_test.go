@@ -99,7 +99,7 @@ func TestMarshal_EveryRefusalQuotesTheSourcesItNames(t *testing.T) {
 		t.Parallel()
 		root := unprintableRoot(t)
 		s, loadErr := schema.LoadSourcesWithEntry(context.Background(),
-			map[string][]byte{".": []byte("schema \"p\"\n\ntype P {\n\tid String primary\n}\n")}, ".", schema.WithSourcesOnly(true), schema.WithModuleRoot(root))
+			map[string][]byte{root: []byte("schema \"p\"\n\ntype P {\n\tid String primary\n}\n")}, root, schema.WithSourcesOnly(true), schema.WithModuleRoot(root))
 		if loadErr != nil {
 			t.Fatalf("load: %v", loadErr)
 		}

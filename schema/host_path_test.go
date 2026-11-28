@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/hostpath"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -381,7 +383,7 @@ func TestHostPath_MalformedMarkerDetailIsTheRootsIdentity(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			root := filepath.Join(t.TempDir(), row.dir)
-			writeHostPathFile(t, filepath.Join(root, schema.ModuleRootMarker), "module example.com/thing\n")
+			writeHostPathFile(t, filepath.Join(root, moduleroot.Marker), "module example.com/thing\n")
 			entry := filepath.Join(root, "main.yammm")
 			writeHostPathFile(t, entry, "schema \"main\"\n\ntype T {\n\tid String primary\n}\n")
 
@@ -415,4 +417,126 @@ func issueCodes(res diag.Result) []string {
 		codes = append(codes, issue.Code().String())
 	}
 	return codes
+}
+
+// TestHostPath_LoadsThroughALinkToADescriptor holds Load to the bytes the
+// kernel reads for the typed path: through a link to a descriptor, the host's
+// name for the descriptor's file may reach no file (darwin's realpath answers
+// /dev/fd/<the file's base name>) or another file, so the entry is read through
+// the path as typed, and named by it.
+func TestHostPath_LoadsThroughALinkToADescriptor(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no descriptor paths")
+	}
+	dir := t.TempDir()
+	held := filepath.Join(dir, "s.yammm")
+	if err := os.WriteFile(held, []byte(hostPathLeaf), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	link := filepath.Join(dir, "l")
+	if err := os.Symlink(fmt.Sprintf("/dev/fd/%d", f.Fd()), link); err != nil {
+		t.Fatal(err)
+	}
+	s, err := schema.Load(t.Context(), link)
+	if err != nil {
+		t.Fatalf("Load through a link to a descriptor: %v", err)
+	}
+	if s.Name() != "relleaf" {
+		t.Errorf("Load read schema %q, want the descriptor's relleaf", s.Name())
+	}
+	want, err := location.SourceIDFromPath(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.SourceID() != want || !strings.HasSuffix(s.SourceID().String(), "/l") {
+		t.Errorf("SourceID = %q, want the typed path's identity %q", s.SourceID(), want)
+	}
+}
+
+// TestHostPath_AModuleRootThroughADirectorysDescriptorLoads holds a module
+// root given as a descriptor of a directory to that directory: Linux names it
+// through procfs, so an entry under it and its relative imports lie under the
+// root. darwin's host names it inside the descriptor table only, where the
+// typed path stands and the entry lies outside it.
+func TestHostPath_AModuleRootThroughADirectorysDescriptorLoads(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "linux" {
+		t.Skip("only Linux names a directory's descriptor by the directory's path")
+	}
+	m := t.TempDir()
+	writeHostPathFile(t, filepath.Join(m, "a.yammm"), "schema \"a\"\n\nimport \"./b\" as b\n\ntype T {\n\tid String primary\n\t--> TO (one) b.U\n}\n")
+	writeHostPathFile(t, filepath.Join(m, "b.yammm"), "schema \"b\"\n\ntype U {\n\tid String primary\n}\n")
+	d, err := os.Open(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	root := fmt.Sprintf("/dev/fd/%d", d.Fd())
+	if _, err := schema.Load(t.Context(), filepath.Join(m, "a.yammm"), schema.WithModuleRoot(root)); err != nil {
+		t.Errorf("Load under the module root %s, a descriptor of the entry's directory: %v", root, err)
+	}
+}
+
+// TestHostPath_ARefusedEntryIsNamedOnceAsTyped holds a refused entry's message to
+// the path the caller passed, once: a missing file, a name that is not valid
+// UTF-8, and a relative path, which is named relative, as typed.
+func TestHostPath_ARefusedEntryIsNamedOnceAsTyped(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{filepath.Join(dir, "missing.yammm"), filepath.Join(dir, "x\xffq.yammm")} {
+		_, err := schema.Load(t.Context(), p)
+		if err == nil {
+			t.Fatalf("Load(%q) loaded", p)
+		}
+		msg, named := err.Error(), strconv.Quote(p)
+		// An unquoted repeat, as a path error's own text, counts too.
+		bare := strings.Count(msg, p)
+		if strings.Contains(named, p) {
+			bare -= strings.Count(msg, named)
+		}
+		if n := strings.Count(msg, named); n != 1 || bare != 0 {
+			t.Errorf("Load(%q) names %s %d times and the bare path %d times: %v", p, named, n, bare, err)
+		}
+	}
+	t.Chdir(dir)
+	if _, err := schema.Load(t.Context(), "nope.yammm"); err == nil || !strings.Contains(err.Error(), `read "nope.yammm":`) || strings.Count(err.Error(), "nope.yammm") != 1 {
+		t.Errorf("Load of a relative missing entry = %v; want it named as typed", err)
+	}
+}
+
+// TestHostPath_AnEntryIsReadAtTheFileItsIdentityNames holds the read and the
+// identity of an entry spelled through a link and a ".." to one file: the ".."
+// is evaluated on the text for both, so the file beside the link is read, not
+// the one the kernel reaches by climbing out of the link's target.
+func TestHostPath_AnEntryIsReadAtTheFileItsIdentityNames(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs elevation on Windows")
+	}
+	dir := t.TempDir()
+	writeHostPathFile(t, filepath.Join(dir, "x.yammm"), "schema \"text\"\n\ntype T {\n\tid String primary\n}\n")
+	writeHostPathFile(t, filepath.Join(dir, "real", "x.yammm"), "schema \"kernel\"\n\ntype T {\n\tid String primary\n}\n")
+	if err := os.MkdirAll(filepath.Join(dir, "real", "deep"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "real", "deep"), filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	// Built by hand: filepath.Join would clean the ".." away.
+	s, err := schema.Load(t.Context(), filepath.Join(dir, "link")+"/../x.yammm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := location.SourceIDFromPath(filepath.Join(dir, "x.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Name() != "text" || s.SourceID() != want {
+		t.Errorf("Load through link/.. read schema %q at %v; want %q at %v", s.Name(), s.SourceID(), "text", want)
+	}
 }

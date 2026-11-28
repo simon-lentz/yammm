@@ -24,15 +24,6 @@ func (c canonicalPath) IsZero() bool {
 	return c.path == ""
 }
 
-// Dir returns the identity of c's directory, cleaning c first. At a
-// volume root it returns the root, and for the zero value the zero value.
-func (c canonicalPath) Dir() canonicalPath {
-	if c.IsZero() {
-		return canonicalPath{}
-	}
-	return identityOf(filepath.Dir(filepath.Clean(filepath.FromSlash(c.path))))
-}
-
 // identityOf writes a resolved host path as an identity: NFC, with forward
 // slashes, and a network share's root with its trailing separator as a drive's
 // root has one, because filepath.Clean keeps `\\server\share\` and

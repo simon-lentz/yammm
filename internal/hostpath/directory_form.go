@@ -3,7 +3,6 @@ package hostpath
 import (
 	"errors"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -22,104 +21,69 @@ func (notDirectory) Error() string { return "not a directory" }
 
 func (notDirectory) Is(target error) bool { return target == syscall.ENOTDIR }
 
-// RefusedRead returns [ErrNotDirectory] when p's spelling names a directory
-// ([NamesDirectory]) and the element it names, or the first element above it
-// that exists, is not a directory, and nil otherwise. A dangling link is judged
-// at the path the kernel reaches through it. A caller checks it before it opens
-// p, so the refusal reads the same on every host.
-func RefusedRead(p string) error {
-	return refused(p, false)
-}
-
-// RefusedWrite is [RefusedRead] for a path about to be written. It also
-// refuses an element that does not exist in an existing directory, where the
-// write would create a file, and refuses with the host's own error an element
-// under a directory that does not exist, or one its stat fails for. Windows
-// renames onto "f\" as onto "f", so a writer cannot leave this to the rename.
+// RefusedWrite returns [ErrNotDirectory] when p, a path about to be written,
+// names a directory ([NamesDirectory]) and the element it names, or the first
+// element above it that exists, is not a directory, and when that element does
+// not exist in an existing directory, where the write would create a file. It
+// refuses with the host's own error an element under a directory that does not
+// exist, or one its stat fails for, and returns nil for any other p. A dangling
+// link is judged at the path the kernel reaches through it. Windows renames
+// onto "f\" as onto "f", so a writer cannot leave this to the rename.
 func RefusedWrite(p string) error {
-	return refused(p, true)
+	return refusedWriteIn(hostLookups{}, p)
 }
 
-// refused judges the element p names with p's directory-form ending removed
-// and nothing else cleaned, so a ".." in a link target is taken as the kernel
-// takes it. A Unix stat answers ENOTDIR for an element under a non-directory.
-// Windows answers ERROR_PATH_NOT_FOUND, its ENOTDIR, which matches
-// fs.ErrNotExist, so there an absent element is judged by the first element
-// above it that exists.
-func refused(p string, write bool) error {
+// refusedWriteIn is [RefusedWrite] over l. It follows maxLinkHops dangling
+// links and refuses the next, which a static tree never reaches, since the
+// kernel answers ELOOP to a stat of a longer chain.
+func refusedWriteIn(l Lookups, p string) error {
 	if !NamesDirectory(p) {
 		return nil
 	}
 	element := directoryElement(p)
 	for hops := 0; ; hops++ {
-		info, err := os.Stat(element)
+		info, err := l.Stat(element)
 		switch {
 		case err == nil && !info.IsDir(), unixNotDirectory(err):
 			return ErrNotDirectory
 		case err == nil:
 			return nil
 		case !errors.Is(err, fs.ErrNotExist):
-			return writeRefusal(write, err)
+			return bareErr(err)
 		}
-		next, link := danglingLink(element)
+		next, link := danglingHop(l, element)
 		if !link {
-			return absentElement(element, err, write)
+			return absentElement(l, element, err)
 		}
 		if hops == maxLinkHops {
-			return writeRefusal(write, errTooManyLinks)
+			return errTooManyLinks
 		}
 		element = directoryElement(next)
 	}
 }
 
 // absentElement judges an element that does not exist, and is no link, by the
-// first element above it that exists: a non-directory there is refused, and a
-// write is refused in an existing directory and, above a missing one, with
-// err, the element's own stat failure. A stat that answered missing for the
-// element reached every element above it that exists, so the climb meets no
-// other stat failure.
-func absentElement(element string, err error, write bool) error {
+// first element above it that exists: a non-directory there is refused, as is
+// the element in an existing directory, and above a missing one the write is
+// refused with err, the element's own stat failure. A stat that answered
+// missing for the element reached every element above it that exists, so the
+// climb meets no other stat failure.
+func absentElement(l Lookups, element string, err error) error {
 	parent := Parent(element)
 	for dir := parent; ; {
-		info, serr := os.Stat(dir)
+		info, serr := l.Stat(dir)
 		switch {
-		case serr == nil && !info.IsDir():
-			return ErrNotDirectory
-		case serr == nil && dir == parent && write:
+		case serr == nil && !info.IsDir(), serr == nil && dir == parent:
 			return ErrNotDirectory
 		case serr == nil:
-			return writeRefusal(write, err)
+			return bareErr(err)
 		}
 		up := Parent(dir)
 		if up == dir {
-			return writeRefusal(write, err)
+			return bareErr(err)
 		}
 		dir = up
 	}
-}
-
-// danglingLink returns the path the kernel reaches through the link at
-// element, when element is one. An empty target reaches nothing, as
-// [Resolve] reads it.
-func danglingLink(element string) (string, bool) {
-	info, err := os.Lstat(element)
-	if err != nil || info.Mode()&fs.ModeSymlink == 0 {
-		return "", false
-	}
-	dest, err := os.Readlink(element)
-	if err != nil || dest == "" {
-		return "", false
-	}
-	return FollowLink(element, dest), true
-}
-
-// writeRefusal is err, unwrapped, for a write, and nil for a read, which
-// leaves the failure to the caller's own open.
-func writeRefusal(write bool, err error) error {
-	if !write {
-		return nil
-	}
-	return bareErr(err)
 }
 
 // directoryElement returns p without the trailing separators and "." elements

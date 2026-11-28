@@ -17,11 +17,11 @@ import (
 // held, and 0o644 publishes it to every account on the host.
 const NewFileMode fs.FileMode = 0o600
 
-// stagingPattern is the [os.CreateTemp] pattern of every staging file. Its
-// length does not depend on the target's name, so a basename near the name
-// limit can still be replaced, and it ends in [snapshot.TmpSuffix], which
-// [snapshot.ScanDir] skips, so a staging file a crash leaves is never scanned.
-const stagingPattern = ".yammm-*" + snapshot.TmpSuffix
+// stagingName is the name of a staging file for a random token. Its length does
+// not depend on the target's name, so a basename near the name limit can still
+// be replaced, and it ends in [snapshot.TmpSuffix], which [snapshot.ScanDir]
+// skips, so a staging file a crash leaves is never scanned.
+func stagingName(token string) string { return ".yammm-" + token + snapshot.TmpSuffix }
 
 // maxLinkHops bounds how many symlinks a write follows — the bound Linux sets
 // (MAXSYMLINKS) — so a loop is refused rather than followed.
@@ -62,11 +62,11 @@ func resolveWriteTarget(path string) (writeTarget, error) {
 			if hops == maxLinkHops {
 				return writeTarget{}, syscall.ELOOP
 			}
-			dest, err := os.Readlink(resolved)
+			next, err := hostpath.Hop(resolved)
 			if err != nil {
 				return writeTarget{}, bare(err)
 			}
-			resolved = hostpath.FollowLink(resolved, dest)
+			resolved = next
 			if err := hostpath.RefusedWrite(resolved); err != nil {
 				return writeTarget{}, err
 			}
@@ -141,20 +141,19 @@ func WrittenNames(path string) ([]string, error) {
 // failure is a refusal, never a cue to write in place: that would turn a full
 // disk into a truncated file.
 func replace(t writeTarget, data []byte) (retErr error) {
-	f, err := os.CreateTemp(hostpath.Parent(t.path), stagingPattern)
+	stage, err := t.stage()
 	if err != nil {
 		return fmt.Errorf("stage replacement: %w", bare(err))
 	}
-	tmp := f.Name()
 	defer func() {
 		if retErr != nil {
-			os.Remove(tmp) //nolint:gosec // best-effort cleanup on a failed write
+			stage.Discard()
 		}
 	}()
-	if err := writeSyncChmodClose(f, data, t.mode); err != nil {
+	if err := writeSyncChmodClose(stage.File, data, t.mode); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, t.path); err != nil {
+	if err := stage.Commit(); err != nil {
 		return fmt.Errorf("rename into place: %w", bare(err))
 	}
 	return nil
@@ -193,10 +192,17 @@ func bare(err error) error {
 	return err
 }
 
+// stage creates the staging file for t at the mode the write ends with, so the
+// bytes are never readable more widely than the file they replace.
+func (t writeTarget) stage() (*hostpath.Staging, error) {
+	return hostpath.Stage(t.path, t.mode, stagingName)
+}
+
 // writeSyncChmodClose writes, flushes, chmods and closes f, keeping the close
-// error a delayed-allocation filesystem reports a failed write through. The
-// chmod precedes the rename: the other order leaves the content readable at
-// the wider mode for a moment.
+// error a delayed-allocation filesystem reports a failed write through. f was
+// created at mode under the umask, so the bytes are never readable more widely
+// than mode; the chmod sets the bits the umask cleared, and it precedes the
+// rename, so the replacement lands with its whole mode.
 func writeSyncChmodClose(f *os.File, data []byte, mode fs.FileMode) (retErr error) {
 	defer func() {
 		if err := f.Close(); err != nil && retErr == nil {

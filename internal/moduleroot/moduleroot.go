@@ -1,44 +1,54 @@
-package schema
+// Package moduleroot finds the module root of a schema on disk: the nearest
+// directory above it that holds a [Marker] file. The directory is the root that
+// module-style imports resolve against and the boundary the loader's import
+// sandbox is opened at. The schema loader, the command-line tool and the
+// language server share it, so each finds one root for one schema.
+//
+// # The marker rule
+//
+// A marker is a regular file, or a symbolic link to one, that is empty or holds
+// only comment lines, a comment line's first non-space byte being '#'. A UTF-8
+// byte order mark is refused rather than trimmed, which reserves the byte for a
+// later marker format. A marker larger than 64 KiB is malformed by size. A
+// malformed marker fails the load and is never read as no marker.
+package moduleroot
 
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/simon-lentz/yammm/internal/hostpath"
-
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/hostpath"
+	"github.com/simon-lentz/yammm/location"
 )
 
-// ModuleRootMarker is the file name that marks a directory as a module root.
-//
-// The directory holding the nearest such file above a schema is the root that
+// Marker is the file name that marks a directory as a module root: the
+// directory holding the nearest such file above a schema is the root that
 // module-style imports resolve against and the boundary the import sandbox is
-// opened at. The name is exported so the CLI help, the editor's file watcher
-// and a consumer's tooling all spell it one way.
-const ModuleRootMarker = "yammm.mod"
+// opened at.
+const Marker = "yammm.mod"
 
-// maxModuleRootMarkerSize bounds the read of a marker file. The marker holds
+// maxMarkerSize bounds the read of a marker file. The marker holds
 // comment lines only, so anything larger is malformed by size rather than
 // worth parsing — and the bound keeps a hostile or mistaken file from being
 // read into memory during a walk that runs before any sandbox exists.
-const maxModuleRootMarkerSize = 64 << 10
+const maxMarkerSize = 64 << 10
 
 // utf8BOM is refused rather than trimmed. Refusing reserves the byte for a
 // later marker format; a rule that silently trims it is a rule that format
 // has to keep.
 const utf8BOM = "\ufeff"
 
-// MalformedModuleRootError reports a module-root marker whose content
-// violates the marker rule: the file must be empty or hold only comment
-// lines, where a comment line's first non-space byte is '#'.
-//
-// A malformed marker fails the load. A marker the author wrote and the loader
-// ignored is the failure mode module-root discovery exists to remove, so the
-// error is never downgraded to a fall-through.
-type MalformedModuleRootError struct {
+// MalformedError reports a module-root marker whose content violates the
+// marker rule: the file must be empty or hold only comment lines, where a
+// comment line's first non-space byte is '#'. A malformed marker fails the
+// load: a marker the author wrote and the loader ignored is the failure mode
+// discovery exists to remove.
+type MalformedError struct {
 	// Path is the marker file's path.
 	Path string
 	// Line is the 1-based line number that violates the rule, or 0 when the
@@ -49,39 +59,36 @@ type MalformedModuleRootError struct {
 }
 
 // Error implements the error interface.
-func (e *MalformedModuleRootError) Error() string {
+func (e *MalformedError) Error() string {
 	if e.Line > 0 {
 		return fmt.Sprintf("malformed module root marker %s: line %d: %s", e.Path, e.Line, e.Reason)
 	}
 	return fmt.Sprintf("malformed module root marker %s: %s", e.Path, e.Reason)
 }
 
-// FindModuleRoot walks from dir to the filesystem root looking for a
-// [ModuleRootMarker] file. It returns the canonical directory holding the
-// nearest one and true; "" and false when no ancestor holds one; and an error
-// when the resolver refuses dir, when a marker exists but is malformed or
-// cannot be read, and when a look for a marker fails other than as absent.
+// Find walks from dir, a directory, to the filesystem root looking for a
+// [Marker] file. It returns the canonical directory holding the nearest one and
+// true; "" and false when no ancestor holds one, so a caller can insert its own
+// tier before its default; and an error when the resolver refuses dir, when a
+// marker exists but is malformed or cannot be read, and when a look for a
+// marker fails other than as absent.
 //
-// A miss returns "" rather than dir so a caller can insert its own tier
-// between discovery and its default — the editor's workspace folder does
-// exactly that. dir must be a directory: pass filepath.Dir of a file path.
-//
-// The walk runs on the chain [location.SourceIDFromPath] resolves, so a
-// marker reachable only through a symlinked spelling is normally not
-// consulted. A path the resolver refuses is an error. A directory the process
-// cannot traverse is kept as typed, as the resolver keeps it, and the look for
-// a marker beneath it then fails with the permission error. Discovery itself
-// is not sandboxed and cannot be: it runs before any root exists, and costs one
-// os.Lstat per ancestor level.
-func FindModuleRoot(dir string) (string, bool, error) {
+// The walk runs on the chain [location.SourceIDFromPath] resolves dir to, so a
+// marker beside a symbolic link's own spelling is not consulted: a caller
+// passes the directory of the file's resolved host path. A directory the
+// process cannot traverse is kept as typed, as the resolver keeps it, and the
+// look for a marker beneath it then fails with the permission error. Discovery
+// runs before any root exists, so it is not sandboxed, and costs one os.Lstat
+// per ancestor level.
+func Find(dir string) (string, bool, error) {
 	canonical, err := hostpath.Resolve(dir)
 	if err != nil {
 		return "", false, fmt.Errorf("canonicalize %q: %w", dir, err)
 	}
 
 	for current := canonical; ; {
-		marker := filepath.Join(current, ModuleRootMarker)
-		switch ok, err := checkModuleRootMarker(marker); {
+		marker := filepath.Join(current, Marker)
+		switch ok, err := checkMarker(marker); {
 		case err != nil:
 			return "", false, err
 		case ok:
@@ -98,11 +105,11 @@ func FindModuleRoot(dir string) (string, bool, error) {
 	}
 }
 
-// checkModuleRootMarker reports whether path is a well-formed marker. It
+// checkMarker reports whether path is a well-formed marker. It
 // returns false and no error when nothing is there, and an error for a marker
 // that exists but cannot serve: a directory, a dangling symlink, an over-size
 // or non-comment file, or an unreadable one.
-func checkModuleRootMarker(path string) (bool, error) {
+func checkMarker(path string) (bool, error) {
 	// Lstat first: os.Stat reports a dangling symlink as absent, which would
 	// silently skip a marker the author committed.
 	info, err := os.Lstat(path)
@@ -116,7 +123,7 @@ func checkModuleRootMarker(path string) (bool, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		info, err = os.Stat(path)
 		if err != nil {
-			return false, &MalformedModuleRootError{
+			return false, &MalformedError{
 				Path:   path,
 				Reason: "symlink does not resolve to a readable file",
 			}
@@ -124,15 +131,15 @@ func checkModuleRootMarker(path string) (bool, error) {
 	}
 
 	if info.IsDir() {
-		return false, &MalformedModuleRootError{
+		return false, &MalformedError{
 			Path:   path,
 			Reason: "is a directory, not a marker file",
 		}
 	}
 
-	content, err := readBounded(path, maxModuleRootMarkerSize)
+	content, err := readBounded(path, maxMarkerSize)
 	if err != nil {
-		if _, ok := errors.AsType[*MalformedModuleRootError](err); ok { //nolint:errcheck // type check only, value unused
+		if _, ok := errors.AsType[*MalformedError](err); ok { //nolint:errcheck // type check only, value unused
 			return false, err
 		}
 		return false, fmt.Errorf("read module root marker %q: %w", path, err)
@@ -147,23 +154,23 @@ func checkModuleRootMarker(path string) (bool, error) {
 // readBounded reads at most limit bytes from path and reports a marker larger
 // than that as malformed by size.
 func readBounded(path string, limit int64) ([]byte, error) {
-	f, err := openRegular(
+	f, err := hostpath.OpenRegular(
 		func(flag int) (*os.File, error) { return os.OpenFile(path, flag, 0) },
 		func() (os.FileInfo, error) { return os.Stat(path) })
 	if err != nil {
-		if errors.Is(err, errNotRegularFile) {
-			return nil, &MalformedModuleRootError{Path: path, Reason: "is not a regular file"}
+		if errors.Is(err, hostpath.ErrNotRegularFile) {
+			return nil, &MalformedError{Path: path, Reason: "is not a regular file"}
 		}
 		return nil, fmt.Errorf("open %q: %w", path, err)
 	}
 	defer f.Close()
 
-	content, tooLong, err := readAtMost(f, limit)
+	content, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("%q: %w", path, err)
 	}
-	if tooLong {
-		return nil, &MalformedModuleRootError{
+	if int64(len(content)) > limit {
+		return nil, &MalformedError{
 			Path:   path,
 			Reason: fmt.Sprintf("larger than %d bytes; a marker holds comment lines only", limit),
 		}
@@ -176,7 +183,7 @@ func readBounded(path string, limit int64) ([]byte, error) {
 func checkMarkerContent(path string, content []byte) error {
 	text := string(content)
 	if strings.HasPrefix(text, utf8BOM) {
-		return &MalformedModuleRootError{
+		return &MalformedError{
 			Path:   path,
 			Line:   1,
 			Reason: "starts with a UTF-8 byte order mark",
@@ -192,7 +199,7 @@ func checkMarkerContent(path string, content []byte) error {
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		return &MalformedModuleRootError{
+		return &MalformedError{
 			Path:   path,
 			Line:   line,
 			Reason: "is neither empty nor a comment; a marker may hold only # comment lines",
@@ -201,23 +208,21 @@ func checkMarkerContent(path string, content []byte) error {
 	return nil
 }
 
-// ModuleRootIssue converts a [FindModuleRoot] error into the diagnostic the
-// load reports for it.
-//
-// A [MalformedModuleRootError] becomes an Error-severity
-// E_LOAD_MODULE_ROOT_MALFORMED carrying the marker's directory and the origin
-// "discovered"; any other error becomes a Fatal E_LOAD_IO_FAILURE, the shape
-// of the loader's other fatal I/O failures (a failed import read is an
-// Error-severity issue instead). The issue carries no span: the
-// source registry holds .yammm sources only.
-//
-// Exported because the editor reports the same failure without going through
-// [Load], and one code built in two places is a code with two shapes.
-func ModuleRootIssue(err error) diag.Issue {
-	if malformed, ok := errors.AsType[*MalformedModuleRootError](err); ok {
+// Issue converts a [Find] error into the diagnostic a load reports for it: a
+// [MalformedError] is an Error-severity E_LOAD_MODULE_ROOT_MALFORMED carrying
+// the marker's directory and the origin "discovered", and any other error a
+// Fatal E_LOAD_IO_FAILURE, the shape of the loader's other fatal I/O failures.
+// The issue carries no span, since the source registry holds .yammm sources
+// only. The loader and the editor report the failure through it alike.
+func Issue(err error) diag.Issue {
+	if malformed, ok := errors.AsType[*MalformedError](err); ok {
+		root := filepath.Dir(malformed.Path)
+		if id, err := location.SourceIDFromPath(root); err == nil {
+			root = id.String()
+		}
 		return diag.NewIssue(diag.Error, diag.E_LOAD_MODULE_ROOT_MALFORMED, malformed.Error()).
-			WithDetail(diag.DetailKeyModuleRoot, rootIdentity(filepath.Dir(malformed.Path), diag.ModuleRootDiscovered)).
+			WithDetail(diag.DetailKeyModuleRoot, root).
 			WithDetail(diag.DetailKeyModuleRootOrigin, diag.ModuleRootDiscovered).Build()
 	}
-	return errorToFatalIssue(err)
+	return diag.NewIssue(diag.Fatal, diag.E_LOAD_IO_FAILURE, err.Error()).Build()
 }

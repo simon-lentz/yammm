@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -116,25 +117,30 @@ func TestDiagRootFor_NeverReturnsASchemeString(t *testing.T) {
 // a root the loader did not use.
 func TestDiagRootFor_DiscoversOnTheFailurePath(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, schema.ModuleRootMarker), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, moduleroot.Marker), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	sub := filepath.Join(root, "sub")
 	if err := os.MkdirAll(sub, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	entry := filepath.Join(sub, "bad.yammm")
-
-	got := diagRootFor(schema.Schema{}, "", entry)
 	onDisk, err := yammmtest.DiskSpelling(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != onDisk {
-		t.Errorf("diagRootFor = %q, want the discovered root %q, not the entry directory", got, onDisk)
+	// A load fails on a missing entry and on one that exists and does not
+	// parse; the walk starts from the entry's directory for both.
+	existing := filepath.Join(sub, "bad.yammm")
+	if err := os.WriteFile(existing, []byte("not a schema\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []string{filepath.Join(sub, "missing.yammm"), existing} {
+		if got := diagRootFor(schema.Schema{}, "", entry); got != onDisk {
+			t.Errorf("diagRootFor(%s) = %q, want the discovered root %q, not the entry directory", filepath.Base(entry), got, onDisk)
+		}
 	}
 }
 
@@ -199,7 +205,7 @@ func TestDiagRootFor_ResolvesAnExplicitRootOnTheFailurePath(t *testing.T) {
 // parent, so the root is not the file itself.
 func TestDiagRootFor_ASchemaPathInDirectoryFormStartsFromTheFilesDirectory(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	dir := t.TempDir()
 	file := filepath.Join(dir, "s.yammm")

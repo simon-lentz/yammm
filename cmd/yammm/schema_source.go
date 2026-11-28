@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 
 	"github.com/simon-lentz/yammm/internal/hostpath"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/schema"
@@ -60,7 +61,7 @@ func diagRootFor(s schema.Schema, explicitRoot, absSchemaPath string) string {
 		base = filepath.Dir(file)
 		// A discovery error is deliberately ignored: the load already
 		// reported it, and the renderer's job is to relativize what it can.
-		if root, found, err := schema.FindModuleRoot(base); err == nil && found {
+		if root, found, err := moduleroot.Find(base); err == nil && found {
 			return root
 		}
 	}

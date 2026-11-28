@@ -13,6 +13,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -96,7 +97,7 @@ func TestLoad_RefusesANonRegularModuleRootMarker(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	mkfifo(t, filepath.Join(dir, schema.ModuleRootMarker))
+	mkfifo(t, filepath.Join(dir, moduleroot.Marker))
 	entry := filepath.Join(dir, "main.yammm")
 	if err := os.WriteFile(entry, []byte("schema \"main\"\n\ntype T {\n    id String primary\n}\n"), 0o600); err != nil {
 		t.Fatal(err)

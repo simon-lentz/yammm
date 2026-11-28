@@ -11,8 +11,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // renderedBadSchema fails to load with one issue, spanned from line 5,
@@ -63,7 +63,7 @@ func symlinkOrSkip(t *testing.T, target, link string) {
 // [hostRelative] computes it.
 func TestRenderedLocations_RelativeToTheRoot(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	rows := []struct {
 		name  string
@@ -184,7 +184,7 @@ func runWithTerminalSink(t *testing.T, argv []string, run func(*cobra.Command, [
 // warns renders one.
 func TestRenderedLocations_FailedLoadShowsItsExcerpt(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	rows := []struct {
 		name string

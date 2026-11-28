@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,6 +17,7 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/hostpath"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -208,12 +211,26 @@ func parseMetadata(raw []string) (map[string]string, error) {
 
 // foundByExtension reports whether a scan for .ys files can find what a write
 // to path wrote: a name the write passes through, the path or a link it
-// follows, ends in .ys and is an entry [snapshot.ScanDir] admits. A path it
-// cannot resolve or stat is reported found, so no warning rests on a guess.
+// follows, ends in .ys and is an entry [snapshot.ScanDir] admits. A write that
+// ends at one of the writer's own descriptor paths wrote the writer's stream,
+// which a scan in another process cannot reach, so it is never found; another
+// process's procfs entry is a link the kernel follows to the file that process
+// holds, so the name it reads is judged too. A path it cannot resolve or stat
+// is reported found, so no warning rests on a guess.
 func foundByExtension(path string) bool {
 	names, err := cli.WrittenNames(path)
 	if err != nil {
 		return true
+	}
+	last := names[len(names)-1]
+	if _, own := hostpath.DescriptorNumber(last); own {
+		return false
+	}
+	// A pipe's or a socket's entry reads as "pipe:" and a number, no file.
+	if hostpath.Descriptor(last) {
+		if target, err := os.Readlink(last); err == nil && filepath.IsAbs(target) {
+			names = append(names, target)
+		}
 	}
 	for _, name := range names {
 		if strings.HasSuffix(name, ".ys") && scanAdmits(name) {
@@ -224,9 +241,16 @@ func foundByExtension(path string) bool {
 }
 
 // scanAdmits reports whether [snapshot.ScanDir] admits the entry name names: a
-// regular file, or a link whose target is one or cannot be stat'd. A name it
-// cannot stat is admitted, as foundByExtension reports it found.
+// regular file, or a link whose target is one or cannot be stat'd, in a
+// directory the process can list. A name it cannot stat is admitted, as
+// foundByExtension reports it found; a directory that refuses a listing with
+// EACCES is no guess, since a scan of it fails.
 func scanAdmits(name string) bool {
+	if dir, err := os.Open(hostpath.Parent(name)); errors.Is(err, fs.ErrPermission) {
+		return false
+	} else if err == nil {
+		dir.Close() //nolint:gosec // opened only to learn whether it can be listed
+	}
 	info, err := os.Lstat(name)
 	switch {
 	case err != nil || info.Mode().IsRegular():

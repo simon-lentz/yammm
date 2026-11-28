@@ -241,7 +241,7 @@ func notDirectory(listed string, err error) error {
 	if listed == "" || !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
 		return cause
 	}
-	if hostpath.RefusedRead(listed+string(filepath.Separator)) == nil {
+	if !errors.Is(hostpath.Classify(listed+string(filepath.Separator), err), hostpath.ErrNotDirectory) {
 		return cause
 	}
 	return hostpath.ErrNotDirectory

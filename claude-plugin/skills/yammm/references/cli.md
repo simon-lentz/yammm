@@ -123,8 +123,9 @@ file's diagnostics are written, in text output, before the next file is formatte
 language does not have outside an invariant expression or an annotation
 argument, is reported as the positioned `E_SYNTAX` diagnostic `validate`
 reports, naming the file, and exits 1. A path no source identity names, such
-as one that is not valid UTF-8 or that resolves past the host's path limit, is
-named by its quoted spelling, at the same position. Any other diagnostic `validate` reports
+as one that is not valid UTF-8 once its `..` elements are taken on the text, or
+that resolves past the host's path limit, is named by its quoted spelling, at
+the same position. Any other diagnostic `validate` reports
 does not stop `fmt`.
 
 When formatting would change a schema's tokens or comments, `fmt` refuses. The
@@ -182,7 +183,7 @@ Builds a graph snapshot from one or more data files and persists it as a `.ys` f
 | `--indent` | Produce indented output |
 | `--into` | Existing `.ys` file to merge new data into. Its `created_at` and metadata are carried forward: `--timestamp` replaces the first, and `-m` overlays the second key by key |
 
-Output is byte-for-byte deterministic unless a `created_at` is written, which happens only through `--timestamp` or `--into`. `W_SNAPSHOT_PATH_EXTENSION` is raised only after the file is written. It is placed in the file the output path reaches, its links followed, as a snapshot read's issues are placed (Diagnostics Go to stderr, below): its span names that file by its source identity, with positions of line 0 and column 0, so text output writes the name relative to the module root when the file lies under that root. A descriptor path such as `/dev/stdout` is named absolute and clean, its link not followed, and a path no source identity names is named by its quoted spelling. The message quotes the output path as typed.
+Output is byte-for-byte deterministic unless a `created_at` is written, which happens only through `--timestamp` or `--into`. `W_SNAPSHOT_PATH_EXTENSION` is raised only after the file is written. It is placed in the file the output path reaches, its links followed, as a snapshot read's issues are placed (Diagnostics Go to stderr, below): its span names that file by its source identity, with positions of line 0 and column 0, so text output writes the name relative to the module root when the file lies under that root. A descriptor path such as `/dev/stdout` is named absolute and clean, from the directory that judged it, its link not followed; a path whose links reach one, at the chain's end or on the way, is named by its own last element in its directory's source identity; and a path no source identity names is named by its quoted spelling. The message quotes the output path as typed.
 
 ### snapshot verify
 
@@ -325,7 +326,7 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 | ---- | ------- |
 | 0 | Success (no errors) |
 | 1 | An error in the input (a validation failure, a constraint violation, a schema `fmt` cannot parse), or drift `neo4j diff` finds |
-| 2 | Usage error (bad flags, missing or extra arguments, an unknown command or help topic, an empty path operand or path flag, a schema, data or module-root path that is not valid UTF-8 given to a command that loads the schema; `fmt` opens its operand as given, so such a path it cannot open exits 3; a metadata key or value that is not valid UTF-8; a `--uri` that names no server on its text) |
+| 2 | Usage error (bad flags, missing or extra arguments, an unknown command or help topic, an empty path operand or path flag, a schema, data or module-root path that is not valid UTF-8 once a `..` in it is evaluated on its text, given to a command that loads the schema; `fmt` opens its operand as given, so such a path it cannot open exits 3; a metadata key or value that is not valid UTF-8; a `--uri` that names no server on its text) |
 | 3 | Runtime error (connection failure, I/O error, a path the filesystem refuses, a `neo4j diff` comparison that could not be verified, a database object `neo4j diff` cannot classify, an internal fault, a failure the command did not classify) |
 
 ---

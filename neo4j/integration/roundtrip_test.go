@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	n4j "github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
@@ -32,7 +33,7 @@ func newConfig(t *testing.T, ctx context.Context, c cypher.Config) cypher.Config
 
 func loadRoundTripSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 	s, res := schema.Load(context.Background(), filepath.Join("testdata", "roundtrip.yammm"))
 	if res != nil {
 		t.Fatalf("loading the round-trip schema: %v", res)

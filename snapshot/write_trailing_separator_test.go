@@ -166,3 +166,36 @@ func TestWriteFile_ALinkTargetInDirectoryFormIsRefused(t *testing.T) {
 		t.Errorf("WriteFile left %d entries, want old.ys and the four links", len(entries))
 	}
 }
+
+// TestWriteFile_ALinkToADirectoryInDirectoryFormIsRefused holds a path in
+// directory form that reaches a link to a directory, typed or as a link's
+// target, to the refusal a bare directory takes: EISDIR, with the link and the
+// directory left as they were.
+func TestWriteFile_ALinkToADirectoryInDirectoryFormIsRefused(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "d"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink("d", link); err != nil {
+		t.Skipf("no symbolic links here: %v", err)
+	}
+	if err := os.Symlink("link"+string(filepath.Separator), filepath.Join(dir, "via")); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{link + string(filepath.Separator), filepath.Join(dir, "via")} {
+		if err := snapshot.WriteFile(p, []byte("new")); !errors.Is(err, syscall.EISDIR) {
+			t.Errorf("WriteFile(%q) = %v, want EISDIR", p, err)
+		}
+		if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+			t.Errorf("after WriteFile(%q) the link is %v, %v; want it left a link", p, info, err)
+		}
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, "d")); len(entries) != 0 {
+		t.Errorf("the directory holds %d entries, want none", len(entries))
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 3 {
+		t.Errorf("the parent holds %d entries, want d, link and via alone", len(entries))
+	}
+}

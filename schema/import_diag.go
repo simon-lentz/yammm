@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -28,9 +29,9 @@ import (
 func moduleRootClause(root, origin string) string {
 	switch origin {
 	case diag.ModuleRootDiscovered:
-		return fmt.Sprintf("module root %s, discovered from %s", root, strings.TrimSuffix(root, "/")+"/"+ModuleRootMarker)
+		return fmt.Sprintf("module root %s, discovered from %s", root, strings.TrimSuffix(root, "/")+"/"+moduleroot.Marker)
 	case diag.ModuleRootDefault:
-		return fmt.Sprintf("module root %s, defaulted to the entry schema's directory; a %s in an ancestor directory would widen resolution", root, ModuleRootMarker)
+		return fmt.Sprintf("module root %s, defaulted to the entry schema's directory; a %s in an ancestor directory would widen resolution", root, moduleroot.Marker)
 	case diag.ModuleRootExplicit:
 		return fmt.Sprintf("module root %s, given explicitly", root)
 	case diag.ModuleRootSynthetic:

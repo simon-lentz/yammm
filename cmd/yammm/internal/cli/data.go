@@ -30,7 +30,8 @@ import (
 // The error return captures the failures that stop a read: a path that names no
 // file, one that cannot be read, or one the identity cannot be derived for. The
 // diag.Result carries the parse's diagnostics. The caller refuses an empty path
-// or one that is not valid UTF-8 first ([CheckSourceOperand], exit 2), so every
+// or one that is not valid UTF-8, its ".." elements taken on the text, first
+// ([CheckSourceOperand], exit 2), so every
 // error this returns is a path the filesystem answered, and exits 3.
 func LoadAndParseJSON(ctx context.Context, path string) (map[string]jsondata.Batch, diag.Result, error) {
 	data, err := ReadFile(path)
@@ -39,7 +40,7 @@ func LoadAndParseJSON(ctx context.Context, path string) (map[string]jsondata.Bat
 	}
 	sourceID, err := location.SourceIDFromPath(path)
 	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
+		return nil, diag.Result{}, fmt.Errorf("resolve data file: %w", err)
 	}
 	parsed, result := jsondata.Parse(ctx, sourceID, data)
 	return parsed, result, nil

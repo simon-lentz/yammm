@@ -59,6 +59,14 @@ func operandFailures(dirOperand, source bool) []operandFailure {
 			}
 			return p, true
 		}},
+		{"a dangling link", cli.ExitRuntime, func(t *testing.T, dir, ext string) (string, bool) {
+			t.Helper()
+			p := filepath.Join(dir, "dangling"+ext)
+			if err := os.Symlink("missing"+ext, p); err != nil {
+				return "", false
+			}
+			return p, true
+		}},
 		{"a symbolic link loop", cli.ExitRuntime, func(t *testing.T, dir, ext string) (string, bool) {
 			t.Helper()
 			p := filepath.Join(dir, "loop"+ext)

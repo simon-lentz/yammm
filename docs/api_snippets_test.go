@@ -10,6 +10,9 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
@@ -231,51 +234,48 @@ func TestDocumentedKeyFunctions(t *testing.T) {
 	}
 }
 
-// TestDocumentedModuleRootDiscovery pins the module-root discovery surface the
-// "Module root discovery" section documents: the finder's three results, the
-// typed error matched with errors.As and the fields the prose names, the issue
-// builder, the marker constant, and the family predicate. A signature change
-// fails here rather than only leaving the prose stating a call that no longer
-// exists.
+// TestDocumentedModuleRootDiscovery pins what the "Module root discovery"
+// section states through Load, its one Go door: a malformed marker above the
+// entry fails the load with E_LOAD_MODULE_ROOT_MALFORMED, whose module_root
+// detail names the marker's directory and whose origin is "discovered", and the
+// section's five origin values exist.
 func TestDocumentedModuleRootDiscovery(t *testing.T) {
 	t.Parallel()
-
-	// The three documented signatures, held as typed values so a shape change
-	// fails here rather than only in the prose.
-	var (
-		find       func(string) (string, bool, error)
-		buildIssue func(error) diag.Issue
-	)
-	find, buildIssue = schema.FindModuleRoot, schema.ModuleRootIssue
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	dir := t.TempDir()
-	root, found, err := find(dir)
-	if err != nil {
-		t.Fatalf("FindModuleRoot on a marker-free temp dir: %v", err)
-	}
-	if found || root != "" {
-		t.Fatalf("FindModuleRoot = (%q, %v); a marker sits above this test's temp directory", root, found)
-	}
-
-	// The documented errors.As shape and the three fields the section names.
-	marker := filepath.Join(dir, schema.ModuleRootMarker)
-	if err := os.WriteFile(marker, []byte("module example.com/thing\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "yammm.mod"), []byte("module example.com/thing\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = find(dir)
-	malformed, ok := errors.AsType[*schema.MalformedModuleRootError](err)
-	if !ok {
-		t.Fatalf("errors.AsType against *MalformedModuleRootError failed for %v", err)
+	entry := filepath.Join(dir, "main.yammm")
+	if err := os.WriteFile(entry, []byte("schema \"s\"\n\ntype A {\n\tid String primary\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if malformed.Path == "" || malformed.Line == 0 || malformed.Reason == "" {
-		t.Errorf("the documented fields are not all populated: %+v", malformed)
+	_, err := schema.Load(t.Context(), entry)
+	if !errors.Is(err, diag.E_LOAD_MODULE_ROOT_MALFORMED) {
+		t.Fatalf("Load under a malformed marker = %v, want E_LOAD_MODULE_ROOT_MALFORMED", err)
+	}
+	re, _ := errors.AsType[*diag.ResultError](err)
+	root, err := location.SourceIDFromPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if re.Result.Len() == 0 {
+		t.Fatal("the load's ResultError holds no issue")
+	}
+	for issue := range re.Result.Issues() {
+		details := map[string]string{}
+		for _, d := range issue.Details() {
+			details[d.Key] = d.Value
+		}
+		if got := details[diag.DetailKeyModuleRoot]; got != root.String() {
+			t.Errorf("module_root = %q, want the marker's directory %q", got, root)
+		}
+		if got := details[diag.DetailKeyModuleRootOrigin]; got != diag.ModuleRootDiscovered {
+			t.Errorf("module_root_origin = %q, want %q", got, diag.ModuleRootDiscovered)
+		}
 	}
 
-	if code := buildIssue(err).Code(); code != diag.E_LOAD_MODULE_ROOT_MALFORMED {
-		t.Errorf("ModuleRootIssue produced %v, want E_LOAD_MODULE_ROOT_MALFORMED", code)
-	}
-
-	// The origin vocabulary the section enumerates.
 	for _, origin := range []string{
 		diag.ModuleRootExplicit, diag.ModuleRootDiscovered,
 		diag.ModuleRootSynthetic, diag.ModuleRootDefault, diag.ModuleRootNone,
@@ -284,6 +284,4 @@ func TestDocumentedModuleRootDiscovery(t *testing.T) {
 			t.Error("an origin value the section enumerates is empty")
 		}
 	}
-	_ = diag.DetailKeyModuleRoot
-	_ = diag.DetailKeyModuleRootOrigin
 }

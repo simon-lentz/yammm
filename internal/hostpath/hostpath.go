@@ -3,9 +3,9 @@
 //
 // A ".." the path itself holds is evaluated on the text first, as the schema
 // loader and [Resolve] evaluate it. [Text] applies that step to
-// every path the command-line tool reads or writes but a schema, and to the path
-// snapshot.WriteFile writes; the tool's schema paths, and the identity of each
-// path it reads, take the same step through location and filepath.Abs. So each
+// every path the command-line tool reads or writes, to the entry schema.Load
+// reads, and to the path snapshot.WriteFile writes; the identity of each path
+// takes the same step through location and filepath.Abs. So each
 // reaches the file the loader reads for the same spelling. A POSIX kernel would
 // instead take the parent of the directory the component before the ".."
 // reached, which differs when that component is a symbolic link; on Windows the
@@ -14,7 +14,7 @@
 // Everything after that step is the kernel's. A symbolic link's own target is
 // read as the kernel reads it, uncleaned: on Unix each ".." in it takes the
 // parent of the directory reached on disk, and on Windows the kernel evaluates
-// it on the text. [FollowLink] builds that path, and
+// it on the text. [Hop] builds that path, and
 // [Parent] the directory that holds a path's last element, without cleaning
 // either. [filepath.Clean], [filepath.Dir] and [filepath.Join] would cancel a
 // ".." against the component before it, and a caller that stages a file beside
@@ -89,17 +89,18 @@ func Parent(p string) string {
 	}
 }
 
-// FollowLink returns the path the kernel reaches through the symbolic link at
-// link, whose target is dest. An absolute dest, or one that names a volume, is
-// returned as it is. A dest rooted without a volume, on Windows, is read on the
-// link's volume. Any other dest is read from the link's own directory, and
-// nothing is cleaned, so the kernel evaluates each ".." in it: on Unix from the
-// directory reached on disk, on Windows on the text.
-func FollowLink(link, dest string) string {
+// followLink returns the path the kernel reaches through the symbolic link at
+// link, whose target is dest, which is not empty ([readLinkIn]). An absolute
+// dest, or one that names a volume, is returned as it is. A dest rooted without
+// a volume, on Windows, is read on the link's volume. Any other dest is read
+// from the link's own directory, and nothing is cleaned, so the kernel
+// evaluates each ".." in it: on Unix from the directory reached on disk, on
+// Windows on the text.
+func followLink(link, dest string) string {
 	switch {
 	case filepath.IsAbs(dest), filepath.VolumeName(dest) != "":
 		return dest
-	case dest != "" && os.IsPathSeparator(dest[0]):
+	case os.IsPathSeparator(dest[0]):
 		return filepath.VolumeName(link) + dest
 	}
 	dir := Parent(link)

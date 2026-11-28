@@ -49,8 +49,8 @@ func TestFollowLink_ReadsATargetFromTheLinksDirectoryUncleaned(t *testing.T) {
 		cases = append(cases, struct{ link, dest, want string }{`D:\d\l`, `\t`, `D:\t`})
 	}
 	for _, c := range cases {
-		if got := FollowLink(c.link, c.dest); got != c.want {
-			t.Errorf("FollowLink(%q, %q) = %q, want %q", c.link, c.dest, got, c.want)
+		if got := followLink(c.link, c.dest); got != c.want {
+			t.Errorf("followLink(%q, %q) = %q, want %q", c.link, c.dest, got, c.want)
 		}
 	}
 }
@@ -92,7 +92,7 @@ func TestParent_NamesTheDirectoryTheKernelWritesIn(t *testing.T) {
 
 // TestFollowLink_NamesTheFileTheKernelReaches creates a file through links
 // whose targets, relative and absolute, climb out of a linked directory, and
-// finds it at the path FollowLink gives.
+// finds it at the path followLink gives.
 func TestFollowLink_NamesTheFileTheKernelReaches(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "real", "deep", "x"), 0o750); err != nil {
@@ -117,12 +117,12 @@ func TestFollowLink_NamesTheFileTheKernelReaches(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := os.Lstat(FollowLink(link, dest))
+		got, err := os.Lstat(followLink(link, dest))
 		if err != nil {
-			t.Fatalf("FollowLink(%q, %q) = %q: %v", link, dest, FollowLink(link, dest), err)
+			t.Fatalf("followLink(%q, %q) = %q: %v", link, dest, followLink(link, dest), err)
 		}
 		if !os.SameFile(want, got) {
-			t.Errorf("FollowLink(%q, %q) = %q names another file", link, dest, FollowLink(link, dest))
+			t.Errorf("followLink(%q, %q) = %q names another file", link, dest, followLink(link, dest))
 		}
 	}
 }

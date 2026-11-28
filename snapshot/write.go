@@ -1,13 +1,10 @@
 package snapshot
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -49,27 +46,25 @@ func WriteFile(path string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("resolve target: %w", err)
 	}
-	f, err := createStaging(target)
+	stage, err := createStaging(target)
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}
-	tmp := f.Name()
+	f := stage.File
 	if _, err := f.Write(data); err != nil {
-		f.Close()      //nolint:gosec // best-effort close before cleanup
-		os.Remove(tmp) //nolint:gosec // best-effort cleanup on write failure
+		stage.Discard()
 		return fmt.Errorf("write temp: %w", err)
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()      //nolint:gosec // best-effort close before cleanup
-		os.Remove(tmp) //nolint:gosec // best-effort cleanup on sync failure
+		stage.Discard()
 		return fmt.Errorf("sync temp: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmp) //nolint:gosec // best-effort cleanup on close failure
+		stage.Discard()
 		return fmt.Errorf("close temp: %w", err)
 	}
-	if err := os.Rename(tmp, target); err != nil {
-		os.Remove(tmp) //nolint:gosec // best-effort cleanup on rename failure
+	if err := stage.Commit(); err != nil {
+		stage.Discard()
 		return fmt.Errorf("rename temp to final: %w", err)
 	}
 	return nil
@@ -89,11 +84,11 @@ func followFinalLinks(path string) (string, error) {
 		if hops == maxLinkHops {
 			return "", &fs.PathError{Op: "readlink", Path: path, Err: syscall.ELOOP}
 		}
-		dest, err := os.Readlink(path)
+		next, err := hostpath.Hop(path)
 		if err != nil {
 			return "", err //nolint:wrapcheck // WriteFile wraps the error with the failing step
 		}
-		path = hostpath.FollowLink(path, dest)
+		path = next
 		if err := hostpath.RefusedWrite(path); err != nil {
 			return "", &fs.PathError{Op: "stat", Path: path, Err: err}
 		}
@@ -101,24 +96,11 @@ func followFinalLinks(path string) (string, error) {
 }
 
 // createStaging creates a staging file for target that no other call shares,
-// in the directory the kernel reaches for target. A name another file already
-// holds is retried, as os.CreateTemp retries.
-func createStaging(target string) (*os.File, error) {
-	dir := hostpath.Parent(target)
-	if !os.IsPathSeparator(dir[len(dir)-1]) {
-		dir += string(filepath.Separator)
-	}
+// in the directory the kernel reaches for target: the target's stem, a token,
+// then its extension and [TmpSuffix].
+func createStaging(target string) (*hostpath.Staging, error) {
 	base := filepath.Base(target)
 	ext := filepath.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
-	for range 10000 {
-		token := strconv.FormatUint(uint64(rand.Uint32()), 10) //nolint:gosec // O_EXCL makes the name unique; the token only spreads the attempts
-		name := dir + stem + "." + token + ext + TmpSuffix
-		f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666) //nolint:gosec // 0o666 under umask is the documented mode, as os.Create gives
-		if errors.Is(err, fs.ErrExist) {
-			continue
-		}
-		return f, err //nolint:wrapcheck // WriteFile wraps the error with the failing step
-	}
-	return nil, fmt.Errorf("no unused staging name beside %s: %w", target, fs.ErrExist)
+	return hostpath.Stage(target, 0o666, func(token string) string { return stem + "." + token + ext + TmpSuffix }) //nolint:wrapcheck // WriteFile wraps the error with the failing step
 }

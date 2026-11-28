@@ -2,7 +2,6 @@ package location
 
 import (
 	"errors"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -38,9 +37,6 @@ func TestNewSourceID(t *testing.T) {
 		if id.String() != name || id.IsFilePath() || id.IsZero() {
 			t.Errorf("NewSourceID(%q) = %q, file %v, zero %v; want the name, synthetic", name, id, id.IsFilePath(), id.IsZero())
 		}
-		if !id.Dir().IsZero() {
-			t.Errorf("NewSourceID(%q).Dir() = %q; a synthetic source has no directory", name, id.Dir())
-		}
 	}
 	for _, tc := range []struct {
 		name string
@@ -62,34 +58,6 @@ func TestNewSourceID(t *testing.T) {
 		if !id.IsZero() {
 			t.Errorf("NewSourceID(%q) refused the name but returned %q", tc.name, id)
 		}
-	}
-}
-
-// TestSourceID_Dir holds Dir to the identity of the directory that holds a
-// file-backed source, and to the root at a volume root.
-func TestSourceID_Dir(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	file, err := SourceIDFromPath(filepath.Join(dir, "a.yammm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := SourceIDFromPath(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := file.Dir(); got != want {
-		t.Errorf("Dir() = %q; want %q", got, want)
-	}
-	root, err := SourceIDFromPath(filepath.VolumeName(dir) + string(filepath.Separator))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := root.Dir(); got != root {
-		t.Errorf("Dir() of the root = %q; want the root %q", got, root)
-	}
-	if got := (SourceID{}).Dir(); !got.IsZero() {
-		t.Errorf("Dir() of the zero SourceID = %q; want zero", got)
 	}
 }
 

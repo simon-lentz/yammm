@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -17,7 +18,7 @@ import (
 // diagnostic error.
 func loadTestdata(t *testing.T, name string) schema.Schema {
 	t.Helper()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 	path, err := filepath.Abs(filepath.Join("testdata", name+".yammm"))
 	if err != nil {
 		t.Fatalf("abs path: %v", err)

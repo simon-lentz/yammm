@@ -13,8 +13,8 @@ import (
 	"github.com/simon-lentz/yammm/internal/lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm/internal/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/docstate"
@@ -376,7 +376,7 @@ func (w *Workspace) analyzeDocument(analyzeCtx context.Context, uri string) (doc
 	// a root as an argument and never discovers one. A path that cannot be
 	// resolved, like a discovery failure, is a document diagnostic rather than a
 	// dropped analysis — the editor says what the CLI says, because
-	// schema.ModuleRootIssue builds it for both.
+	// moduleroot.Issue builds it for both.
 	var snapshot *analysis.Snapshot
 	var moduleRoot string
 	var rootErr error
@@ -388,7 +388,7 @@ func (w *Workspace) analyzeDocument(analyzeCtx context.Context, uri string) (doc
 	}
 	if rootErr != nil {
 		result := diag.NewCollector(diag.NoLimit)
-		result.Collect(schema.ModuleRootIssue(rootErr))
+		result.Collect(moduleroot.Issue(rootErr))
 		snapshot, err = w.sched.analyzer.SnapshotForResult(canonicalPath, result.Result())
 	} else {
 		snapshot, err = w.sched.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot, true)
@@ -459,7 +459,7 @@ func (w *Workspace) FileChanged(uri string, changeType protocol.UInteger) {
 	// below would find nothing. Handled before the source-identity conversion
 	// because a marker is not a source. Nothing is stored: this is a refresh,
 	// not a cache.
-	if path, err := lsputil.URIToPath(uri); err == nil && filepath.Base(path) == schema.ModuleRootMarker {
+	if path, err := lsputil.URIToPath(uri); err == nil && filepath.Base(path) == moduleroot.Marker {
 		w.ReanalyzeOpenDocuments()
 		return
 	}
@@ -533,7 +533,7 @@ func (w *Workspace) FindModuleRoot(path string) (string, error) {
 	// No cache: the editor cannot see a marker being created or deleted, and
 	// a cached miss would be the ignored marker again. A marker event
 	// re-analyzes instead (see FileChanged).
-	switch root, found, err := schema.FindModuleRoot(filepath.Dir(path)); {
+	switch root, found, err := moduleroot.Find(filepath.Dir(path)); {
 	case err != nil:
 		return "", fmt.Errorf("discover module root for %q: %w", path, err)
 	case found:

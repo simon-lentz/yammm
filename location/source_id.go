@@ -13,8 +13,7 @@ import (
 // up to NFC, and synthetic ones as written.
 //
 // A SourceID can represent:
-//   - File-backed source: Created via SourceIDFromPath or ResolveSourcePath,
-//     and cut to its directory's by SourceID.Dir
+//   - File-backed source: Created via SourceIDFromPath or ResolveSourcePath
 //   - Synthetic source: Created via NewSourceID, such as
 //     "<stdin>", "inline:test", or "test://unit/person.yammm"
 //
@@ -69,11 +68,12 @@ func validateSynthetic(name string) error {
 // SourceIDFromPath returns the file-backed identity of path: the host path the
 // package documentation's resolution gives, in NFC with forward slashes. Two
 // spellings that resolve to one host path give one identity. A path that does
-// not exist yet is allowed. A path that does not resolve returns a plain error.
+// not exist yet is allowed. A path that does not resolve returns the resolver's
+// error, which names a non-empty path once.
 func SourceIDFromPath(path string) (SourceID, error) {
 	host, err := hostpath.Resolve(path)
 	if err != nil {
-		return SourceID{}, fmt.Errorf("create source ID from path %q: %w", path, err)
+		return SourceID{}, err //nolint:wrapcheck // the resolver's error names path
 	}
 	return SourceID{cp: identityOf(host)}, nil
 }
@@ -81,8 +81,7 @@ func SourceIDFromPath(path string) (SourceID, error) {
 // ResolveSourcePath returns the identity of p and the host path it was derived
 // from, out of one resolution, so the two cannot disagree. It is
 // [SourceIDFromPath] for a caller that also reads the file, and it fails where
-// SourceIDFromPath does. A caller that may be given a link to a descriptor reads
-// through p instead, since the host path may reach no file or another file.
+// SourceIDFromPath does.
 func ResolveSourcePath(p string) (SourceID, string, error) {
 	host, err := hostpath.Resolve(p)
 	if err != nil {
@@ -98,16 +97,6 @@ func (s SourceID) String() string {
 		return s.synthetic
 	}
 	return s.cp.String()
-}
-
-// Dir returns the identity of the directory that holds s. At a volume root it
-// returns the root. A synthetic or zero source has no directory, and returns
-// the zero SourceID.
-func (s SourceID) Dir() SourceID {
-	if s.cp.IsZero() {
-		return SourceID{}
-	}
-	return SourceID{cp: s.cp.Dir()}
 }
 
 // Rel returns s written relative to the directory base, climbing with ".."

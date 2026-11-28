@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/hostpath"
 )
 
 // TestCreateStaging_NameKeepsTheExtensionBeforeTmpSuffix pins the staging
@@ -27,11 +29,12 @@ func TestCreateStaging_NameKeepsTheExtensionBeforeTmpSuffix(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", base, err)
 		}
-		for _, f := range []*os.File{first, second} {
-			name := f.Name()
-			if err := f.Close(); err != nil {
+		for _, st := range []*hostpath.Staging{first, second} {
+			name := st.File.Name()
+			if err := st.File.Close(); err != nil {
 				t.Fatal(err)
 			}
+			defer st.Discard()
 			got := filepath.Base(name)
 			if filepath.Dir(name) != dir {
 				t.Errorf("%s: staging file %s is not beside the target", base, name)
@@ -43,8 +46,8 @@ func TestCreateStaging_NameKeepsTheExtensionBeforeTmpSuffix(t *testing.T) {
 				t.Errorf("%s: staging name %q is the one every writer shares", base, got)
 			}
 		}
-		if first.Name() == second.Name() {
-			t.Errorf("%s: two writers got one staging file %s", base, first.Name())
+		if first.File.Name() == second.File.Name() {
+			t.Errorf("%s: two writers got one staging file %s", base, first.File.Name())
 		}
 	}
 }
@@ -54,11 +57,12 @@ func TestCreateStaging_NameKeepsTheExtensionBeforeTmpSuffix(t *testing.T) {
 func TestCreateStaging_ModeMatchesOSCreate(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	f, err := createStaging(filepath.Join(dir, "snap.ys"))
+	st, err := createStaging(filepath.Join(dir, "snap.ys"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer st.Discard()
+	f := st.File
 	ref, err := os.Create(filepath.Join(dir, "reference"))
 	if err != nil {
 		t.Fatal(err)

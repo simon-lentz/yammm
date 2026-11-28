@@ -2,10 +2,12 @@ package hostpath
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -30,12 +32,12 @@ func TestErrNotDirectory_MatchesENOTDIRAndNoMissingPath(t *testing.T) {
 	}
 }
 
-// TestRefused_JudgesTheElementADirectoryFormNames holds RefusedRead and
+// TestRefused_JudgesTheElementADirectoryFormNames holds Stat, OpenFile and
 // RefusedWrite to one rule on every host: a path that ends in a separator or a
 // "." element is refused as not a directory when its last element is a file or
 // sits under one, and a write also where it would create a file in an existing
-// directory. A write under a missing directory is refused as missing; a
-// directory, and a path not in directory form, are left to the caller.
+// directory. A write under a missing directory is refused as missing; a read
+// is refused as not a directory nowhere else.
 func TestRefused_JudgesTheElementADirectoryFormNames(t *testing.T) {
 	t.Parallel()
 	base := t.TempDir()
@@ -72,7 +74,7 @@ func TestRefused_JudgesTheElementADirectoryFormNames(t *testing.T) {
 		{dir + sep, allowed, allowed},
 		{dir + sep + ".", allowed, allowed},
 		{file, allowed, allowed},
-		{underFile, allowed, allowed},
+		{underFile, notDirectory, allowed},
 		{absent, allowed, allowed},
 		{dir, allowed, allowed},
 	}
@@ -131,27 +133,45 @@ func TestRefused_JudgesTheElementADirectoryFormNames(t *testing.T) {
 			tests = append(tests, row{empty + sep, allowed, notDirectory})
 		}
 	}
+	stat := func(p string) error { _, err := Stat(p); return err }
+	open := func(p string) error {
+		f, err := OpenFile(p, os.O_RDONLY)
+		if err == nil {
+			f.Close() //nolint:gosec // opened only to learn whether the open is refused
+		}
+		return err
+	}
 	for _, tc := range tests {
 		for _, door := range []struct {
 			name    string
 			refused func(string) error
 			want    int
-		}{{"RefusedRead", RefusedRead, tc.read}, {"RefusedWrite", RefusedWrite, tc.write}} {
+			read    bool
+		}{
+			{"Stat", stat, tc.read, true},
+			{"OpenFile", open, tc.read, true},
+			{"RefusedWrite", RefusedWrite, tc.write, false},
+		} {
 			err := door.refused(tc.path)
-			switch door.want {
-			case allowed:
-				if err != nil {
-					t.Errorf("%s(%q) = %v; want nil", door.name, tc.path, err)
-				}
-			case notDirectory:
+			switch {
+			case door.want == notDirectory:
 				if !errors.Is(err, ErrNotDirectory) {
 					t.Errorf("%s(%q) = %v; want ErrNotDirectory", door.name, tc.path, err)
 				}
-			case missing:
+			case door.read:
+				// A read's other answers are the host's: only the refusal is ruled.
+				if errors.Is(err, ErrNotDirectory) {
+					t.Errorf("%s(%q) = %v; want no ErrNotDirectory", door.name, tc.path, err)
+				}
+			case door.want == allowed:
+				if err != nil {
+					t.Errorf("%s(%q) = %v; want nil", door.name, tc.path, err)
+				}
+			case door.want == missing:
 				if !errors.Is(err, fs.ErrNotExist) || errors.Is(err, ErrNotDirectory) {
 					t.Errorf("%s(%q) = %v; want the host's missing-path error", door.name, tc.path, err)
 				}
-			case failed:
+			case door.want == failed:
 				if err == nil || errors.Is(err, ErrNotDirectory) || errors.Is(err, fs.ErrNotExist) {
 					t.Errorf("%s(%q) = %v; want the stat's own failure", door.name, tc.path, err)
 				}
@@ -199,5 +219,145 @@ func TestDirectoryElement_RemovesTheDirectoryFormEndingAlone(t *testing.T) {
 		if got := directoryElement(p); got != want {
 			t.Errorf("directoryElement(%q) = %q, want %q", p, got, want)
 		}
+	}
+}
+
+// chainLookups is a filesystem of one existing directory, dir, holding a chain
+// of dangling links l0 to l(n-1), each to the next, the last to end, which is a
+// regular file when file is set and otherwise absent. A stat of a link answers
+// ENOENT, as a kernel's does within its own link bound.
+type chainLookups struct {
+	dir  string
+	n    int
+	file bool
+}
+
+func (c chainLookups) link(p string) (int, bool) {
+	var i int
+	if _, err := fmt.Sscanf(filepath.Base(p), "l%d", &i); err != nil || filepath.Dir(p) != c.dir || i >= c.n {
+		return 0, false
+	}
+	return i, true
+}
+
+func (c chainLookups) Stat(p string) (fs.FileInfo, error) {
+	switch p = filepath.Clean(p); {
+	case p == c.dir:
+		return os.Stat(os.TempDir())
+	case c.file && p == filepath.Join(c.dir, "end"):
+		return os.Stat(os.Args[0])
+	}
+	return nil, &fs.PathError{Op: "stat", Path: p, Err: fs.ErrNotExist}
+}
+
+func (c chainLookups) Lstat(p string) (fs.FileInfo, error) {
+	if _, ok := c.link(filepath.Clean(p)); ok {
+		return symlinkInfo{}, nil
+	}
+	return c.Stat(p)
+}
+
+func (c chainLookups) Readlink(p string) (string, error) {
+	i, ok := c.link(filepath.Clean(p))
+	switch {
+	case !ok:
+		return "", &fs.PathError{Op: "readlink", Path: p, Err: fs.ErrInvalid}
+	case i == c.n-1:
+		return "end", nil
+	}
+	return fmt.Sprintf("l%d", i+1), nil
+}
+
+type symlinkInfo struct{ fs.FileInfo }
+
+func (symlinkInfo) Mode() fs.FileMode { return fs.ModeSymlink }
+
+// TestLinkHops_FollowsTheBoundAndRefusesTheNext holds both judgements that
+// follow dangling links by hand to one bound: a chain of maxLinkHops links is
+// judged where it lands, and one link more is refused. No tree on disk can
+// show it, since the kernel answers ELOOP to a stat of a chain past its own
+// bound of 32 or 40.
+func TestLinkHops_FollowsTheBoundAndRefusesTheNext(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "c")
+	start := filepath.Join(dir, "l0") + string(filepath.Separator)
+
+	if err := refusedWriteIn(chainLookups{dir: dir, n: maxLinkHops}, start); !errors.Is(err, ErrNotDirectory) {
+		t.Errorf("RefusedWrite through %d links to an absent file = %v; want ErrNotDirectory", maxLinkHops, err)
+	}
+	if err := refusedWriteIn(chainLookups{dir: dir, n: maxLinkHops + 1}, start); !errors.Is(err, errTooManyLinks) {
+		t.Errorf("RefusedWrite through %d links = %v; want the bound's refusal", maxLinkHops+1, err)
+	}
+
+	missing := &fs.PathError{Op: "open", Path: start, Err: fs.ErrNotExist}
+	under := filepath.Join(dir, "l0", "x")
+	if err := ClassifyIn(chainLookups{dir: dir, n: maxLinkHops, file: true}, under, missing); !errors.Is(err, ErrNotDirectory) {
+		t.Errorf("Classify under %d links to a file = %v; want ErrNotDirectory", maxLinkHops, err)
+	}
+	if err := ClassifyIn(chainLookups{dir: dir, n: maxLinkHops + 1, file: true}, under, missing); err != missing { //nolint:errorlint // the open's own error value, unwrapped, is the answer
+		t.Errorf("Classify under %d links to a file = %v; want the open's own error", maxLinkHops+1, err)
+	}
+}
+
+// TestRefusedWrite_NamesNoPath holds a refusal for a stat that fails to the
+// host's bare cause, which the caller names the path with once.
+func TestRefusedWrite_NamesNoPath(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs elevation on Windows")
+	}
+	loop := filepath.Join(t.TempDir(), "loop")
+	if err := os.Symlink("loop", loop); err != nil {
+		t.Fatal(err)
+	}
+	err := RefusedWrite(loop + string(filepath.Separator))
+	if _, isPath := errors.AsType[*fs.PathError](err); isPath || !errors.Is(err, syscall.ELOOP) {
+		t.Errorf("RefusedWrite(a looping link in directory form) = %#v; want the bare ELOOP", err)
+	}
+}
+
+// TestOpenFile_NamesThePathOnce holds an open's refusal to one path error that
+// names the path once.
+func TestOpenFile_NamesThePathOnce(t *testing.T) {
+	t.Parallel()
+	p := filepath.Join(t.TempDir(), "missing.yammm")
+	_, err := OpenFile(p, os.O_RDONLY)
+	if n := strings.Count(fmt.Sprint(err), p); n != 1 || !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("OpenFile(missing) = %v; want ENOENT naming the path once, not %d times", err, n)
+	}
+}
+
+// TestHop_AnEmptyTargetReachesNothing holds a link whose target is empty to
+// ENOENT, as darwin's kernel answers it, never an index past its end.
+func TestHop_AnEmptyTargetReachesNothing(t *testing.T) {
+	t.Parallel()
+	link := filepath.Join(t.TempDir(), "empty")
+	if err := os.Symlink("", link); err != nil {
+		t.Skipf("this host makes no link with an empty target: %v", err)
+	}
+	if got, err := Hop(link); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("Hop(an empty link) = %q, %v; want ENOENT", got, err)
+	}
+}
+
+// TestStat_UnderADanglingLinkWithALongTargetIsMissing holds a path under a
+// dangling link to the kernel's answer, missing, when the climb's hand-built
+// path through the link's target passes PATH_MAX and fails on its length.
+func TestStat_UnderADanglingLinkWithALongTargetIsMissing(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs elevation on Windows")
+	}
+	dir := t.TempDir()
+	parts := slices.Repeat([]string{strings.Repeat("m", 200)}, 5)
+	parts = append(parts, strings.Repeat("m", 1014-len(filepath.Join(parts...))-1))
+	target := filepath.Join(parts...)
+	link := filepath.Join(dir, "l")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Stat(filepath.Join(link, "x"))
+	if !errors.Is(err, fs.ErrNotExist) || errors.Is(err, ErrNotDirectory) {
+		t.Errorf("Stat(under a dangling link with a %d-byte target) = %v; want missing", len(target), err)
 	}
 }

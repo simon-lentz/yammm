@@ -10,8 +10,8 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // TestFileLoadedSchema_NestedOneUnderAManyIsRefusedASecondOccupant pins the
@@ -22,7 +22,7 @@ import (
 // first hop was in no fixture.
 func TestFileLoadedSchema_NestedOneUnderAManyIsRefusedASecondOccupant(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 	file := filepath.Join(t.TempDir(), "composed.yammm")
 	s := loadFromDiskAt(t, file)
 	runID := mustTypeID(t, s, "Run")

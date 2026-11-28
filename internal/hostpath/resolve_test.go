@@ -241,9 +241,6 @@ func TestResolve_DanglingLinkKeepsItsAnswerWhenItsTargetIsCreated(t *testing.T) 
 // resolver refuses it rather than cancel the component on the text.
 func TestResolve_RefusesALinkTargetThatClimbsPastWhatTheKernelCannotEnter(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows evaluates a target's .. on the text, so the text's answer is the kernel's")
-	}
 	for _, row := range []struct {
 		name, target string
 		want         error
@@ -262,6 +259,21 @@ func TestResolve_RefusesALinkTargetThatClimbsPastWhatTheKernelCannotEnter(t *tes
 			}
 			link := filepath.Join(base, "u.json")
 			symlink(t, filepath.FromSlash(row.target), link)
+			if runtime.GOOS == "windows" {
+				// Windows evaluates the target's ".." on its text, so the kernel
+				// reads e.json, and the resolver names it.
+				want, err := Resolve(filepath.Join(base, "e.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got, err := os.ReadFile(link); err != nil || string(got) != "e.json" {
+					t.Fatalf("read through %s -> %s = %q, %v; want e.json's bytes", link, row.target, got, err)
+				}
+				if host, err := Resolve(link); err != nil || host != want {
+					t.Errorf("Resolve(%s -> %s) = %q, %v; want %q, the file the kernel read", link, row.target, host, err, want)
+				}
+				return
+			}
 			if _, err := os.ReadFile(link); err == nil {
 				t.Fatalf("the kernel reads through %s -> %s", link, row.target)
 			}
@@ -421,6 +433,156 @@ func TestResolve_AnswersAPathThatReachesADescriptorsFile(t *testing.T) {
 	})
 }
 
+// A link that ends at a descriptor path reaches the file the descriptor holds,
+// which the host may name by a path that reaches no file, another descriptor's
+// file, or, on Linux, a name in a process's own procfs table. The typed path is
+// the one name sure to reach it, so the resolver answers it, however the chain
+// runs and whether or not the descriptor is open.
+func TestResolve_KeepsTheTypedPathOfALinkToADescriptor(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no descriptor paths")
+	}
+	dir := diskSpelling(t, t.TempDir())
+	// Named "0", darwin's realpath answers /dev/fd/0 for its descriptor.
+	held := filepath.Join(dir, "0")
+	if err := os.WriteFile(held, []byte(heldByADescriptor), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	fd := fmt.Sprintf("/dev/fd/%d", f.Fd())
+
+	links := map[string]string{
+		"to-fd":     fd,
+		"to-stdin":  "/dev/stdin",
+		"to-closed": "/dev/fd/9999",
+		"chain":     "to-fd",
+		"to-dev":    "/dev",
+	}
+	for name, target := range links {
+		symlink(t, target, filepath.Join(dir, name))
+	}
+	for _, typed := range []string{
+		filepath.Join(dir, "to-fd"),
+		filepath.Join(dir, "to-stdin"),
+		filepath.Join(dir, "to-closed"),
+		filepath.Join(dir, "chain"),
+	} {
+		if got, err := Resolve(typed); err != nil || got != typed {
+			t.Errorf("Resolve(%q) = %q, %v; want the typed path", typed, got, err)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "chain"))
+	if err != nil || string(got) != heldByADescriptor {
+		t.Errorf("read through the chain = %q, %v; want the descriptor's file", got, err)
+	}
+	// A descriptor path a link to /dev reaches is named from /dev, which judged it.
+	if got, err := Resolve(filepath.Join(dir, "to-dev", "stdout")); err != nil || got != "/dev/stdout" {
+		t.Errorf("Resolve through a link to /dev = %q, %v; want /dev/stdout", got, err)
+	}
+	// Only the link's own element has no sure name: typed through a link to
+	// its directory, it keeps that element in the directory's spelling.
+	alias := filepath.Join(diskSpelling(t, t.TempDir()), "alias")
+	symlink(t, dir, alias)
+	if got, err := Resolve(filepath.Join(alias, "to-fd")); err != nil || got != filepath.Join(dir, "to-fd") {
+		t.Errorf("Resolve through a link to the directory = %q, %v; want %q", got, err, filepath.Join(dir, "to-fd"))
+	}
+}
+
+// TestResolve_RefusesALinkChainToADescriptorTheKernelRefuses holds a chain of
+// links longer than the kernel follows to the kernel's answer, ELOOP, when it
+// ends at a descriptor path as when it ends at a file.
+func TestResolve_RefusesALinkChainToADescriptorTheKernelRefuses(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no descriptor paths")
+	}
+	dir := diskSpelling(t, t.TempDir())
+	file := filepath.Join(dir, "f")
+	writeEmpty(t, file)
+	// darwin follows 32 links and Linux 40.
+	const n = 64
+	for _, end := range []string{"/dev/stdin", file} {
+		prefix := "d"
+		if end == file {
+			prefix = "f"
+		}
+		symlink(t, end, filepath.Join(dir, prefix+"0"))
+		for i := 1; i < n; i++ {
+			symlink(t, fmt.Sprintf("%s%d", prefix, i-1), filepath.Join(dir, fmt.Sprintf("%s%d", prefix, i)))
+		}
+		typed := filepath.Join(dir, fmt.Sprintf("%s%d", prefix, n-1))
+		if _, err := os.Stat(typed); !errors.Is(err, syscall.ELOOP) {
+			t.Fatalf("the kernel answered %v for %d links; want ELOOP", err, n)
+		}
+		if got, err := Resolve(typed); !errors.Is(err, syscall.ELOOP) {
+			t.Errorf("Resolve of %d links to %s = %q, %v; want ELOOP", n, end, got, err)
+		}
+	}
+}
+
+// A descriptor of a directory reaches the directory, which has a name on disk:
+// Linux spells it through procfs, and darwin's speller answers inside the
+// descriptor table, where the typed path stands. Either way the answer, and a
+// path under it, reach the directory the descriptor holds.
+func TestResolve_ReachesTheDirectoryADescriptorHolds(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no descriptor paths")
+	}
+	dir := diskSpelling(t, t.TempDir())
+	// Named "1", darwin's realpath answers /dev/fd/1 for its descriptor.
+	held := filepath.Join(dir, "1")
+	mkdirAll(t, held)
+	writeEmpty(t, filepath.Join(held, "x.yammm"))
+	d, err := os.Open(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	fd := fmt.Sprintf("/dev/fd/%d", d.Fd())
+	symlink(t, fd, filepath.Join(dir, "ld"))
+	want, err := os.Stat(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, typed := range []string{fd, filepath.Join(dir, "ld")} {
+		got, err := Resolve(typed)
+		if err != nil {
+			t.Errorf("Resolve(%q) = %v", typed, err)
+			continue
+		}
+		// darwin's stat of /dev/fd/N answers the descriptor table's own node;
+		// an open duplicates the descriptor, so its fstat reaches the file.
+		if !opensAs(t, got, want) {
+			t.Errorf("Resolve(%q) = %q, which opens no held directory", typed, got)
+		}
+		if got == "/dev/fd/1" {
+			t.Errorf("Resolve(%q) = %q, another descriptor's path", typed, got)
+		}
+	}
+	under := fd + "/x.yammm"
+	if got, err := Resolve(under); err != nil || strings.HasPrefix(got, "/dev/fd/1/") {
+		t.Errorf("Resolve(%q) = %q, %v; want no other descriptor's path", under, got, err)
+	}
+}
+
+// opensAs reports whether an open of p reaches the file want describes.
+func opensAs(t *testing.T, p string, want fs.FileInfo) bool {
+	t.Helper()
+	f, err := os.Open(p)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	return err == nil && os.SameFile(info, want)
+}
+
 // A file replaced during a resolve is spelled on disk at every instant, since the
 // kernel reaches it through its directory at every instant.
 func TestResolve_AFileReplacedDuringAResolveKeepsItsSpelling(t *testing.T) {
@@ -473,6 +635,110 @@ func TestResolve_AFileReplacedDuringAResolveKeepsItsSpelling(t *testing.T) {
 	replacer.Wait()
 	if replaced.Load() == 0 {
 		t.Error("no replace landed while the resolves ran, so none was judged")
+	}
+}
+
+// TestResolve_AFileRemovedDuringAResolveResolvesAsMissing holds a file removed
+// between the stat that finds it and the spelling to the answer a missing file
+// has, its typed name in its spelled directory, never a refusal.
+func TestResolve_AFileRemovedDuringAResolveResolvesAsMissing(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mkdirAll(t, filepath.Join(dir, "real"))
+	symlink(t, "real", filepath.Join(dir, "lnk"))
+	target := filepath.Join(dir, "real", "a.json")
+	want, err := Resolve(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var churner sync.WaitGroup
+	var removed atomic.Int64
+	churner.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if err := os.WriteFile(target, nil, 0o600); err != nil {
+				// Windows refuses to create a file a resolve's handle still holds
+				// for deletion: that cycle has not happened yet.
+				if runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission) {
+					continue
+				}
+				t.Error(err)
+				return
+			}
+			if err := os.Remove(target); err == nil {
+				removed.Add(1)
+			}
+		}
+	})
+	for range 5000 {
+		got, err := Resolve(filepath.Join(dir, "lnk", "a.json"))
+		if err != nil || got != want {
+			t.Errorf("Resolve = %q, %v; want %q", got, err, want)
+			break
+		}
+	}
+	close(stop)
+	churner.Wait()
+	if removed.Load() == 0 {
+		t.Error("no remove landed while the resolves ran, so none was judged")
+	}
+}
+
+// TestResolve_ARefusalIsAPathErrorOfTheTypedPath holds a refusal to one
+// *fs.PathError, Op "resolve", that names the path as typed.
+func TestResolve_ARefusalIsAPathErrorOfTheTypedPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "f.json")
+	writeEmpty(t, file)
+	typed := file + string(filepath.Separator)
+	_, err := Resolve(typed)
+	pe, ok := errors.AsType[*fs.PathError](err)
+	if !ok || pe.Op != "resolve" || pe.Path != typed || !errors.Is(err, ErrNotDirectory) {
+		t.Errorf("Resolve(%q) error = %#v; want a PathError{Op: resolve, Path: the typed path} of ErrNotDirectory", typed, err)
+	}
+}
+
+// TestResolve_ALinkWithAnEmptyTargetResolvesAsMissing holds a link whose target
+// is empty to a missing file of its own name: the kernel reaches nothing
+// through it, so neither the link nor a path under it takes its directory's
+// name.
+func TestResolve_ALinkWithAnEmptyTargetResolvesAsMissing(t *testing.T) {
+	t.Parallel()
+	dir := diskSpelling(t, t.TempDir())
+	link := filepath.Join(dir, "empty")
+	if err := os.Symlink("", link); err != nil {
+		t.Skipf("this host makes no link with an empty target: %v", err)
+	}
+	for _, typed := range []string{link, filepath.Join(link, "x")} {
+		if got, err := Resolve(typed); err != nil || got != typed {
+			t.Errorf("Resolve(%q) = %q, %v; want the typed path", typed, got, err)
+		}
+	}
+}
+
+// TestResolve_ARelativePathUnderARemovedDirectoryNamesThePath holds the refusal
+// of a relative path, when the working directory is gone and no absolute form
+// exists, to naming the path.
+func TestResolve_ARelativePathUnderARemovedDirectoryNamesThePath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "gone")
+	mkdirAll(t, dir)
+	t.Chdir(dir)
+	if err := os.Remove(dir); err != nil {
+		t.Skipf("this host keeps a working directory in use: %v", err)
+	}
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("this host still names a removed working directory")
+	}
+	_, err := Resolve("x.yammm")
+	pe, ok := errors.AsType[*fs.PathError](err)
+	if !ok || pe.Op != "resolve" || pe.Path != "x.yammm" {
+		t.Errorf("Resolve(x.yammm) under a removed directory = %v; want a resolve refusal that names x.yammm", err)
 	}
 }
 
@@ -642,6 +908,78 @@ func TestResolve_RefusesAPathWhoseResolvedFormExceedsPathMax(t *testing.T) {
 	resolveInChild(t, "TestResolve_RefusesAPathWhoseResolvedFormExceedsPathMax", typed, "")
 }
 
+// TestResolve_RefusesALinkTargetWhoseDotDotHasNoSpelling holds a path whose
+// resolution passes through a directory past PATH_MAX to the speller's
+// refusal, named once and with no other cause: a dangling link that climbs out
+// of that directory with "..", whether or not the kernel then reaches a file,
+// and a dangling link inside it, whose directory the speller cannot write.
+func TestResolve_RefusesALinkTargetWhoseDotDotHasNoSpelling(t *testing.T) {
+	t.Parallel()
+	if typed, ok := os.LookupEnv(childResolveEnv); ok {
+		got, err := Resolve(typed)
+		if !errors.Is(err, syscall.ENAMETOOLONG) || errors.Is(err, ErrNotDirectory) {
+			t.Errorf("Resolve(%q) = %q, %v; want ENAMETOOLONG and no ErrNotDirectory", typed, got, err)
+		}
+		if err != nil && strings.Count(err.Error(), typed) != 1 {
+			t.Errorf("Resolve(%q) error names the path %d times: %v", typed, strings.Count(err.Error(), typed), err)
+		}
+		// A refusal at a later hop names the link it was reading.
+		if link := os.Getenv(childWantEnv); link != "" && (err == nil || !strings.Contains(err.Error(), strconv.Quote(link))) {
+			t.Errorf("Resolve(%q) = %v; want the cause to name the link %q", typed, err, link)
+		}
+		return
+	}
+	if runtime.GOOS != "darwin" {
+		t.Skip("the PATH_MAX bound belongs to darwin's realpath(3)")
+	}
+
+	// lnk is a relative link, under PATH_MAX, to a directory whose real path
+	// is past it, and dl's target climbs out of that directory by one "..".
+	// darwin refuses mkdir by a path that resolves that far, so the tree is
+	// built through a directory descriptor.
+	base := diskSpelling(t, t.TempDir())
+	chain := filepath.Join(slices.Repeat([]string{strings.Repeat("d", 200)}, 4)...)
+	last := 1046 - len(base) - len(string(filepath.Separator)+chain+string(filepath.Separator))
+	if last < 1 || last > 255 {
+		t.Skipf("the temporary directory %q leaves no element length for a real path of 1,046 bytes", base)
+	}
+	target := filepath.Join(chain, strings.Repeat("e", last))
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := root.MkdirAll(target, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Symlink(target, "lnk"); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Symlink("lnk/../m.yammm", "dl"); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Symlink("nothing", filepath.Join(target, "inner")); err != nil {
+		t.Fatal(err)
+	}
+	typed := filepath.Join(base, "dl")
+	if _, err := os.Stat(typed); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("stat(%q) = %v; want the kernel's ENOENT for the file the link climbs to", typed, err)
+	}
+	resolveInChild(t, "TestResolve_RefusesALinkTargetWhoseDotDotHasNoSpelling", typed, "")
+	resolveInChild(t, "TestResolve_RefusesALinkTargetWhoseDotDotHasNoSpelling", filepath.Join(base, "lnk", "inner"), "")
+	if err := root.Symlink("dl", "via"); err != nil {
+		t.Fatal(err)
+	}
+	resolveInChild(t, "TestResolve_RefusesALinkTargetWhoseDotDotHasNoSpelling", filepath.Join(base, "via"), typed)
+	if err := root.WriteFile(filepath.Join(filepath.Dir(target), "m.yammm"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(typed); err != nil {
+		t.Fatalf("stat(%q) = %v; want the file the link climbs to", typed, err)
+	}
+	resolveInChild(t, "TestResolve_RefusesALinkTargetWhoseDotDotHasNoSpelling", typed, "")
+}
+
 // TestResolve_RefusesAnEmptyPath holds the resolver to refusing an unset file
 // name, where filepath.Abs would make it the working directory.
 func TestResolve_RefusesAnEmptyPath(t *testing.T) {
@@ -715,6 +1053,26 @@ func holdsName(t *testing.T, dir, name string) bool {
 		t.Fatal(err)
 	}
 	return slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == name })
+}
+
+// A ".." the path holds is taken on its text first, so an element it cancels is
+// no part of the path: a writer that cleans the path writes the file the
+// identity then names, whatever bytes the cancelled element held.
+func TestResolve_JudgesUTF8AfterTheDotDotTextRule(t *testing.T) {
+	t.Parallel()
+	dir := diskSpelling(t, t.TempDir())
+	sep := string(filepath.Separator)
+	want, err := Resolve(dir + sep + "v.yammm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	typed := dir + sep + "\xff" + sep + ".." + sep + "v.yammm"
+	if got, err := Resolve(typed); err != nil || got != want {
+		t.Errorf("Resolve(%q) = %q, %v; want %q", typed, got, err, want)
+	}
+	if _, err := Resolve(dir + sep + "\xff" + sep + "v.yammm"); !errors.Is(err, ErrInvalidUTF8Path) {
+		t.Errorf("an element no \"..\" cancels is refused: got %v", err)
+	}
 }
 
 // TestResolve_RefusesAPathThatIsNotValidUTF8 holds the resolver to text both
@@ -939,9 +1297,21 @@ func TestResolve_ATrailingSeparatorNamesADirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer d.Close()
+		// darwin's fdesc answers ENOTDIR for a directory's descriptor in
+		// directory form, and Linux follows its procfs link to the directory:
+		// Resolve answers as the kernel does, so its answer opens the directory.
 		typed = fmt.Sprintf("/dev/fd/%d/", d.Fd())
-		if got, err := Resolve(typed); err != nil || got != strings.TrimSuffix(typed, "/") {
-			t.Errorf("Resolve(%q) for a directory's descriptor = %q, %v; want the descriptor's own path", typed, got, err)
+		got, err := Resolve(typed)
+		held, serr := os.Stat(dir)
+		if serr != nil {
+			t.Fatal(serr)
+		}
+		if _, serr := os.Stat(typed); errors.Is(serr, syscall.ENOTDIR) {
+			if !errors.Is(err, syscall.ENOTDIR) {
+				t.Errorf("Resolve(%q) for a directory's descriptor the kernel refuses = %q, %v; want ENOTDIR", typed, got, err)
+			}
+		} else if err != nil || !opensAs(t, got, held) {
+			t.Errorf("Resolve(%q) for a directory's descriptor = %q, %v; want a path that opens the directory", typed, got, err)
 		}
 	}
 }

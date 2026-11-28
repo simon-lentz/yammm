@@ -2,9 +2,13 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -136,5 +140,45 @@ func TestLoadAndParseJSON_StopsAtACancelledContext(t *testing.T) {
 	}
 	if len(parsed) != 0 {
 		t.Errorf("a cancelled parse returned %d types, want none", len(parsed))
+	}
+}
+
+// TestLoadAndParseJSON_NamesARefusedPathOnce holds a resolve refusal to one
+// name for the operand: a file the kernel reads through two links, whose
+// resolved form is past darwin's PATH_MAX, has no identity, and the refusal
+// states the path as typed once, with the cause.
+func TestLoadAndParseJSON_NamesARefusedPathOnce(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "darwin" {
+		t.Skip("the PATH_MAX bound belongs to darwin's realpath(3)")
+	}
+	base := t.TempDir()
+	chain := filepath.Join(slices.Repeat([]string{strings.Repeat("d", 200)}, 4)...)
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Join(chain, chain), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range []string{"hop", filepath.Join(chain, "hop")} {
+		if err := root.Symlink(chain, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := root.WriteFile(filepath.Join(chain, chain, "d.json"), []byte(`{"A": []}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	typed := filepath.Join(base, "hop", "hop", "d.json")
+	if _, err := os.ReadFile(typed); err != nil {
+		t.Fatalf("the kernel must read the file: %v", err)
+	}
+	_, _, err = LoadAndParseJSON(t.Context(), typed)
+	if !errors.Is(err, syscall.ENAMETOOLONG) {
+		t.Fatalf("LoadAndParseJSON(%q) = %v; want the speller's ENAMETOOLONG", typed, err)
+	}
+	if n := strings.Count(err.Error(), "d.json"); n != 1 {
+		t.Errorf("the refusal names the operand %d times: %v", n, err)
 	}
 }

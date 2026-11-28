@@ -501,7 +501,7 @@ func TestSyntheticImportKey_IsTheLoadersLookup(t *testing.T) {
 		{"a decomposed name", "main.yammm", "café/dep", "café/dep.yammm"},
 		{"a backslash", "main.yammm", `lib\dep`, ""},
 		{"a path whose last segment is a dot dot", "a/main.yammm", "./x.yammm/..", ""},
-		{"an importer key the loader cleans", "sub/main.yammm/", "./dep", "sub/dep.yammm"},
+		{"an importer key that names a directory", "sub/main.yammm/", "./dep", ""},
 		{"an importer key with a dot segment", "sub/./main.yammm", "../dep", "dep.yammm"},
 		{"an importer key holding a backslash", `sub\main.yammm`, "./dep", ""},
 		{"an absolute importer key", "/abs/main.yammm", "./dep", ""},

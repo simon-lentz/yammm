@@ -6,16 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// TestLoadSources_AKeyThatNamesADirectoryRefusesAFile holds an in-memory source
-// key that ends in a separator or a "." element to the resolver's rule, relative
-// or absolute: a key whose last element is a regular file on disk is refused,
-// where the same key without the separator loads.
-func TestLoadSources_AKeyThatNamesADirectoryRefusesAFile(t *testing.T) {
+// TestLoadSources_AKeyThatNamesADirectoryIsRefused holds an in-memory source
+// key that ends in a separator or a "." or ".." element to one refusal, relative or
+// absolute, under a module root on disk or a synthetic root: a key names a
+// file, so the key is refused whatever the disk holds at its element, where
+// the same key without the ending loads.
+func TestLoadSources_AKeyThatNamesADirectoryIsRefused(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -23,31 +22,48 @@ func TestLoadSources_AKeyThatNamesADirectoryRefusesAFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "x.yammm"), source, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(root, "d.yammm"), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	sep := string(filepath.Separator)
-	load := func(key string) diag.Result {
-		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
-			return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{key: source}, key,
-				schema.WithSourcesOnly(true), schema.WithModuleRoot(root), schema.WithWarnings(warn))
-		})
-		return res
+	load := func(key string, opts ...schema.Option) error {
+		_, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{key: source}, key,
+			append(opts, schema.WithSourcesOnly(true))...)
+		return err
 	}
-	if res := load("x.yammm"); diagtest.Err(res) != nil {
-		t.Fatalf("the plain key was refused: %s", firstError(res))
+	onDisk := schema.WithModuleRoot(root)
+	synthetic := schema.WithSyntheticRoot("embedded://app")
+	if err := load("x.yammm", onDisk); err != nil {
+		t.Fatalf("the plain key was refused under the module root: %v", err)
 	}
-	for _, key := range []string{
-		"x.yammm" + sep,
-		"x.yammm" + sep + ".",
-		filepath.Join(root, "x.yammm") + sep,
+	if err := load("x.yammm", synthetic); err != nil {
+		t.Fatalf("the plain key was refused under the synthetic root: %v", err)
+	}
+	for _, row := range []struct {
+		key  string
+		opts []schema.Option
+	}{
+		{"x.yammm" + sep, []schema.Option{onDisk}},
+		{"x.yammm" + sep + ".", []schema.Option{onDisk}},
+		{"d.yammm" + sep, []schema.Option{onDisk}},
+		{"absent.yammm" + sep, []schema.Option{onDisk}},
+		{filepath.Join(root, "x.yammm") + sep, []schema.Option{onDisk}},
+		{filepath.Join(root, "x.yammm") + sep, nil},
+		{"x.yammm/", []schema.Option{synthetic}},
+		{"x.yammm/.", []schema.Option{synthetic}},
+		{".", []schema.Option{onDisk}},
+		{"..", []schema.Option{onDisk}},
+		{"sub" + sep + "..", []schema.Option{onDisk}},
+		{"sub" + sep + ".." + sep + "..", []schema.Option{onDisk}},
+		{"sub/x/..", []schema.Option{synthetic}},
 	} {
-		res := load(key)
-		if !res.HasFatal() {
-			t.Errorf("key %q loaded", key)
+		err := load(row.key, row.opts...)
+		if err == nil {
+			t.Errorf("key %q loaded", row.key)
 			continue
 		}
-		// A load reports the refusal as text, which reads as Unix's ENOTDIR on
-		// every host.
-		if msg := firstError(res); !strings.Contains(msg, "not a directory") {
-			t.Errorf("key %q: %s, want the not-a-directory refusal", key, msg)
+		if !strings.Contains(err.Error(), "names a directory, not a file") {
+			t.Errorf("key %q: %v, want the directory-key refusal", row.key, err)
 		}
 	}
 }

@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
+	"math"
 	"os"
+	"path/filepath"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/hostpath"
@@ -24,15 +28,15 @@ func CheckOperand(what, path string) error {
 
 // CheckSourceOperand is [CheckOperand] for a path that names a source, a
 // schema or data file or a module root: its identity reaches both JSON wires,
-// so location refuses one that is not valid UTF-8 before any lookup, and so
-// does this, with location.ErrInvalidUTF8Path. A path that only names a file
-// to read takes [CheckOperand], since its name may be any bytes the filesystem
-// holds.
+// so location refuses one that is not valid UTF-8 once a ".." in it is taken
+// on the text, before any lookup, and so does this, with
+// location.ErrInvalidUTF8Path. A path that only names a file to read takes
+// [CheckOperand], since its name may be any bytes the filesystem holds.
 func CheckSourceOperand(what, path string) error {
 	if err := CheckOperand(what, path); err != nil {
 		return err
 	}
-	if !utf8.ValidString(path) {
+	if !utf8.ValidString(filepath.Clean(path)) {
 		return Usagef("resolve %s %q: %w: %q", what, path, location.ErrInvalidUTF8Path, path)
 	}
 	return nil
@@ -47,31 +51,34 @@ func HostPath(p string) (string, error) {
 	return hostpath.Text(p)
 }
 
-// ReadFile reads the file [HostPath] gives for path. An error names path as
-// the operator spelled it.
+// ReadFile reads the file [HostPath] gives for path, judged as
+// [hostpath.OpenFile] judges it. An error names path as the operator spelled it.
 func ReadFile(path string) ([]byte, error) {
-	host, err := HostPath(path)
-	if err == nil {
-		err = hostpath.RefusedRead(host)
-	}
+	f, err := Open(path)
 	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
+		return nil, err
 	}
-	data, err := os.ReadFile(host)
-	return data, renamePathError(err, path)
+	defer f.Close()
+	// Sized from the file, as os.ReadFile sizes it, so a read allocates the
+	// file once; a stream, or a size below zero or too large for one buffer,
+	// reads as it grows.
+	size := 0
+	if info, err := f.Stat(); err == nil && info.Mode().IsRegular() && info.Size() > 0 && info.Size() < int64(math.MaxInt-bytes.MinRead) {
+		size = int(info.Size())
+	}
+	buf := bytes.NewBuffer(make([]byte, 0, size+bytes.MinRead))
+	_, err = buf.ReadFrom(SpelledReader(f, path))
+	return buf.Bytes(), err
 }
 
-// Open opens the file [HostPath] gives for path for reading. An error names
-// path as the operator spelled it.
+// Open opens the file [HostPath] gives for path for reading, as
+// [hostpath.OpenFile] opens it. An error names path as the operator spelled it.
 func Open(path string) (*os.File, error) {
 	host, err := HostPath(path)
-	if err == nil {
-		err = hostpath.RefusedRead(host)
-	}
 	if err != nil {
-		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
+		return nil, &fs.PathError{Op: "open", Path: operandName(path), Err: err}
 	}
-	f, err := os.Open(host)
+	f, err := hostpath.OpenFile(host, os.O_RDONLY)
 	return f, renamePathError(err, path)
 }
 
@@ -92,10 +99,20 @@ func (r spelledReader) Read(p []byte) (int, error) {
 	return n, renamePathError(err, r.path)
 }
 
-// renamePathError makes an [fs.PathError] name path.
+// renamePathError makes an [fs.PathError] name path, by [operandName].
 func renamePathError(err error, path string) error {
 	if pe, ok := errors.AsType[*fs.PathError](err); ok {
-		return &fs.PathError{Op: pe.Op, Path: path, Err: pe.Err}
+		return &fs.PathError{Op: pe.Op, Path: operandName(path), Err: pe.Err}
 	}
 	return err
+}
+
+// operandName is how an error names the operand path: as typed, or quoted
+// when it is not valid UTF-8, as [SourceOf] names it, since a JSON wire writes
+// an invalid byte as U+FFFD.
+func operandName(path string) string {
+	if utf8.ValidString(path) {
+		return path
+	}
+	return strconv.Quote(path)
 }

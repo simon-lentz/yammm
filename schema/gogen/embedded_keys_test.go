@@ -318,18 +318,20 @@ func TestMarshal_NoRootFileEntryKeysUnderItsDirectory(t *testing.T) {
 
 // TestMarshal_SourceAtTheRootItselfIsRefused pins the refusal of a source
 // whose identity is the root directory, which has no relative path: as the
-// entry and as a source nothing imports.
+// entry and as a source nothing imports. The load refuses a key that is "." by
+// its text, so the key is the root's absolute path.
 func TestMarshal_SourceAtTheRootItselfIsRefused(t *testing.T) {
 	t.Parallel()
 	src := []byte("schema \"p\"\n\ntype P {\n\tid String primary\n}\n")
+	root := t.TempDir()
 	for name, tc := range map[string]struct {
 		sources map[string][]byte
 		entry   string
 	}{
-		"the entry":             {map[string][]byte{".": src}, "."},
-		"a source not imported": {map[string][]byte{"main.yammm": src, ".": src}, "main.yammm"},
+		"the entry":             {map[string][]byte{root: src}, root},
+		"a source not imported": {map[string][]byte{"main.yammm": src, root: src}, "main.yammm"},
 	} {
-		s, loadErr := schema.LoadSourcesWithEntry(context.Background(), tc.sources, tc.entry, schema.WithSourcesOnly(true), schema.WithModuleRoot(t.TempDir()))
+		s, loadErr := schema.LoadSourcesWithEntry(context.Background(), tc.sources, tc.entry, schema.WithSourcesOnly(true), schema.WithModuleRoot(root))
 		if loadErr != nil {
 			t.Fatalf("%s: load: %v", name, loadErr)
 		}

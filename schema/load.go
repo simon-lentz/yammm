@@ -13,10 +13,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/hostpath"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 
 	"golang.org/x/text/unicode/norm"
 
@@ -90,10 +90,10 @@ func newRootLoader(moduleRoot string) (*rootLoader, error) {
 
 // openFile opens a regular file relative to the module root with sandboxed
 // access. Returns a [pathEscapeError] if the path would escape the module root and
-// errNotRegularFile if it names anything but a regular file.
+// [hostpath.ErrNotRegularFile] if it names anything but a regular file.
 func (rl *rootLoader) openFile(relativePath string) (*os.File, error) {
 	cleanPath := filepath.Clean(relativePath)
-	return openRegular(func(flag int) (*os.File, error) {
+	return hostpath.OpenRegular(func(flag int) (*os.File, error) { //nolint:wrapcheck // the open's and the stat's errors are this loader's own
 		f, err := rl.root.OpenFile(cleanPath, flag, 0)
 		if err != nil {
 			return nil, rl.handleOpenError(err, relativePath)
@@ -134,50 +134,29 @@ func readSource(r io.Reader, what string) ([]byte, error) {
 	return content, nil
 }
 
-// errNotRegularFile is what openRegular returns for a path that names anything
-// but a regular file.
-var errNotRegularFile = errors.New("not a regular file")
-
-// openRegular opens a file for reading and refuses anything but a regular
-// file. The open is non-blocking so a FIFO cannot stall it, and the kind is
-// read from the open descriptor so nothing can change between check and read.
-//
-// stat classifies a FAILED open, which a socket produces: there is no
-// descriptor to read the kind from, and the platform's errno is not an answer
-// a caller can report. Nothing is opened afterwards, so there is no window.
-func openRegular(open func(flag int) (*os.File, error), stat func() (os.FileInfo, error)) (*os.File, error) {
-	f, err := open(os.O_RDONLY | syscall.O_NONBLOCK)
+// readSourceFile opens and reads the schema file path names within the source
+// bound, through its typed spelling ([hostpath.Text]): a link that reaches a
+// descriptor is read through, where the host's name for the descriptor's file
+// may reach no file or another one. An error names path once.
+func readSourceFile(path string) ([]byte, error) {
+	text, err := hostpath.Text(path)
 	if err != nil {
-		if info, serr := stat(); serr == nil && !info.Mode().IsRegular() {
-			return nil, errNotRegularFile
+		return nil, fmt.Errorf("read %q: %w", path, err)
+	}
+	f, err := hostpath.OpenRegular(
+		func(flag int) (*os.File, error) { return hostpath.OpenFile(text, flag) },
+		func() (os.FileInfo, error) { return hostpath.Stat(text) })
+	if err != nil {
+		if errors.Is(err, hostpath.ErrNotRegularFile) {
+			return nil, fmt.Errorf("schema path %q is not a regular file", path)
 		}
-		return nil, err
-	}
-	info, err := f.Stat()
-	if err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("stat: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		_ = f.Close()
-		return nil, errNotRegularFile
-	}
-	return f, nil
-}
-
-// readSourceFile opens and reads one schema file within the source bound.
-func readSourceFile(absPath string) ([]byte, error) {
-	f, err := openRegular(
-		func(flag int) (*os.File, error) { return os.OpenFile(absPath, flag, 0) },
-		func() (os.FileInfo, error) { return os.Stat(absPath) })
-	if err != nil {
-		if errors.Is(err, errNotRegularFile) {
-			return nil, fmt.Errorf("schema path %q is not a regular file", absPath)
+		if pe, ok := errors.AsType[*fs.PathError](err); ok {
+			err = pe.Err
 		}
-		return nil, fmt.Errorf("read %q: %w", absPath, err)
+		return nil, fmt.Errorf("read %q: %w", path, err)
 	}
 	defer f.Close()
-	return readSource(f, fmt.Sprintf("schema %q", absPath))
+	return readSource(f, fmt.Sprintf("schema %q", path))
 }
 
 // readFile reads a file relative to the module root with sandboxed access,
@@ -186,7 +165,7 @@ func readSourceFile(absPath string) ([]byte, error) {
 func (rl *rootLoader) readFile(relativePath string) ([]byte, string, error) {
 	f, err := rl.openFile(relativePath)
 	if err != nil {
-		if errors.Is(err, errNotRegularFile) {
+		if errors.Is(err, hostpath.ErrNotRegularFile) {
 			return nil, "", fmt.Errorf("import %q is not a regular file", relativePath)
 		}
 		return nil, "", err
@@ -216,6 +195,10 @@ func (rl *rootLoader) handleOpenError(err error, requestedPath string) error {
 		}
 	}
 
+	// A missing path is judged by the first element above it that exists,
+	// through the root, so a file in the way reads "not a directory" on every
+	// host: Windows answers it as a missing path.
+	err = hostpath.ClassifyIn(rl.root, filepath.Clean(requestedPath), err)
 	if errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("import file %q not found", requestedPath)
 	}
@@ -265,13 +248,14 @@ func Load(ctx context.Context, path string, opts ...Option) (Schema, error) {
 		return Schema{}, err
 	}
 
-	// One resolution gives the entry's identity and the host path it is read from.
+	// One resolution gives the entry's identity and the host path its module
+	// root and imports are found from; its bytes are read as typed.
 	sourceID, absPath, err := location.ResolveSourcePath(path)
 	if err != nil {
-		return Schema{}, fatalErr(fmt.Errorf("resolve path %q: %w", path, err), nil)
+		return Schema{}, fatalErr(err, nil)
 	}
 
-	content, err := readSourceFile(absPath)
+	content, err := readSourceFile(path)
 	if err != nil {
 		return Schema{}, fatalErr(err, nil)
 	}
@@ -288,13 +272,13 @@ func Load(ctx context.Context, path string, opts ...Option) (Schema, error) {
 	rootOrigin := diag.ModuleRootExplicit
 	if moduleRoot == "" {
 		entryDir := filepath.Dir(absPath)
-		discovered, found, err := FindModuleRoot(entryDir)
+		discovered, found, err := moduleroot.Find(entryDir)
 		switch {
 		case err != nil:
 			// A marker the author wrote and the loader could not honour fails
 			// the load. Falling through to the entry directory would be the
 			// silently-ignored marker this mechanism exists to remove.
-			return Schema{}, issueErr(ModuleRootIssue(err))
+			return Schema{}, issueErr(moduleroot.Issue(err))
 		case found:
 			moduleRoot, rootOrigin = discovered, diag.ModuleRootDiscovered
 		default:
@@ -534,7 +518,7 @@ type loader struct {
 	loadingSchemas map[location.SourceID]bool     // For cycle detection
 	imports        map[string]importBinding       // alias -> binding (resolved or failed) for current schema
 	failedCompiles map[location.SourceID]struct{} // sources whose nested compile failed (memo, per Load call)
-	hostPaths      map[location.SourceID]string   // file-backed source -> the host path its bytes were read from
+	hostPaths      map[location.SourceID]string   // file-backed source -> the host path its relative imports resolve from
 	resolved       map[string]resolvedSource      // path -> its one resolution in this load
 }
 
@@ -1210,12 +1194,15 @@ func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 		return id, "", nil
 	}
 
-	if key == "" {
+	switch {
+	case key == "":
 		return location.SourceID{}, "", location.ErrEmptyPath
+	case hostpath.NamesDirectory(key), filepath.Base(key) == ".", filepath.Base(key) == "..":
+		return location.SourceID{}, "", source.DirectoryKeyError(key) //nolint:wrapcheck // the refusal names the key
 	}
 	hostKey := key
 	if !filepath.IsAbs(key) && l.moduleRoot != "" {
-		hostKey = hostpath.DirectoryForm(key, filepath.Join(l.moduleRoot, key))
+		hostKey = filepath.Join(l.moduleRoot, key)
 	}
 	id, host, err := l.resolveSource(hostKey)
 	if err != nil {

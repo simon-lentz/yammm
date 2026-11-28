@@ -91,8 +91,8 @@ func (c *loadConfig) refuse(call string, takes ...optionKind) error {
 // [LoadSourcesWithEntry] a relative source key resolves under the root.
 //
 // It is the first rung of the ladder [Load] resolves a root by: this option,
-// then the directory of the nearest ancestor holding a [ModuleRootMarker]
-// file, then the entry schema's own directory. The editor inserts its
+// then the directory of the nearest ancestor holding a yammm.mod
+// marker file, then the entry schema's own directory. The editor inserts its
 // workspace folder between the second and the third.
 //
 // Under a non-empty root no marker is read at all — not even a malformed one, which
@@ -166,7 +166,8 @@ func WithSourcesOnly(only bool) Option {
 // rule below refuses is rejected outright too.
 //
 // A key is read by one rule:
-// it is valid UTF-8, holds no backslash and no character that does not print, and once cleaned
+// it is valid UTF-8, holds no backslash and no character that does not print, does not end in
+// a separator or a "." or ".." element, and once cleaned
 // and in NFC it is relative and names a file, not the root or a directory above it. A key that escapes the root is
 // permitted and yields a ".."-bearing identity, which stays stable and
 // distinct. A relative import ("./x", "../x") resolves

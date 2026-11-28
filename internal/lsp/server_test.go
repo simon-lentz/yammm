@@ -23,6 +23,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/lsp/internal/protocol"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/testutil"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/workspace"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -1396,7 +1397,7 @@ func TestConfigValidate_SpellsModuleRootAsTheLoaderDoes(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "lib"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, schema.ModuleRootMarker), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, moduleroot.Marker), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	typed := root
@@ -1406,9 +1407,9 @@ func TestConfigValidate_SpellsModuleRootAsTheLoaderDoes(t *testing.T) {
 	sep := string(filepath.Separator)
 	typed += sep + "lib" + sep + ".."
 
-	want, found, err := schema.FindModuleRoot(filepath.Join(root, "lib"))
+	want, found, err := moduleroot.Find(filepath.Join(root, "lib"))
 	if err != nil || !found {
-		t.Fatalf("schema.FindModuleRoot = (%q, %v, %v)", want, found, err)
+		t.Fatalf("moduleroot.Find = (%q, %v, %v)", want, found, err)
 	}
 
 	cfg := lsp.Config{ModuleRoot: typed}

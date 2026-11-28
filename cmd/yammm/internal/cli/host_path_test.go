@@ -9,10 +9,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/hostpath"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -577,5 +580,49 @@ func TestReadFile_NamesThePathAsSpelled(t *testing.T) {
 	}
 	if _, err := Open(typed); err == nil || !strings.Contains(err.Error(), typed) {
 		t.Errorf("Open(%q) error %v does not name the path as typed", typed, err)
+	}
+	// A directory opens and fails at its read, which names the path too.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "d.json"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	typedDir := dir + sep + "d" + sep + ".." + sep + "d.json"
+	if _, err := ReadFile(typedDir); err == nil || !strings.Contains(err.Error(), typedDir) {
+		t.Errorf("ReadFile(%q) error %v does not name the path as typed", typedDir, err)
+	}
+}
+
+// TestReadFile_QuotesAnOperandThatIsNotUTF8 holds an error to a name a JSON
+// wire keeps: an operand that is not valid UTF-8 is quoted, as SourceOf names
+// it, never written with a byte encoding/json turns into U+FFFD.
+func TestReadFile_QuotesAnOperandThatIsNotUTF8(t *testing.T) {
+	t.Parallel()
+	sep := string(filepath.Separator)
+	typed := t.TempDir() + sep + "b\xff" + sep + ".." + sep + "missing.json"
+	_, err := ReadFile(typed)
+	if err == nil || !strings.Contains(err.Error(), strconv.Quote(typed)) || !utf8.ValidString(err.Error()) {
+		t.Errorf("ReadFile(%q) error %q; want the operand quoted", typed, err)
+	}
+}
+
+// TestReadFile_AllocatesTheFileOnce holds a read to one buffer of the file's
+// size, as os.ReadFile allocates, however large the file.
+func TestReadFile_AllocatesTheFileOnce(t *testing.T) {
+	raceskip.Skip(t)
+	for _, size := range []int{1 << 20, 4 << 20} {
+		path := filepath.Join(t.TempDir(), "data.json")
+		if err := os.WriteFile(path, bytes.Repeat([]byte{'x'}, size), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		data, err := ReadFile(path)
+		runtime.ReadMemStats(&after)
+		if err != nil || len(data) != size {
+			t.Fatalf("ReadFile = %d bytes, %v; want %d", len(data), err, size)
+		}
+		if got := after.TotalAlloc - before.TotalAlloc; got > uint64(size)+uint64(size)/4 {
+			t.Errorf("ReadFile of %d bytes allocated %d bytes; want one buffer of the file's size", size, got)
+		}
 	}
 }

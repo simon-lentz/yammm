@@ -10,7 +10,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// checkDataOperands refuses a data operand that is empty or not valid UTF-8, since
+// checkDataOperands refuses a data operand that is empty or, its ".." elements
+// taken on the text, not valid UTF-8, since
 // its identity reaches both JSON wires. It reads no file, so a command that calls
 // it before its first read reports a usage error alone.
 func checkDataOperands(paths ...string) error {

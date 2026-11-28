@@ -198,7 +198,8 @@ func (s *DiagnosticSink) addCall(c *diag.Collector, err error, path string) erro
 
 // SourceOf returns the source that names the file at path in a diagnostic: the
 // file's identity, or for a path no identity names, such as one that is not
-// valid UTF-8 or resolves past the host's path limit, its quoted spelling, as
+// valid UTF-8 once its ".." elements are taken on the text or resolves past the
+// host's path limit, its quoted spelling, as
 // gofmt names a file as typed.
 func SourceOf(path string) location.SourceID {
 	if id, err := location.SourceIDFromPath(path); err == nil {

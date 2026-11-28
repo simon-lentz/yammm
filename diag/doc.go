@@ -29,15 +29,18 @@
 // # Entry Point Pattern
 //
 // A YAMMM operation that can fail returns (T, error), and one that produces no
-// value returns an error alone; one whose caller needs no reason, such as
-// instance.Validator.PrimaryKeyOf, returns false as its last value. A failure is one *[ResultError] holding the
-// Fatal and Error issues the call drew, and the call returns the zero T beside
-// it unless its doc states a partial value. A call that can draw an issue below
+// value returns an error alone; location.ResolveSourcePath returns its two
+// values before the error, and one whose caller needs no reason, such as
+// instance.Validator.PrimaryKeyOf, returns false as its last value. A failure
+// that draws issues is one *[ResultError] holding the Fatal and Error issues
+// the call drew, and the call returns the zero T beside it unless its doc
+// states a partial value. An option a call refuses is a plain error, as is any
+// failure of a call that draws no issues, such as markdown.Marshal or
+// neo4j.ParseConstraints. A call that can draw an issue below
 // failure severity takes a WithWarnings option in its package's Option type: the
 // callback receives each such issue on the calling goroutine, before the call
 // returns, in the order found, and with no callback the issues are discarded.
 // snapshot.ScanDir yields each file's failure as its entry's Err.
-// schema.ModuleRootIssue returns a bare [Issue].
 //
 //	s, err := schema.Load(ctx, path, schema.WithWarnings(func(i diag.Issue) {
 //	    log.Print(i)

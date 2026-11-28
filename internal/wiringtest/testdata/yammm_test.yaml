@@ -153,6 +153,17 @@ jobs:
             ${{ steps.go-caches.outputs.build }}
             ${{ steps.go-caches.outputs.mod }}
           key: ${{ steps.go-restore.outputs.cache-primary-key }}
+      - name: Test darwin/amd64 under Rosetta
+        if: ${{ !cancelled() }}
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+            go build -o "$RUNNER_TEMP/testsummary" ./internal/testsummary
+            GOARCH=amd64 go test -json -count=1 -timeout=5m \
+              github.com/simon-lentz/yammm/internal/hostpath github.com/simon-lentz/yammm/location 2>&1 |
+              "$RUNNER_TEMP/testsummary" -timeout=5m \
+                github.com/simon-lentz/yammm/internal/hostpath github.com/simon-lentz/yammm/location
+          fi
   cross-vet:
     name: Vet every target
     runs-on: ubuntu-24.04

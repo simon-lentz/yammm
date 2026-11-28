@@ -10,42 +10,44 @@
 //
 // A file-backed [SourceID] that [SourceIDFromPath] or [ResolveSourcePath] makes
 // is the answer to one question — what does the filesystem call this file —
-// written in NFC with forward slashes. [SourceID.Dir] cuts one to its
-// directory's, as a later paragraph states. Its text is:
+// written in NFC with forward slashes. Its text is:
 //   - Absolute (not relative)
 //   - Clean (no . or .. segments)
 //   - NFC-normalized (Unicode)
 //   - Written with "/" as its separator, on every host
 //   - Resolved as far as the process can look: symlinks followed, and each
-//     component it can look up spelled as the filesystem spells it; a missing
-//     tail, anything under a component it cannot traverse, and a descriptor
-//     path, is kept as typed (see the section on ".." below)
+//     component it can look up spelled as the host's answer spells it; a
+//     missing tail and anything under a component it cannot traverse are kept
+//     as typed, and a descriptor path, a path whose links reach one and a path
+//     the host spells inside a descriptor table are named as "Descriptor
+//     paths" states (see it and the section on ".." below)
 //   - Valid UTF-8
 //
 // Resolution follows the host's own path rules. On Windows a backslash is a
 // separator and is written as "/", and a network share resolves like any other
-// path; on Unix a backslash is a file-name character and is kept, and a leading
-// "//" names the root, as the kernel resolves it.
+// path. A drive resolves to what it stands for: a SUBST drive to the directory
+// it substitutes, and a mapped drive to its share, so a file reached through a
+// share of a local directory keeps the share's identity beside its local one.
+// On Unix a backslash is a file-name character and is kept, and a leading "//"
+// names the root, as the kernel resolves it.
 //
 // An identity is not a path to open. NFC can change its bytes, so on a
 // filesystem that distinguishes normalization forms it may name no file; read a
 // file through the path as given or the host path [ResolveSourcePath] returns
-// beside the identity, and through the path as given when a link may reach a
-// descriptor (see below).
+// beside the identity.
 //
 // Two spellings that resolve to one host path give one identity: the spelling
-// the filesystem holds, written in NFC, with a missing tail, or a descriptor
-// path, as typed. A file that two host paths reach — a hard link, a firmlink or
-// a bind mount — keeps two identities. [SourceID.Dir] cuts an identity's text,
-// so a descriptor path's directory keeps its typed spelling too, and
-// [SourceID.Rel] compares two identities segment by segment, never through the
+// the filesystem holds, written in NFC, with a missing tail as typed; a
+// descriptor path and a path whose links reach one are named as "Descriptor paths"
+// below states. A file that two host paths reach — a hard link, a firmlink or
+// a bind mount — keeps two identities. [SourceID.Rel] compares two identities segment by segment, never through the
 // host.
 //
 // # A ".." is evaluated on the text
 //
 // Case, the on-disk normalization and every symbolic link are read from disk, as
-// far as the path exists, the process can look and the path is not a descriptor
-// path. A ".." is not. It is evaluated
+// far as the path exists, the process can look and the path does not reach a
+// descriptor's file. A ".." is not. It is evaluated
 // on the path's text before anything is looked up, so "dir/link/../x" names
 // "dir/x" whatever "dir/link" resolves to. A "." and a repeated separator are
 // cleaned on the text in the same step. A path that ends in a separator or a
@@ -54,7 +56,10 @@
 // matches syscall.ENOTDIR under errors.Is, is not itself a syscall.Errno, and
 // reads "not a directory" on every host, and the identity of one that is a directory, or does not exist yet, is
 // written without the separator. The refusal never matches [fs.ErrNotExist],
-// though Windows' own ENOTDIR, ERROR_PATH_NOT_FOUND, does.
+// though Windows' own ENOTDIR, ERROR_PATH_NOT_FOUND, does. Windows answers a
+// path under a regular file as missing, so there the first element above it
+// that exists is judged, and a file there is refused the same way: the
+// resolver, a schema read and an import read each refuse it on every host.
 //
 // This is a decision, not an oversight, and for a ".." the path itself holds it
 // is the same decision on every host. A ".." inside a link's target is another
@@ -79,13 +84,17 @@
 // the process cannot enter cancels that component where the kernel would refuse
 // the path. Only a ".." parts the text rule from the kernel.
 //
-// For a path that is not a descriptor path, the answer on darwin is realpath(3),
-// called through libSystem. It reads each
+// For a path "Descriptor paths" below does not name, the answer on
+// darwin is realpath(3), called through libSystem. On APFS it reads each
 // component's name from the directory the lookup passed through, so it answers
 // in the volume's case and normalization; it opens nothing, so a FIFO, an
 // unreadable file and a full descriptor table resolve like any other path.
 // fcntl(F_GETPATH) is not used: it answers from a vnode's cached name, which a
-// concurrent lookup of another hard link of the same file rewrites. A firmlink is not a symbolic link, so
+// concurrent lookup of another hard link of the same file rewrites. On a FAT
+// volume realpath answers in the case of the lookup that made the kernel's
+// current record of the file, which the kernel can discard while the volume
+// stays mounted, so a later answer can take another case (measured on FAT32;
+// exFAT is not measured). A firmlink is not a symbolic link, so
 // /System/Volumes/Data/Users and /Users stay two spellings, as a bind mount
 // does on Linux. On Windows the answer is the final path of the file
 // (GetFinalPathNameByHandleW), read from a handle opened with no access. That is
@@ -93,9 +102,12 @@
 // target's identity. An SMB component the user may not query
 // falls back to the name as opened, which is not normalized. filepath.EvalSymlinks is not used
 // there: it follows a link named inside a target before a ".." that follows
-// it, where Windows evaluates the ".." first. On Linux filepath.EvalSymlinks
-// is the answer for such a path: the host is case-sensitive, and a directory mounted with case
-// folding (ext4 +F) keeps the typed case and is out of scope.
+// it, where Windows evaluates the ".." first. The path is made absolute once,
+// which trims an element's trailing dots and spaces, and every later lookup is
+// made in extended form (\\?\), so none trims them again whatever the path's
+// length. On Linux and every other Unix host but darwin, filepath.EvalSymlinks
+// is the answer: it keeps the typed case, so on a case-folding filesystem, or a
+// bind mount of one, each spelling of a file has its own identity.
 //
 // A path that does not exist yet resolves as far as it exists: the deepest
 // existing ancestor is spelled on disk and the missing tail is appended as
@@ -110,29 +122,47 @@
 // identity minted for a file before it is written therefore equals the one
 // minted after, which is what lets an in-memory source key match the file it
 // will become. A component the process cannot traverse ends the resolution the
-// same way. A path under a regular file can never exist and is refused, as is,
-// on Unix, a dangling link whose target takes a ".." past a component that
-// does not exist or is not a directory, since the kernel reaches no file through it; so is a cycle of dangling links, and so is an existing path whose resolved form is
-// longer than the host allows a path to be (PATH_MAX, 1024 bytes on darwin).
+// same way. A path under a regular file can never exist and is refused. On
+// Unix a dangling link whose target holds a ".." has the part of its target up
+// to the last ".." spelled by the host's speller, which takes each ".." on disk
+// as the kernel does, and a target the speller refuses, one that takes a ".."
+// past a component that does not exist or is not a directory, or out of a
+// directory whose resolved form is too long, is refused with the speller's
+// error. So is a cycle of dangling links, and so is an existing path whose
+// resolution passes through a resolved form longer than the host allows a path
+// to be (PATH_MAX, 1024 bytes on darwin), though its own resolved form may be
+// shorter and the kernel may open it.
 //
-// On every host but Windows, a descriptor path resolves to itself. It is a path
-// whose directory is /dev, by whatever route the path reaches it, and whose name
-// is stdin, stdout or stderr; one whose directory is /dev/fd and whose name is a
-// number; or, on Linux, an entry of a procfs descriptor table. Such a path
-// names an open descriptor, not a file: its file may be a pipe or an unlinked file
-// with no name, and on darwin the host gives no true name for a regular one. Two
-// spellings of one descriptor path, such as /dev/stdin and /DEV/stdin on a
-// case-insensitive volume, give two identities. A link to one resolves as far as
-// the host names it, and that name may reach no file or another file, so only
-// the path as given is sure to reach the descriptor.
+// # Descriptor paths
+//
+// On every host but Windows, a descriptor path names an open descriptor, not a
+// file. It is a path whose directory is /dev, by whatever route the path
+// reaches it, and whose name is stdin, stdout or stderr; one whose directory is
+// /dev/fd and whose name is a number; or, on Linux, an entry of a procfs
+// descriptor table. Its file may be a pipe or an unlinked file with no name, and
+// on darwin the host gives no true name for a regular one. So a descriptor path
+// of a file that is not a directory resolves to its name written from the
+// directory that judged it, /dev/ or /dev/fd/ and its number in decimal with no
+// leading zero, so /dev/stdin and /DEV/stdin on a case-insensitive volume give
+// one identity, and on Linux so do /dev/fd/3, /proc/self/fd/3 and the process's
+// /proc/<pid>/fd/3; an entry of another procfs table, as another process's or a
+// thread's, keeps its spelling, and on Linux a
+// number with a leading zero names no entry. A path whose links end at such a
+// descriptor path, open or not, keeps its typed last element, as does a path
+// the host spells inside a descriptor table, as darwin spells a file under a
+// directory's descriptor: the host's name for it may reach no file or another
+// file. The directory that holds that element is spelled as any directory is. A
+// descriptor of a directory reaches a directory with a name, and is spelled as
+// any directory is: Linux names it through procfs, and darwin's answer lies in
+// the descriptor table, so there it keeps its typed last element in /dev/fd,
+// and /dev/fd/04 and /dev/fd/4 stay two identities.
 //
 // # SourceID
 //
 // SourceID identifies a source within a build. A file-backed one is compared up
 // to NFC: on a host that keeps both forms of a name, two files named in NFC and
 // NFD take one SourceID. It supports two modes:
-//   - File-backed: Created via SourceIDFromPath or ResolveSourcePath, and cut to
-//     its directory's by SourceID.Dir.
+//   - File-backed: Created via SourceIDFromPath or ResolveSourcePath.
 //   - Synthetic: Created via NewSourceID for non-file sources
 //     like "<stdin>", "inline:test", or "test://unit/person.yammm". NewSourceID
 //     refuses a name that could not be told apart from another identity: an

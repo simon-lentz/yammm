@@ -185,6 +185,11 @@ func TestCheckOperand_CarriesLocationsSentinel(t *testing.T) {
 	if err := CheckSourceOperand("data file", "x\xff.json"); !errors.Is(err, location.ErrInvalidUTF8Path) {
 		t.Errorf("CheckSourceOperand of a name that is not UTF-8 = %v, want ErrInvalidUTF8Path", err)
 	}
+	// The resolver judges UTF-8 after the ".." text rule, so a name a ".." takes
+	// away is never judged, and the operand check agrees with it.
+	if err := CheckSourceOperand("data file", "x\xff/../a.json"); err != nil {
+		t.Errorf("CheckSourceOperand refused a name a \"..\" takes away: %v", err)
+	}
 }
 
 // An unreadable file reaches some commands as a diagnostic rather than an error

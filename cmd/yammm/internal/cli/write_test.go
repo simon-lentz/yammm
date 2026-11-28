@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/hostpath"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -52,14 +53,15 @@ func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	staged, err := os.CreateTemp(dir, stagingPattern)
+	stage, err := hostpath.Stage(filepath.Join(dir, "out.ys"), NewFileMode, stagingName)
 	if err != nil {
 		t.Fatalf("stage: %v", err)
 	}
-	staged.Close() //nolint:gosec // nothing is written to it
+	defer stage.Discard()
+	stage.File.Close() //nolint:gosec // nothing is written to it
 
-	if !strings.HasSuffix(staged.Name(), snapshot.TmpSuffix) {
-		t.Errorf("staging name %q does not end in %q", filepath.Base(staged.Name()), snapshot.TmpSuffix)
+	if !strings.HasSuffix(stage.File.Name(), snapshot.TmpSuffix) {
+		t.Errorf("staging name %q does not end in %q", filepath.Base(stage.File.Name()), snapshot.TmpSuffix)
 	}
 
 	if entries := scanEntries(t, dir); len(entries) != 0 {
@@ -135,9 +137,8 @@ func TestWriteFile_ModePolicy(t *testing.T) {
 // output and no staging file.
 //
 // A directory standing where the file belongs is refused by the permission
-// check before anything is staged. The cleanup that runs when a write fails
-// AFTER staging needs an I/O failure this platform cannot be made to produce,
-// and is defence rather than a path a test reaches.
+// check before anything is staged. [TestWriteFile_AFailedWriteLeavesNoStagingFile]
+// holds the cleanup after staging.
 func TestWriteFile_ADirectoryTargetIsRefusedAndNothingIsWritten(t *testing.T) {
 	t.Parallel()
 
@@ -213,4 +214,55 @@ func scanEntries(t *testing.T, dir string) []snapshot.ScanEntry {
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+// TestWriteFile_ReplacesAFileReachedThroughALongLink holds a replacement to
+// the files the kernel writes for the path: darwin counts a link's body and the
+// rest of the path against MAXPATHLEN, so through a link of 1,014 bytes
+// "/x.dat" fits and a staging name spelled through the link does not.
+func TestWriteFile_ReplacesAFileReachedThroughALongLink(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the link needs a Unix kernel's MAXPATHLEN arithmetic")
+	}
+	dir := t.TempDir()
+	link := filepath.Join(dir, "L")
+	if err := os.Symlink(strings.Repeat("./", 507), link); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(link, "x.dat")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatalf("the target itself must be writable: %v", err)
+	}
+	for range 5 {
+		if err := WriteFile(path, []byte("new")); err != nil {
+			t.Fatalf("WriteFile through a 1,014-byte link = %v", err)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "x.dat")); err != nil || string(got) != "new" {
+		t.Errorf("the file the link reaches holds %q, %v; want the written bytes", got, err)
+	}
+	assertNoDebris(t, dir, "L", "x.dat")
+}
+
+// TestReplace_StagesAtTheModeTheWriteEndsWith holds the staging file to the
+// target's mode from its creation, before any byte is written: a new file's
+// staging copy is owner-only, as the file it becomes.
+func TestReplace_StagesAtTheModeTheWriteEndsWith(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows keeps no Unix permission bits")
+	}
+	stage, err := writeTarget{path: filepath.Join(t.TempDir(), "out.ys"), mode: NewFileMode}.stage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := stage.File.Stat()
+	stage.Discard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got&^NewFileMode != 0 {
+		t.Errorf("the staging file was created with mode %v; want no bit beyond %v", got, NewFileMode)
+	}
 }

@@ -6,7 +6,7 @@ The YAMMM language itself — grammar, types, expressions, constraints, and diag
 
 ## Error Handling Conventions
 
-Every call that can fail returns `(T, error)`, or an `error` alone when it has no value to return, as `snapshot.Verify`, `snapshot.WriteFile`, `graph.Graph.Add`, `graph.Graph.Check`, `cypher.Config.CheckLabels`, `schema.CheckConstraint` and `gogen.CheckPackageName` do. `schema.FindModuleRoot` and `location.ResolveSourcePath` return two values before their error, a call where the caller needs no reason, such as `instance.Validator.PrimaryKeyOf`, returns `false` as its last value, and `snapshot.ScanDir` yields an error only when the scan stops, holding a file's own failure in `ScanEntry.Err`. A call that cannot fail returns its value alone, such as `cypher.DropConstraintStatement` and `cypher.IsIdentifier`, and the introspection queries `neo4j.ShowConstraints` and `neo4j.ShowIndexes` are `string` constants.
+Every call that can fail returns `(T, error)`, or an `error` alone when it has no value to return, as `snapshot.Verify`, `snapshot.WriteFile`, `graph.Graph.Add`, `graph.Graph.Check`, `cypher.Config.CheckLabels`, `schema.CheckConstraint` and `gogen.CheckPackageName` do. `location.ResolveSourcePath` returns two values before its error, a call where the caller needs no reason, such as `instance.Validator.PrimaryKeyOf`, returns `false` as its last value, and `snapshot.ScanDir` yields an error only when the scan stops, holding a file's own failure in `ScanEntry.Err`. A call that cannot fail returns its value alone, such as `cypher.DropConstraintStatement` and `cypher.IsIdentifier`, and the introspection queries `neo4j.ShowConstraints` and `neo4j.ShowIndexes` are `string` constants.
 
 **A failure is a `*diag.ResultError`.** A call that judges its input returns the Fatal and Error issues it drew as one `*diag.ResultError`, whose `Result` holds those failures alone. Read it with `errors.AsType[*diag.ResultError](err)`, which finds it through a `fmt.Errorf` `%w` tag and through `errors.Join`. Test it by code with `errors.Is(err, diag.E_IMPORT_CYCLE)`: a `diag.Code` is an error, and a `ResultError` matches every code among the failures it saw, a dropped one included. A refusal of the call itself, such as an option the call does not take, is an error with no diagnostic code. Some calls return a plain error for every failure, such as `markdown.Marshal` and `neo4j.CoerceParams`; each call's doc names what it returns.
 
@@ -86,7 +86,7 @@ s, err := schema.LoadString(ctx, content, "source-name", opts...)
 s, err := schema.LoadSourcesWithEntry(ctx, sources, entryPath, opts...)
 ```
 
-A path `Load` reads, and a key `LoadSourcesWithEntry` registers under a module root on disk, names a directory when it ends in a separator or a `.` element, as a Unix kernel reads it, on every host. So `s.yammm/` and `s.yammm/.` name no file: where `s.yammm` is a regular file the load is refused with a Fatal `E_LOAD_IO_FAILURE` whose message ends in `not a directory` on every host, where v0.21.1 read the file. Under `WithSyntheticRoot` a key names no host path and is cleaned instead (see [Synthetic source identities](#synthetic-source-identities)).
+A path `Load` reads, and a key `LoadSourcesWithEntry` registers under a module root on disk, names a directory when it ends in a separator or a `.` element, as a Unix kernel reads it, on every host. So `s.yammm/` and `s.yammm/.` name no file: where `s.yammm` is a regular file `Load` is refused with a Fatal `E_LOAD_IO_FAILURE` whose message ends in `not a directory` on every host, where v0.21.1 read the file. A source key names a file, so `LoadSourcesWithEntry` refuses a key in that form, and a key that is `.` or whose last element is `..`, whatever the disk holds, under a module root on disk and under `WithSyntheticRoot` alike, with a Fatal `E_LOAD_IO_FAILURE` saying the key names a directory, where v0.21.1 cleaned it to `s.yammm`.
 
 ### Load Options
 
@@ -117,24 +117,14 @@ resolves it over four tiers:
 Discovery is additive: with no marker anywhere above the entry file, behaviour
 is exactly what it was before — the entry schema's own directory.
 
-```go
-// The nearest ancestor holding a yammm.mod, "" and false when none does, and
-// an error when the resolver refuses dir, a marker is malformed or unreadable,
-// or a look for one fails other than as absent.
-root, found, err := schema.FindModuleRoot(filepath.Dir(entryPath))
+Discovery has no Go surface: `Load` runs it, as do the `yammm` command and the
+language server, each with the one rule below, so one schema gets one root. A
+caller that wants a root of its own passes `WithModuleRoot`. A malformed marker
+fails the load with `E_LOAD_MODULE_ROOT_MALFORMED`, whose `module_root` detail
+names the marker's directory; a marker that cannot be read fails it with a Fatal
+`E_LOAD_IO_FAILURE`.
 
-var malformed *schema.MalformedModuleRootError
-if errors.As(err, &malformed) {
-    fmt.Printf("%s line %d: %s\n", malformed.Path, malformed.Line, malformed.Reason)
-}
-
-// The diagnostic Load reports for either error kind. Callers outside the
-// loader — the editor, a custom front end — build it from here so one code
-// keeps one shape.
-issue := schema.ModuleRootIssue(err)
-```
-
-`schema.ModuleRootMarker` is the marker's file name (`yammm.mod`).
+The marker's file name is `yammm.mod`.
 
 **The marker's content rule.** In this version the file must be empty or hold
 only comment lines, where a comment line's first non-space byte is `#`. Any
@@ -200,7 +190,8 @@ The option refuses rather than degrades. Each of these is an error:
 | A root holding, after its scheme, a character outside its set — a `?`, a `#`, a `%`, a backslash, a space, a control, format or other character that does not print, one of `" < > [ ] ^ { \| }` or a backtick, or a `:` or `@` in its authority — or text that is not valid UTF-8 | After the scheme a root holds ASCII letters and digits, `/`, the marks `- . _ ~ ! $ & ' ( ) * + , ; =`, `:` and `@` in its path alone, and a character past ASCII that prints: a letter, mark, number, punctuation or symbol, as `strconv.IsPrint` reports. It names no server, so it takes no port, no user, no query and no fragment, and no percent escape, which would give one root two spellings. The set is applied to the root in NFC, so U+1FEF GREEK VARIA, which NFC makes a backtick, is refused |
 | The option beside `WithModuleRoot`, an empty root included | The two name one concept and the load can honor only one. The error names both options and carries no diagnostic code |
 | The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there. The error names the option and the load, and carries no diagnostic code |
-| An absolute source key — as given, or once cleaned and in NFC (`./C:/x.yammm`, or a key spelled with U+212A KELVIN SIGN, which NFC makes `K`) — or one naming the root itself or a directory above it (`..`) | An absolute key collides with file-backed identities, and neither the root nor a directory above it is a source. A key that spells a directory under the root is cleaned to a file key: `x.yammm/` and `x.yammm/.` are `x.yammm`. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
+| An absolute source key — as given, or once cleaned and in NFC (`./C:/x.yammm`, or a key spelled with U+212A KELVIN SIGN, which NFC makes `K`) — or one naming the root itself or a directory above it (`..`) | An absolute key collides with file-backed identities, and neither the root nor a directory above it is a source. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
+| A source key that ends in `/` or a `.` or `..` element (`x.yammm/`, `x.yammm/.`, `sub/x/..`) | Such a key names a directory, as it does under a module root on disk, where it is refused too; v0.21.1 cleaned it to the file it would otherwise name |
 | A source key holding a backslash | Windows reads a backslash as a separator and every other host as part of a file name, so one store would name different sources on each |
 | A source key holding a character that does not print — a control character, a bidi or other format character, a space past ASCII, a line or paragraph separator, a private-use or unassigned code point | Such a character renders as nothing or reorders the text around it, so two identities could read alike. Every synthetic identity the library judges is held to this rule, a `LoadString` name and `location.NewSourceID` among them. `location.NewSourceID` and `gogen.Marshal` return an error wrapping `location.ErrUnprintableSourceID`. A load reports its text, so `errors.Is` cannot match it there. The verdict follows the Unicode tables of the Go toolchain that builds yammm, so a character a later Unicode assigns is refused until that toolchain moves. The ASCII space stays legal in a key |
 
@@ -813,7 +804,7 @@ if !header.SchemaHashMatches(s) {
 
 ### Atomic Writing
 
-`snapshot.WriteFile` persists bytes to a path using the `tmp+fsync+rename` protocol — the standard crash-safe write primitive every yammm consumer needs when turning `Marshal` output into a durable `.ys` file:
+`snapshot.WriteFile` persists bytes to a path using the `tmp+fsync+rename` protocol — the crash-safe write primitive a consumer uses to turn `Marshal` output into a durable `.ys` file:
 
 ```go
 func WriteFile(path string, data []byte) error
@@ -823,7 +814,7 @@ const TmpSuffix = ".tmp"
 
 The payload is first written to a staging file of its own beside the file it replaces, `fsync`'d, closed, and then renamed into place. The staging name is the replaced file's stem, a random token, its extension and `snapshot.TmpSuffix` — `snap.12345.ys.tmp` for `snap.ys`, and through a symbolic link the replaced file is the one the link names — so concurrent writers of one path never share a staging file. The rename is the atomic commit point: either the new file takes over (rename succeeded) or the previous file is left untouched (any earlier step failed). With concurrent writers, each rename commits one writer's bytes whole and the last one wins. On any intermediate failure, `WriteFile` removes its own staging file and returns an error wrapped with the failing step (`create temp`, `write temp`, `sync temp`, `close temp`, or `rename temp to final`). It never removes a staging file it did not create.
 
-**Which file is written.** `WriteFile` evaluates a `..` in `path` on its text first, as the schema loader evaluates it: `path` is cleaned, so a `..` cancels the element before it rather than following a symbolic link, and `dir/link/../snap.ys` writes `dir/snap.ys`; a relative `path` that climbs out of the working directory is made absolute from it as `filepath.Abs` spells it, the directory the loader climbs from. The cleaning keeps a `path` that ends in a separator or a `.` element naming a directory, as a Unix kernel reads it, so no file is written there. When its last element is a file, sits under one, or does not exist in an existing directory, `WriteFile` refuses it before staging, on every host, with an error matching `syscall.ENOTDIR` and tagged `resolve target`, so `snap.ys/` writes no file. Under a directory that does not exist, or when its stat fails otherwise, it is refused with the host's own error, and an existing directory is refused as one spelled without the separator is. A symbolic link at `path` is then followed, as a chain, and survives: the file it names is written, and a dangling link creates that file. The same rule judges each link target in directory form, at the file the kernel reaches through it. A link's target is read as the kernel reads it — on Unix a `..` in the target takes the parent of the directory reached on disk, on Windows it is evaluated on the text — and the staging file is made beside the file the rename replaces. A cycle of links at `path` is refused with an error wrapping `syscall.ELOOP`, tagged `resolve target`; a cycle in a directory of the path fails when the staging file is created, tagged `create temp`.
+**Which file is written.** `WriteFile` evaluates a `..` in `path` on its text first, as the schema loader evaluates it: `path` is cleaned, so a `..` cancels the element before it rather than following a symbolic link, and `dir/link/../snap.ys` writes `dir/snap.ys`; a relative `path` that climbs out of the working directory is made absolute from it as `filepath.Abs` spells it, the directory the loader climbs from. The cleaning keeps a `path` that ends in a separator or a `.` element naming a directory, as a Unix kernel reads it, so no file is written there. When its last element is a file, sits under one, or does not exist in an existing directory, `WriteFile` refuses it before staging, on every host, with an error matching `syscall.ENOTDIR` and tagged `resolve target`, so `snap.ys/` writes no file. Under a directory that does not exist, or when its stat fails otherwise, it is refused with the host's own error, and an existing directory is refused with an error matching `syscall.EISDIR` at `create temp`; spelled without the separator, it is refused at `rename temp to final`, with the error the host gives a file renamed over a directory. A symbolic link at `path` is then followed, as a chain, and survives: the file it names is written, and a dangling link creates that file. The same rule judges each link target in directory form, at the file the kernel reaches through it. A link's target is read as the kernel reads it — on Unix a `..` in the target takes the parent of the directory reached on disk, on Windows it is evaluated on the text — and the staging file is made beside the file the rename replaces. A cycle of links at `path` is refused with an error wrapping `syscall.ELOOP`, tagged `resolve target`; a cycle in a directory of the path fails when the staging file is created, tagged `create temp`.
 
 `WriteFile` does not validate that `data` is a valid `.ys` document — it is a general-purpose atomic-write primitive, and callers are responsible for the payload (typically the output of `Marshal`).
 
@@ -1510,7 +1501,7 @@ The formatter returns no output in two cases.
 - **The source fails to parse** — the grammar does not match its tokens, or a string holds an escape the language does not have (malformed digits, or a surrogate code point), save in an invariant expression or an annotation argument, which format as written. A source that parses but that a load refuses formats successfully: inverted bounds, a character the source rules refuse inside a comment or a literal, or an escape whose value is not UTF-8.
 - **The output would not preserve the source.** Whitespace, a trailing comma before `]` or `{`, and a leading byte order mark are the only things the formatter may change. After phase 5, when the output differs from the input with its line ends made LF, the two token sequences are compared with those set aside, and every comment's text line by line. On a mismatch the formatter refuses: the defect is the formatter's, never the input's. An input already formatted is returned unchanged and costs no comparison.
 
-The CLI reports a parse failure as the positioned `E_SYNTAX` diagnostic, in the file it read, and exits with `ExitValidation`. A path no source identity names, such as one that is not valid UTF-8 or that resolves past the host's path limit, is named by its quoted spelling (`strconv.Quote`). It maps a refusal to `ExitRuntime`, leaving the file unchanged. The LSP returns no edits for either, and logs a refusal as a warning.
+The CLI reports a parse failure as the positioned `E_SYNTAX` diagnostic, in the file it read, and exits with `ExitValidation`. A path no source identity names, such as one that is not valid UTF-8 once its `..` elements are taken on the text, or that resolves past the host's path limit, is named by its quoted spelling (`strconv.Quote`). It maps a refusal to `ExitRuntime`, leaving the file unchanged. The LSP returns no edits for either, and logs a refusal as a warning.
 
 Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF, so `yammm fmt -l` lists every CRLF file it formats. A leading UTF-8 byte order mark is no token, so the output never carries a leading one and `-l` lists a marked file the same way; a mark inside a comment or a literal is written back where it stands.
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -75,7 +76,7 @@ func writeBrokenImportTree(t *testing.T) (root, entry string) {
 
 func TestImportResolveProvenance_Default(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	_, entry := writeBrokenImportTree(t)
 
@@ -88,14 +89,14 @@ func TestImportResolveProvenance_Default(t *testing.T) {
 
 	// The remedy clause is the sentence that would have saved the consumer's
 	// CLI failure: it names the marker, not just the root.
-	if !strings.Contains(issue.Message(), schema.ModuleRootMarker) {
-		t.Errorf("the default clause must name %s as the remedy; message: %q", schema.ModuleRootMarker, issue.Message())
+	if !strings.Contains(issue.Message(), moduleroot.Marker) {
+		t.Errorf("the default clause must name %s as the remedy; message: %q", moduleroot.Marker, issue.Message())
 	}
 }
 
 func TestImportResolveProvenance_Discovered(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root, entry := writeBrokenImportTree(t)
 	writeMarker(t, root, "")
@@ -106,15 +107,15 @@ func TestImportResolveProvenance_Discovered(t *testing.T) {
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
 	id := rootIdentity(t, root)
 	assertProvenance(t, issue, details, id, diag.ModuleRootDiscovered,
-		"; module root "+id+", discovered from "+id+"/"+schema.ModuleRootMarker)
-	if !strings.HasSuffix(issue.Message(), id+"/"+schema.ModuleRootMarker) {
+		"; module root "+id+", discovered from "+id+"/"+moduleroot.Marker)
+	if !strings.HasSuffix(issue.Message(), id+"/"+moduleroot.Marker) {
 		t.Errorf("message %q does not end with the marker it was discovered from", issue.Message())
 	}
 }
 
 func TestImportResolveProvenance_Explicit(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root, entry := writeBrokenImportTree(t)
 
@@ -158,7 +159,7 @@ func TestImportResolveProvenance_None(t *testing.T) {
 
 func TestPathEscapeProvenance(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
@@ -186,7 +187,7 @@ func TestPathEscapeProvenance(t *testing.T) {
 
 func TestImportCycleProvenance(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root := t.TempDir()
 	a := filepath.Join(root, "a.yammm")

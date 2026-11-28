@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"go/build/constraint"
+	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -498,11 +500,17 @@ type keyRoot struct {
 
 // resolveKeyRoot reads the root from s, or takes a file entry's directory when
 // the load recorded none. A file root is recorded as a host path and is
-// re-derived as an identity, since a host path's bytes can differ from it.
+// re-derived as an identity, since a host path's bytes can differ from it; an
+// entry's directory is its identity's text cut to the directory and resolved
+// the same way, so a link or a descriptor path in it gets the directory's own
+// identity.
 func resolveKeyRoot(s schema.Schema) (keyRoot, error) {
 	root := s.ModuleRoot()
 	if root == "" {
-		return keyRoot{dir: s.SourceID().Dir()}, nil
+		if !s.SourceID().IsFilePath() {
+			return keyRoot{}, nil
+		}
+		root = filepath.FromSlash(path.Dir(s.SourceID().String()))
 	}
 	if _, err := location.NewSourceID(root); err == nil {
 		return keyRoot{synthetic: root}, nil

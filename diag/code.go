@@ -486,7 +486,9 @@ var (
 
 	// W_SNAPSHOT_PATH_EXTENSION indicates a snapshot was written where a scan
 	// for .ys files does not find it: neither the path nor a link it follows
-	// has a name that ends in .ys and names a regular file. The document is
+	// has a name that ends in .ys and names a regular file in a directory the
+	// process can list, or the write ended at one of the writing process's own
+	// descriptor paths, such as /dev/stdout. The document is
 	// correct and the write succeeded; the warning exists because every reader
 	// that discovers snapshots by extension — a directory scan among them — will
 	// not find this one. Warning severity: the caller named the path

@@ -4,9 +4,7 @@ package hostpath
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -16,50 +14,36 @@ func linkTarget(dir, target string) (string, error) {
 }
 
 // walkedTarget resolves the target of a link in the directory dir as a Unix
-// kernel does: an absolute target from its root and a relative one from dir,
-// each ".." taking the parent of the directory reached so far on disk.
+// kernel does: an absolute target from its root and a relative one from dir.
+// A target with no ".." is joined on its text, and the walk spells what of it
+// exists. Each ".." takes the parent of the directory reached on disk, so the
+// part of a target up to its last ".." is spelled once by the host's speller,
+// which takes a ".." as the kernel does. The speller's refusal refuses the
+// target with its error: a missing component, through which the kernel reaches
+// no file, or a directory on the way whose resolved form is past the host's
+// path limit, which the kernel enters and the speller cannot write.
 func walkedTarget(dir, target string) (string, error) {
+	start := dir
 	if filepath.IsAbs(target) {
-		volume := filepath.VolumeName(target)
-		return walkTarget(volume+string(filepath.Separator), target[len(volume):])
+		start = filepath.VolumeName(target) + string(filepath.Separator)
 	}
-	return walkTarget(dir, target)
+	components := strings.FieldsFunc(target, isSeparator)
+	cut := 0
+	for i, c := range components {
+		if c == ".." {
+			cut = i + 1
+		}
+	}
+	if cut == 0 {
+		return filepath.Join(append([]string{start}, components...)...), nil
+	}
+	head := start + string(filepath.Separator) + strings.Join(components[:cut], string(filepath.Separator))
+	spelled, err := spellOnDisk(head)
+	if err != nil {
+		return "", fmt.Errorf("link target %q: %w", target, err)
+	}
+	return filepath.Join(append([]string{spelled}, components[cut:]...)...), nil
 }
 
-// walkTarget joins target's components to start, an existing directory that
-// holds no link, so ".." takes the parent the kernel reaches. From the first
-// component that is not an existing directory, the rest is joined as written,
-// unless a ".." follows it: the kernel cannot take the parent of a directory it
-// cannot enter, so that target names no file and is refused.
-func walkTarget(start, target string) (string, error) {
-	current := start
-	components := strings.FieldsFunc(target, func(r rune) bool {
-		return r == '/' || r == filepath.Separator
-	})
-	for i, c := range components {
-		switch c {
-		case ".":
-			continue
-		case "..":
-			current = filepath.Dir(current)
-			continue
-		}
-		next := filepath.Join(current, c)
-		info, err := os.Stat(next)
-		if err == nil && info.IsDir() {
-			if spelled, err := spellOnDisk(next); err == nil {
-				current = spelled
-				continue
-			}
-		}
-		rest := components[i+1:]
-		if slices.Contains(rest, "..") {
-			if err == nil {
-				err = ErrNotDirectory
-			}
-			return "", fmt.Errorf("link target %q takes a \"..\" past %q: %w", target, next, err)
-		}
-		return strings.Join(append([]string{next}, rest...), string(filepath.Separator)), nil
-	}
-	return current, nil
-}
+// lookupName is p: off Windows a lookup reads the path as typed.
+func lookupName(p string) string { return p }

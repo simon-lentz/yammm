@@ -10,6 +10,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
@@ -24,7 +25,7 @@ const backslashRule = "an import path separates its segments with / and holds no
 // path only through an escape, so every row writes one.
 func TestImportPath_BackslashIsRefused(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	rows := []struct {
 		name       string
@@ -75,7 +76,7 @@ func TestImportPath_BackslashRefusalIsLoadBearing(t *testing.T) {
 		t.Skip("a backslash is a path separator on Windows, so a\\b.yammm is not one file name")
 	}
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, `a\b.yammm`),
@@ -150,7 +151,7 @@ func writeImportRows(t *testing.T, root string, names ...string) {
 // would reach is present.
 func TestImportPath_APathNamingNoFileIsRefused(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	rows := []struct{ name, entry, importPath string }{
 		{"empty", "main.yammm", ""},
@@ -194,7 +195,7 @@ func TestImportPath_APathNamingNoFileIsRefused(t *testing.T) {
 // rule would reach is present.
 func TestImportPath_TrailingSeparatorsAreReadPast(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	for _, importPath := range []string{"sub/b/", "sub/b//", "sub/b.yammm/", "./sub/b/", "./sub/b//", "./sub/b.yammm/"} {
 		t.Run(importPath, func(t *testing.T) {
@@ -222,7 +223,7 @@ func TestImportPath_TrailingSeparatorsAreReadPast(t *testing.T) {
 // separator names no other file, so the second import is a duplicate.
 func TestImportPath_TwoSpellingsWithASeparatorAreADuplicateImport(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root := t.TempDir()
 	writeHostPathFile(t, filepath.Join(root, "b.yammm"), "schema \"dep\"\n")
@@ -276,7 +277,7 @@ func TestSyntheticImportKey_TrailingSeparatorsAreReadPast(t *testing.T) {
 // module root or an ancestor names the file beside that directory, above the root.
 func TestImportPath_SpellingTheRootEscapes(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	rows := []struct{ name, importPath string }{
 		{"the root", "../z"},
@@ -325,6 +326,36 @@ func TestSyntheticImportPath_APathNamingNoFileIsRefused(t *testing.T) {
 				t.Fatalf("import %q loaded", importPath)
 			}
 			wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_RESOLVE: 1})
+		})
+	}
+}
+
+// TestImportPath_UnderARegularFileIsNotADirectory holds an import whose path
+// climbs into a regular file to one refusal on every host: Windows answers the
+// open as a missing path, so the loader judges the first element above it that
+// exists, and the open reads "not a directory" as Unix's own answer does.
+func TestImportPath_UnderARegularFileIsNotADirectory(t *testing.T) {
+	t.Parallel()
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
+
+	for _, importPath := range []string{"./plain/dep", "plain/dep", "./plain/deeper/dep"} {
+		t.Run(importPath, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeHostPathFile(t, filepath.Join(root, "plain"), "not a directory\n")
+			entry := filepath.Join(root, "main.yammm")
+			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \""+importPath+"\" as d\n\ntype T {\n\tid String primary\n}\n")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+			})
+			var got []string
+			for issue := range res.Issues() {
+				got = append(got, issue.Code().String()+": "+issue.Message())
+				if issue.Code() == diag.E_IMPORT_RESOLVE && strings.Contains(issue.Message(), ".yammm\": not a directory;") {
+					return
+				}
+			}
+			t.Errorf("import %q under a regular file: got %q; want an E_IMPORT_RESOLVE whose open reads \"not a directory\"", importPath, got)
 		})
 	}
 }

@@ -5,6 +5,10 @@ import (
 	"syscall"
 )
 
+// procfsEntries is whether /dev/fd is a procfs table, whose entries are named
+// in one decimal form alone.
+const procfsEntries = true
+
 // procSuperMagic is PROC_SUPER_MAGIC, procfs's statfs type (linux/magic.h).
 const procSuperMagic = 0x9fa0
 
@@ -21,4 +25,23 @@ func procDescriptorTable(dir string) bool {
 	}
 	resolved, err := filepath.EvalSymlinks(dir)
 	return err == nil && filepath.Base(resolved) == "fd"
+}
+
+// ownDescriptorTable reports whether dir is the process's own descriptor
+// table: the one /dev/fd reaches, or a table of one of its threads,
+// /proc/<pid>/task/<tid>/fd, which /proc/thread-self/fd reaches. Go's threads
+// share the process's one table.
+func ownDescriptorTable(dir string) bool {
+	if sameFile(dir, "/dev/fd") {
+		return true
+	}
+	if !procDescriptorTable(dir) {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return false
+	}
+	task := filepath.Dir(filepath.Dir(resolved))
+	return filepath.Base(task) == "task" && sameFile(filepath.Dir(task), "/proc/self")
 }

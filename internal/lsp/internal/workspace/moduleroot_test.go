@@ -14,6 +14,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/testutil"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -47,7 +48,7 @@ func quietLogger() *slog.Logger {
 func markerTree(t *testing.T, markerContent string) (root, entry string) {
 	t.Helper()
 	root = t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, schema.ModuleRootMarker), []byte(markerContent), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, moduleroot.Marker), []byte(markerContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return root, importTree(t, root)
@@ -81,17 +82,17 @@ func importTree(t *testing.T, root string) string {
 // another for the same file. Nothing else pins that they agree.
 func TestModuleRoot_EditorAndLoaderAgree(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root, entry := markerTree(t, "# project root\n")
 	canonical := mustDiskSpelling(t, root)
 
-	direct, found, err := schema.FindModuleRoot(filepath.Dir(entry))
+	direct, found, err := moduleroot.Find(filepath.Dir(entry))
 	if err != nil || !found {
-		t.Fatalf("schema.FindModuleRoot = (%q, %v, %v)", direct, found, err)
+		t.Fatalf("moduleroot.Find = (%q, %v, %v)", direct, found, err)
 	}
 	if direct != canonical {
-		t.Errorf("schema.FindModuleRoot = %q, want %q", direct, canonical)
+		t.Errorf("moduleroot.Find = %q, want %q", direct, canonical)
 	}
 
 	ws := newTestWorkspace(t, quietLogger(), Config{})
@@ -117,7 +118,7 @@ func TestModuleRoot_EditorAndLoaderAgree(t *testing.T) {
 // happened to be opened.
 func TestModuleRoot_MarkerBeatsWorkspaceFolder(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root, entry := markerTree(t, "")
 	outer := filepath.Dir(root)
@@ -140,7 +141,7 @@ func TestModuleRoot_MarkerBeatsWorkspaceFolder(t *testing.T) {
 // be spelled the same way before it is matched against the folder.
 func TestModuleRoot_WorkspaceFolderHoldsAnotherSpellingOfItsDocument(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	tests := []struct {
 		name  string
@@ -202,7 +203,7 @@ func TestModuleRoot_WorkspaceFolderHoldsAnotherSpellingOfItsDocument(t *testing.
 // the loader's own rule that an explicit root is never overridden.
 func TestModuleRoot_ExplicitConfigBeatsMarker(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	_, entry := markerTree(t, "")
 
@@ -223,7 +224,7 @@ func TestModuleRoot_ExplicitConfigBeatsMarker(t *testing.T) {
 // marker this mechanism exists to remove — or nothing at all.
 func TestModuleRoot_MalformedMarkerReachesTheEditor(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	_, entry := markerTree(t, "module example.com/thing\n")
 
@@ -241,7 +242,7 @@ func TestModuleRoot_MalformedMarkerReachesTheEditor(t *testing.T) {
 	if _, err := ws.FindModuleRoot(mustHostPath(t, entry)); err == nil {
 		t.Fatal("Workspace.FindModuleRoot returned no error for a malformed marker")
 	} else {
-		issue := schema.ModuleRootIssue(err)
+		issue := moduleroot.Issue(err)
 		if issue.Code() != diag.E_LOAD_MODULE_ROOT_MALFORMED {
 			t.Errorf("editor issue code = %v, want E_LOAD_MODULE_ROOT_MALFORMED", issue.Code())
 		}
@@ -290,7 +291,7 @@ func TestSnapshotForResult_KeepsAnalyzeContract(t *testing.T) {
 // is the only signal that a root moved.
 func TestFileChanged_MarkerReanalyzesOpenDocuments(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 
 	root, entry := markerTree(t, "")
 	ws := newTestWorkspace(t, quietLogger(), Config{})
@@ -306,7 +307,7 @@ func TestFileChanged_MarkerReanalyzesOpenDocuments(t *testing.T) {
 		t.Fatal("opening the document stored no snapshot")
 	}
 
-	markerURI := lsputil.PathToURI(filepath.Join(root, schema.ModuleRootMarker))
+	markerURI := lsputil.PathToURI(filepath.Join(root, moduleroot.Marker))
 	ws.FileChanged(markerURI, 2 /* Changed */)
 
 	deadline := time.Now().Add(5 * time.Second)

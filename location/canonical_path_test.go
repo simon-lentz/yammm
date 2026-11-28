@@ -247,24 +247,6 @@ func TestCanonicalPath_IsZero(t *testing.T) {
 	}
 }
 
-func TestSourceIDFromPath_Dir(t *testing.T) {
-	skipOnWindows(t, "Unix path test")
-
-	cp, err := SourceIDFromPath("/a/b/c.txt")
-	if err != nil {
-		t.Fatalf("SourceIDFromPath failed: %v", err)
-	}
-
-	dir := cp.Dir()
-	if !strings.HasSuffix(dir.String(), "/a/b") {
-		t.Errorf("Dir() = %q; want suffix /a/b", dir.String())
-	}
-
-	if dir.IsZero() {
-		t.Error("Dir() should not return zero value")
-	}
-}
-
 func TestCanonicalPath_String_Empty(t *testing.T) {
 	var cp canonicalPath
 	if cp.String() != "" {
@@ -359,102 +341,10 @@ func TestLooksLikeAbsolute(t *testing.T) {
 	}
 }
 
-// TestCanonicalPath_Dir_NFCNormalization verifies that Dir() normalizes NFD to NFC.
-// This ensures the NFC invariant is maintained even for directly-constructed values.
-func TestCanonicalPath_Dir_NFCNormalization(t *testing.T) {
-	tests := []struct {
-		name    string
-		nfdPath string // NFD input (decomposed)
-		wantDir string // Expected NFC output (precomposed)
-	}{
-		{
-			name:    "e-acute in parent",
-			nfdPath: "/users/cafe\u0301/subdir", // café with combining acute
-			wantDir: "/users/caf\u00e9",         // café with precomposed é
-		},
-		{
-			name:    "a-umlaut in parent",
-			nfdPath: "/data/ba\u0308r/file.txt", // bär with combining diaeresis
-			wantDir: "/data/b\u00e4r",           // bär with precomposed ä
-		},
-		{
-			name:    "Windows path with NFD",
-			nfdPath: "C:/users/cafe\u0301/docs",
-			wantDir: "C:/users/caf\u00e9",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Direct construction to test with non-NFC input
-			cp := canonicalPath{path: tt.nfdPath}
-			got := cp.Dir()
-
-			if got.String() != tt.wantDir {
-				t.Errorf("Dir() = %q (bytes: %x); want %q (bytes: %x)",
-					got.String(), []byte(got.String()),
-					tt.wantDir, []byte(tt.wantDir))
-			}
-		})
-	}
-}
-
-// TestCanonicalPath_Dir_CleansInput verifies that Dir() cleans non-canonical input
-// before taking the directory, ensuring semantic correctness and consistency with Join().
-func TestCanonicalPath_Dir_CleansInput(t *testing.T) {
-	tests := []struct {
-		name    string
-		windows bool
-		input   string
-		want    string
-	}{
-		{"dotdot as last", false, "/a/b/..", "/"},
-		{"dot as last", false, "/a/b/.", "/a"},
-		{"redundant slashes", false, "/a//b/c", "/a/b"},
-		{"complex non-clean", false, "/a/./b/../c/d", "/a/c"},
-		{"at root", false, "/", "/"},
-		{"Windows dotdot as last", true, "C:/a/b/..", "C:/"},
-		{"Windows dot as last", true, "C:/a/b/.", "C:/a"},
-		{"Windows redundant slashes", true, "C:/a//b/c", "C:/a/b"},
-		{"Windows root escape", true, "C:/a/../..", "C:/"},
-		// Already-canonical inputs: Dir() must respect the drive root.
-		{"Windows deep path", true, "C:/a/b/c", "C:/a/b"},
-		{"Windows one level", true, "C:/a", "C:/"},
-		{"Windows at root", true, "C:/", "C:/"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.windows != (runtime.GOOS == "windows") {
-				t.Skip("the path is written for the other host")
-			}
-			// Direct construction with non-canonical path
-			cp := canonicalPath{path: tt.input}
-			got := cp.Dir()
-			if got.String() != tt.want {
-				t.Errorf("CanonicalPath{%q}.Dir() = %q; want %q", tt.input, got.String(), tt.want)
-			}
-			if !isHostAbsolute(got.String()) {
-				t.Errorf("Dir() result %q is not absolute", got.String())
-			}
-		})
-	}
-}
-
-// TestCanonicalPath_ZeroValue_Methods tests zero-value behavior for Dir().
-func TestCanonicalPath_ZeroValue_Methods(t *testing.T) {
-	var zero canonicalPath
-
-	// Dir() should return zero value for zero value
-	if got := zero.Dir(); !got.IsZero() {
-		t.Errorf("zero.Dir().IsZero() = false; want true")
-	}
-}
-
 // TestSourceIDFromPath_CrossPlatformInvariants validates the core invariants
 // against a real filesystem path so they run on every platform (the
 // Unix-literal tests above skip on Windows): forward-slash-only output,
-// absoluteness, Dir, cleaning of dirty inputs, and value-equality/map-key
+// absoluteness, cleaning of dirty inputs, and value-equality/map-key
 // semantics across constructions.
 func TestSourceIDFromPath_CrossPlatformInvariants(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -485,12 +375,6 @@ func TestSourceIDFromPath_CrossPlatformInvariants(t *testing.T) {
 	}
 
 	requireInvariants("path", cp.String())
-
-	dir := cp.Dir()
-	requireInvariants("Dir()", dir.String())
-	if !strings.HasSuffix(dir.String(), "/dir") {
-		t.Errorf("Dir() = %q; want suffix /dir", dir.String())
-	}
 
 	// Dirty construction (./..-laden) resolves to the same canonical value,
 	// so equality and map-key semantics hold across constructions.

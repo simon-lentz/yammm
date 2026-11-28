@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/moduleroot"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -19,7 +20,7 @@ import (
 // cannot exercise anything that leaks one.
 func loadFromDisk(t *testing.T) schema.Schema {
 	t.Helper()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 	path, err := filepath.Abs(filepath.Join("testdata", "composed.yammm"))
 	if err != nil {
 		t.Fatalf("abs testdata path: %v", err)
@@ -90,7 +91,7 @@ func TestFileLoadedSchema_RendersAnAbsolutePath(t *testing.T) {
 // nothing loaded from disk reached the address a (one) slot writes.
 func TestFileLoadedSchema_OneCompositionShapes(t *testing.T) {
 	t.Parallel()
-	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	yammmtest.RequireNoModuleRoot(t, moduleroot.Find)
 	file := filepath.Join(t.TempDir(), "composed.yammm")
 	s := loadFromDiskAt(t, file)
 	ctx := t.Context()

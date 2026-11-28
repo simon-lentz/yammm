@@ -130,7 +130,9 @@
 // existing directory, WriteFile refuses it before staging, on every host, with
 // an error matching syscall.ENOTDIR. Under a directory that does not exist, or
 // when its stat fails otherwise, it is refused with the host's own error, and an
-// existing directory is refused as one spelled without the separator is. A symbolic link at the path is then followed, as a chain,
+// existing directory is refused with an error matching syscall.EISDIR before
+// staging; spelled without the separator, it is refused at the rename, with the
+// error the host gives a file renamed over a directory. A symbolic link at the path is then followed, as a chain,
 // and the link survives: the file it names is written, and a dangling link
 // creates that file. A link's target is read as the kernel reads it: on Unix a ".." in the
 // target takes the parent of the directory reached on disk, and on Windows it

@@ -97,32 +97,39 @@ func TestWriteFile_EvaluatesADotDotOnThePathsText(t *testing.T) {
 }
 
 // A link whose target climbs out of a linked directory is written where the
-// kernel reaches it, and staged beside that file: the directory the target's
-// text names is sealed here, so a staging file made there fails.
+// kernel reaches it, and staged beside that file. On Unix the directory the
+// target's text names is sealed, so a staging file made there fails. Windows
+// evaluates the target's ".." on its text, so there the file the text names is
+// the one written, with no staging file left beside either.
 func TestWriteFile_StagesBesideTheFileALinkReaches(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not honour a directory's permission bits, and evaluates a target's .. on its text")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores the write bit")
-	}
 	dir := linkedFixture(t)
 	sep := string(filepath.Separator)
 	if err := os.Symlink("link"+sep+".."+sep+"e.ys", filepath.Join(dir, "u.ys")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(dir, 0o550); err != nil { //nolint:gosec // a directory the test must not be able to write
-		t.Fatal(err)
+	reached, other := filepath.Join(dir, "real", "deep", "e.ys"), filepath.Join(dir, "e.ys")
+	if runtime.GOOS == "windows" {
+		reached, other = other, reached
+	} else {
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores the write bit")
+		}
+		if err := os.Chmod(dir, 0o550); err != nil { //nolint:gosec // a directory the test must not be able to write
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o750) }) //nolint:gosec // restoring the test's own directory
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o750) }) //nolint:gosec // restoring the test's own directory
 	if err := snapshot.WriteFile(filepath.Join(dir, "u.ys"), []byte("reached")); err != nil {
 		t.Fatalf("WriteFile through u.ys: %v", err)
 	}
-	if got := readOrMissing(filepath.Join(dir, "real", "deep", "e.ys")); got != "reached" {
-		t.Errorf("the file the link reaches holds %q, want %q", got, "reached")
+	if got := readOrMissing(reached); got != "reached" {
+		t.Errorf("the file the link reaches, %s, holds %q, want %q", reached, got, "reached")
 	}
-	assertNoStagingFiles(t, filepath.Join(dir, "real"))
+	if got := readOrMissing(other); got != "<missing>" {
+		t.Errorf("%s, which the host does not reach, holds %q", other, got)
+	}
+	assertNoStagingFiles(t, dir)
 }
 
 // A cycle of links is refused rather than followed, and nothing is written.
@@ -285,4 +292,33 @@ func sameFile(t *testing.T, a, b string) bool {
 		t.Fatal(err)
 	}
 	return os.SameFile(ai, bi)
+}
+
+// TestWriteFile_ReplacesAFileReachedThroughALongLink holds a replacement to
+// the file the kernel writes for the path: darwin counts a link's body and the
+// rest of the path against MAXPATHLEN, so through a link of 1,014 bytes
+// "/x.ys" fits and the staging name, longer, spelled through the link does not.
+func TestWriteFile_ReplacesAFileReachedThroughALongLink(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the link needs a Unix kernel's MAXPATHLEN arithmetic")
+	}
+	dir := t.TempDir()
+	link := filepath.Join(dir, "L")
+	if err := os.Symlink(strings.Repeat("./", 507), link); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(link, "x.ys")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatalf("the target itself must be writable: %v", err)
+	}
+	if err := snapshot.WriteFile(path, []byte("new")); err != nil {
+		t.Fatalf("WriteFile through a 1,014-byte link = %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "x.ys")); err != nil || string(got) != "new" {
+		t.Errorf("the file the link reaches holds %q, %v; want the written bytes", got, err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
+		t.Errorf("the directory holds %d entries, want the link and the file: %v", len(entries), entries)
+	}
 }

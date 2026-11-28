@@ -55,20 +55,21 @@ var ErrUnprintableSourceID = errors.New("location: synthetic source ID holds a c
 // directory would get a valid-looking identity for a file that was never named.
 //
 // Returned by: SourceIDFromPath and ResolveSourcePath, and returned wrapped by
-// schema.FindModuleRoot and the yammm command's operand checks.
+// the yammm command's operand checks.
 var ErrEmptyPath = hostpath.ErrEmptyPath
 
-// ErrInvalidUTF8Path is returned for a path that is not valid UTF-8, or that
-// resolves to one through the working directory, a name on disk or a dangling
-// link's target.
+// ErrInvalidUTF8Path is returned for a path that is not valid UTF-8 once a
+// ".." in it is evaluated on its text, or that resolves to one through the
+// working directory, a name on disk or a dangling link's target. A ".." that
+// cancels an invalid element leaves a valid path, the one a writer writes.
 //
 // An identity is text that reaches JSON wires — a diagnostic under --json,
 // and a .ys document's provenance source_name — and encoding/json writes
 // an invalid byte as U+FFFD, which merges two names into one.
 //
 // Returned by: SourceIDFromPath, ResolveSourcePath and NewSourceID. A caller
-// that returns it wraps it, as schema.FindModuleRoot
-// and the language server's configuration check do, and the CLI's source
+// that returns it wraps it, as the language server's configuration check
+// does, and the CLI's source
 // operand check wraps it in its own refusal. A schema load reports it as a Fatal
 // E_LOAD_IO_FAILURE for the entry path, an explicit module root, a LoadString
 // source name and a LoadSourcesWithEntry source key, and an import that resolves to

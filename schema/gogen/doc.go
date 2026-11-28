@@ -355,7 +355,8 @@
 //     key, a source has no path relative to the root, a LoadString name has
 //     no base, or a key is one the re-load's key rule refuses (see Embedded
 //     Source);
-//   - the module root the load recorded no longer resolves as a host path;
+//   - the module root the load recorded, or a file entry's directory where it
+//     recorded none, no longer resolves as a host path;
 //   - any other failure, which is a generator bug: emission meets a state it
 //     cannot write, such as an unresolved reference, alias or target, a kind
 //     it does not handle or whose constraint it does not carry, or a name with

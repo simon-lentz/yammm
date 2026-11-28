@@ -54,7 +54,8 @@
 //	}))
 //	if re, ok := errors.AsType[*diag.ResultError](err); ok {
 //	    // Schema compilation errors; re.Result.HasFatal() reports an I/O failure,
-//	    // a cancellation, a header that does not parse, or an internal fault
+//	    // a path the load cannot begin from, a cancellation, a header that does
+//	    // not parse, or an internal fault
 //	} else if err != nil {
 //	    // An option the load does not take
 //	}
