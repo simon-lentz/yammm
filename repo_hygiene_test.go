@@ -5,7 +5,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,16 +15,14 @@ import (
 	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
-// trackedTree returns git ls-files -z's output for the repository, or skips the
-// test where git cannot list it.
-func trackedTree(t *testing.T) []byte {
+// trackedTree returns the repository's files as [gittree.Files] reads them.
+func trackedTree(t *testing.T) []string {
 	t.Helper()
-	gittree.MarkTrackedFiles()
-	out, err := exec.CommandContext(t.Context(), "git", "ls-files", "-z").Output()
+	files, err := gittree.Files(".")
 	if err != nil {
-		t.Skipf("git ls-files unavailable: %v", err)
+		t.Fatal(err)
 	}
-	return out
+	return files
 }
 
 // TestRepository_TracksNoModuleRootMarker keeps this repository free of a
@@ -42,10 +39,8 @@ func trackedTree(t *testing.T) []byte {
 func TestRepository_TracksNoModuleRootMarker(t *testing.T) {
 	t.Parallel()
 
-	out := trackedTree(t)
-
-	for path := range strings.SplitSeq(string(out), "\x00") {
-		if path == "" || filepath.Base(path) != "yammm.mod" {
+	for _, path := range trackedTree(t) {
+		if filepath.Base(path) != "yammm.mod" {
 			continue
 		}
 		if slices.Contains(strings.Split(filepath.ToSlash(path), "/"), "testdata") {
@@ -63,13 +58,8 @@ func TestRepository_TracksNoModuleRootMarker(t *testing.T) {
 func TestRepository_ModuleZipHoldsEveryTrackedFile(t *testing.T) {
 	t.Parallel()
 
-	out := trackedTree(t)
-
 	var files []zip.File
-	for path := range strings.SplitSeq(string(out), "\x00") {
-		if path == "" {
-			continue
-		}
+	for _, path := range trackedTree(t) {
 		if _, err := os.Lstat(filepath.FromSlash(path)); errors.Is(err, fs.ErrNotExist) {
 			// The index still lists a file the working tree has deleted.
 			continue

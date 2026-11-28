@@ -79,8 +79,8 @@ const invocationDoc = "# Fixture\n" +
 	"After the fences `yammm check --after-fences`.\n"
 
 // invocationFixture writes the documents under the test's temporary
-// directory and returns it. The gate walks the filesystem there when that
-// directory lies outside any git work tree, as TMPDIR's does by default.
+// directory and returns it. The directory holds no repository, so the gate
+// reads the files on disk, whether or not TMPDIR lies in another work tree.
 func invocationFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -491,7 +491,10 @@ func TestAssertInvocationsExist_RefusesATableWithAGap(t *testing.T) {
 		{"two-word program", func(r *doclint.CommandRules) { r.Program = "go tool" }, `program "go tool" is not one word`},
 		{"no entry for the program", func(r *doclint.CommandRules) { r.Commands = r.Commands[1:] }, `no entry for the program itself`},
 		{"no parent", func(r *doclint.CommandRules) { r.Commands = append(r.Commands[:4], r.Commands[5:]...) }, `command "snapshot save" has no entry for its parent "snapshot"`},
-		{"listed twice", func(r *doclint.CommandRules) { r.Commands = append(r.Commands, doclint.Command{Path: "check"}) }, `command "check" is listed twice`},
+		{"listed twice", func(r *doclint.CommandRules) { r.Commands = append(r.Commands, doclint.Command{Path: "check"}) }, `command "check" is listed more than once`},
+		{"listed three times", func(r *doclint.CommandRules) {
+			r.Commands = append(r.Commands, doclint.Command{Path: "check"}, doclint.Command{Path: "check"})
+		}, `command "check" is listed more than once`},
 		{"spacing", func(r *doclint.CommandRules) {
 			r.Commands = append(r.Commands, doclint.Command{Path: "snapshot  info"})
 		}, `command path "snapshot  info" is not its words joined by single spaces`},

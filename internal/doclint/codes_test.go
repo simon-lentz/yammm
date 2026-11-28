@@ -282,7 +282,8 @@ func TestAssertCitedCodesExist_ReadsATrackedTreeBelowTheRepositoryTop(t *testing
 	}
 }
 
-// A tracked file the gate cannot read or parse is reported, never skipped.
+// A tracked file the gate cannot read or parse is reported by its path from
+// the root, never skipped.
 //
 // Not parallel: it builds its own repository (isolateFromEnclosingRepository).
 func TestAssertCitedCodesExist_ReportsAFileItCannotRead(t *testing.T) {
@@ -308,7 +309,7 @@ func TestAssertCitedCodesExist_ReportsAFileItCannotRead(t *testing.T) {
 	}
 	r := &recorder{}
 	doclint.AssertCitedCodesExist(r, dir, doclint.CodeRules{Codes: []string{"E_KNOWN"}})
-	for _, want := range []string{"parsing " + filepath.Join(dir, "broken.go"), "reading " + filepath.Join(dir, "gone.md")} {
+	for _, want := range []string{"parsing broken.go", "reading gone.md"} {
 		if !r.reports(want) {
 			t.Errorf("no report %q; got %v", want, r.msgs)
 		}

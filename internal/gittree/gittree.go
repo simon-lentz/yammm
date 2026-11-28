@@ -1,17 +1,43 @@
-// Package gittree gives a test a throwaway directory with a git index of its
-// own, and makes the list of tracked files an input of go test's result cache.
+// Package gittree reads the files of a tree as git tracks them, gives a test a
+// throwaway directory with a git index of its own, and makes the list of
+// tracked files an input of go test's result cache.
+//
+// # The tree at a root
+//
+// [Files] decides on the filesystem whether a root has a tracked set. It
+// resolves the root's links, then finds the nearest .git at or above it: a
+// directory, or the file a linked worktree or a submodule holds. The root
+// belongs to that work tree when it is the work tree's top, or when the
+// repository tracks a file under it, and then its files are git's listing.
+// Any other root is a copy of a tree, as the module cache holds a release, or
+// a test's directory inside a repository that tracks none of it, and its files
+// on disk are the tree.
+//
+// The reader holds git to the .git it found and refuses the rest: git must
+// name the same work tree from the root (git rev-parse --show-toplevel), and
+// any git failure there is an error that carries git's message. git skips an
+// invalid .git, such as an empty directory, and would read the next repository
+// up. An exit status alone does not tell a refusing repository from no
+// repository, and git's messages are localized, so the reader reads neither to
+// choose the branch. What git computes from its configuration beyond those two
+// commands, such as a sparse checkout, is git's and is not modelled.
+//
+// # The result cache
 //
 // go test replays a package's last pass when its test binary, and the files
 // and environment variables its tests read, are unchanged. A test that asks git
 // for the tracked files reads the index through a child process, which that
 // cache does not see: a pass would be replayed after a file was added to the
-// index. Such a test calls [MarkTrackedFiles].
+// index. [Files] calls [MarkTrackedFiles], and so does any test that runs git
+// over an index of its own.
 package gittree
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -142,4 +168,125 @@ const TrackedFilesVar = "YAMMM_TRACKED_FILES"
 // after a file is added to the index.
 func MarkTrackedFiles() {
 	_ = os.Getenv(TrackedFilesVar)
+}
+
+// Files returns the files of the tree at root, slash-separated, relative to
+// root and sorted, as [os.ReadDir] returns a directory's entries. They are
+// git's tracked files when root belongs to a work tree, and the files on disk
+// otherwise; the package documentation states the rule.
+func Files(root string) ([]string, error) {
+	MarkTrackedFiles()
+	dir, err := filepath.Abs(root)
+	if err == nil {
+		dir, err = filepath.EvalSymlinks(dir)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the tree at %s: %w", root, err)
+	}
+	top, err := nearestWorkTree(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading the tree at %s: %w", root, err)
+	}
+	if top != "" {
+		files, tracked, err := trackedFiles(dir, top)
+		if err != nil {
+			return nil, fmt.Errorf("reading the tree at %s: %w", root, err)
+		}
+		if tracked {
+			return files, nil
+		}
+	}
+	files, err := walk(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading the tree at %s: %w", root, err)
+	}
+	return files, nil
+}
+
+// nearestWorkTree returns the nearest directory at or above dir that holds a
+// .git entry, or "" when none does.
+func nearestWorkTree(dir string) (string, error) {
+	for {
+		_, err := os.Lstat(filepath.Join(dir, ".git"))
+		if err == nil {
+			return dir, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("looking for .git: %w", err)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", nil
+		}
+		dir = parent
+	}
+}
+
+// trackedFiles lists the files git tracks under dir, whose nearest .git is in
+// top. The second result is false when dir is below top and the repository
+// tracks nothing under it, so dir is a copy.
+func trackedFiles(dir, top string) (files []string, tracked bool, err error) {
+	env, err := Env(dir)
+	if err != nil {
+		return nil, false, err
+	}
+	out, err := git(dir, env, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, false, err
+	}
+	if named := strings.TrimSpace(string(out)); !sameDir(named, top) {
+		return nil, false, fmt.Errorf("git reads the work tree at %s, and the nearest .git is in %s", named, top)
+	}
+	out, err = git(dir, env, "ls-files", "-z")
+	if err != nil {
+		return nil, false, err
+	}
+	for name := range strings.SplitSeq(string(out), "\x00") {
+		if name != "" {
+			files = append(files, name)
+		}
+	}
+	if dir != top && len(files) == 0 {
+		return nil, false, nil
+	}
+	slices.Sort(files)
+	return files, true, nil
+}
+
+// git runs git with args in dir and returns its output. A failure carries
+// git's message.
+func git(dir string, env []string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	out, err := cmd.Output()
+	if exit := (*exec.ExitError)(nil); errors.As(err, &exit) {
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, bytes.TrimSpace(exit.Stderr))
+	} else if err != nil {
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return out, nil
+}
+
+// walk lists every entry under dir that is not a directory. A copy holds the
+// tracked tree alone, so no directory is skipped: git's listing holds tracked
+// dot-directories such as .github too.
+func walk(dir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return fmt.Errorf("relativizing %s: %w", p, err)
+		}
+		files = append(files, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking %s: %w", dir, err)
+	}
+	slices.Sort(files)
+	return files, nil
 }

@@ -3,12 +3,8 @@ package doclint_test
 import (
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // storedModuleFile is the name a fixture under testdata gives each of its
@@ -20,18 +16,10 @@ const storedModuleFile = "go.mod.fixture"
 
 // materialize copies the fixture module testdata/name into the test's temporary
 // directory, restores each stored module file as go.mod, and returns the copy's
-// root. The copy must lie outside any git work tree, so the gate walks it; in
-// one, the gate would read the empty tracked set.
+// root. The copy holds no repository, so the gate reads its files on disk.
 func materialize(t *testing.T, name string) string {
 	t.Helper()
-	dir := t.TempDir()
-	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--is-inside-work-tree")
-	cmd.Dir = dir
-	cmd.Env = gittree.WithoutRepositoryVars(t, os.Environ())
-	if out, err := cmd.Output(); err == nil && strings.TrimSpace(string(out)) == "true" {
-		t.Fatalf("the temporary directory %s lies inside a git work tree; set TMPDIR outside one", dir)
-	}
-	root := filepath.Join(dir, name)
+	root := filepath.Join(t.TempDir(), name)
 	if err := os.CopyFS(root, os.DirFS(filepath.Join("testdata", name))); err != nil {
 		t.Fatalf("copying fixture %s: %v", name, err)
 	}

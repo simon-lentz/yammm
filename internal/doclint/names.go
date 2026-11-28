@@ -1,12 +1,7 @@
 package doclint
 
 import (
-	"context"
-	"fmt"
 	"go/ast"
-	"io/fs"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
@@ -20,7 +15,7 @@ import (
 // caller can hold a floor. The package documentation states the vocabulary.
 func AssertProcessFreeNames(t TB, root string) (paths, tests int) {
 	t.Helper()
-	files, err := trackedPaths(context.Background(), root)
+	files, err := gittree.Files(root)
 	if err != nil {
 		t.Errorf("listing the paths of %s: %v", root, err)
 		return 0, 0
@@ -58,58 +53,6 @@ func AssertProcessFreeNames(t TB, root string) (paths, tests int) {
 		}
 	}
 	return paths, tests
-}
-
-// trackedPaths returns every path git tracks under root, slash-separated and
-// relative to root, testdata included. Outside a work tree it walks the
-// filesystem and skips node_modules and dot-directories.
-func trackedPaths(ctx context.Context, root string) ([]string, error) {
-	tracks, err := gitTracks(ctx, root)
-	if err != nil {
-		return nil, err
-	}
-	if tracks {
-		gittree.MarkTrackedFiles()
-		env, err := gitEnv(root)
-		if err != nil {
-			return nil, err
-		}
-		cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z")
-		cmd.Env = env
-		out, err := cmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("listing the tracked paths of %s: %w", root, err)
-		}
-		var paths []string
-		for name := range strings.SplitSeq(string(out), "\x00") {
-			if name != "" {
-				paths = append(paths, name)
-			}
-		}
-		return paths, nil
-	}
-	var paths []string
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if p != root && (d.Name() == "node_modules" || strings.HasPrefix(d.Name(), ".")) {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		rel, err := filepath.Rel(root, p)
-		if err != nil {
-			return fmt.Errorf("relativizing %s: %w", p, err)
-		}
-		paths = append(paths, filepath.ToSlash(rel))
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walking %s: %w", root, err)
-	}
-	return paths, nil
 }
 
 // isTestFunc reports whether name is a function the go test runner calls.

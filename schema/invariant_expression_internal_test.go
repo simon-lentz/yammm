@@ -2,7 +2,6 @@ package schema
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,16 +52,15 @@ func TestInvariant_ExpressionIsTheTextAsWritten(t *testing.T) {
 // expression the source parsed to, by the structural hash's encoding.
 func TestInvariant_ExpressionParsesToTheSameExpression(t *testing.T) {
 	t.Parallel()
-	gittree.MarkTrackedFiles()
-
-	cmd := exec.CommandContext(t.Context(), "git", "ls-files", "-z", "--", "*.yammm")
-	cmd.Dir = ".."
-	out, err := cmd.Output()
+	files, err := gittree.Files("..")
 	if err != nil {
-		t.Fatalf("git ls-files: %v", err)
+		t.Fatal(err)
 	}
 	read := 0
-	for name := range strings.SplitSeq(strings.TrimSuffix(string(out), "\x00"), "\x00") {
+	for _, name := range files {
+		if !strings.HasSuffix(name, ".yammm") {
+			continue
+		}
 		src, err := os.ReadFile(filepath.Join("..", filepath.FromSlash(name)))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)

@@ -2,7 +2,6 @@ package doclint
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +14,8 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/text"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // CommandRules is what [AssertInvocationsExist] checks invocations against.
@@ -61,13 +62,13 @@ func AssertInvocationsExist(t TB, root string, rules CommandRules) (checked int)
 		}
 		return 0
 	}
-	files, err := trackedPaths(context.Background(), root)
+	files, err := gittree.Files(root)
 	if err != nil {
 		t.Errorf("listing the paths of %s: %v", root, err)
 		return 0
 	}
 	for _, rel := range files {
-		if !strings.HasSuffix(rel, ".md") {
+		if !isMarkdownFile(rel) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
@@ -109,6 +110,7 @@ func newCommandTree(rules CommandRules) (commandTree, []string) {
 		groups:  make(map[string]bool),
 	}
 	var problems []string
+	repeated := make(map[string]bool)
 	if !slices.Equal(strings.Fields(rules.Program), []string{rules.Program}) {
 		problems = append(problems, fmt.Sprintf("program %q is not one word", rules.Program))
 	}
@@ -123,7 +125,10 @@ func newCommandTree(rules CommandRules) (commandTree, []string) {
 			continue
 		}
 		if _, dup := tree.flags[c.Path]; dup {
-			problems = append(problems, fmt.Sprintf("command %q is listed twice", c.Path))
+			if !repeated[c.Path] {
+				problems = append(problems, fmt.Sprintf("command %q is listed more than once", c.Path))
+			}
+			repeated[c.Path] = true
 			continue
 		}
 		byName := make(map[string]Flag, 2*len(c.Flags))

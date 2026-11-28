@@ -1,7 +1,6 @@
 package doclint
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -10,7 +9,6 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -54,9 +52,8 @@ type Module struct {
 	// nested holds the slash-separated directories under root that carry
 	// their own go.mod: each is another module, and none of it is loaded.
 	nested []string
-	// tracked holds every tracked .go file as trackedGoFiles keys it, or nil
-	// where git cannot list them (no git, or root outside a work tree) and the
-	// walk reads every file.
+	// tracked holds every .go file of the tree [gittree.Files] reads at
+	// root, slash-separated and relative to root.
 	tracked map[string]bool
 }
 
@@ -66,10 +63,10 @@ type Module struct {
 // skip — a gate that quietly drops the file it cannot read reports a clean run
 // over nothing.
 //
-// The file set is the TRACKED tree where root sits in a git work tree, and a
-// filesystem walk where git is unavailable. An untracked file is not source the
-// module ships, and reading it gave a local run a verdict CI could not
-// reproduce.
+// The file set is the tree [gittree.Files] reads: the TRACKED files where root
+// belongs to a git work tree, and the files on disk in a copy. An untracked
+// file is not source the module ships, and reading it gave a local run a
+// verdict CI could not reproduce. A root that is a link is read at its target.
 //
 // A build constraint excludes a NON-TEST file only. go doc renders no test
 // declaration under any tag, so "outside the published documentation" cannot
@@ -89,14 +86,17 @@ func Load(root string) (*Module, error) {
 		byName:   make(map[string][]*Package),
 	}
 	fset := token.NewFileSet()
-	tracked, hasTracked, err := trackedGoFiles(context.Background(), root)
+	tracked, err := trackedGoFiles(root)
 	if err != nil {
 		return nil, err
 	}
-	if !hasTracked {
-		tracked = nil
-	}
 	m.tracked = tracked
+	// WalkDir does not follow a root that is a link.
+	if info, err := os.Lstat(root); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		if root, err = filepath.EvalSymlinks(root); err != nil {
+			return nil, fmt.Errorf("reading %s: %w", m.root, err)
+		}
+	}
 
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -199,61 +199,20 @@ func buildContext() build.Context {
 // excludes here: go doc renders none of its declarations under any tag.
 func isTestFile(name string) bool { return strings.HasSuffix(name, "_test.go") }
 
-// gitTracks reports whether git can list root's tracked files: the binary
-// exists and root is inside a work tree. Neither absence is a failure to read
-// the module — both mean there is no tracked set — so neither is an error.
-func gitTracks(ctx context.Context, root string) (bool, error) {
-	if _, err := exec.LookPath("git"); errors.Is(err, exec.ErrNotFound) {
-		return false, nil
-	} else if err != nil {
-		return false, fmt.Errorf("looking up git: %w", err)
-	}
-	env, err := gitEnv(root)
+// trackedGoFiles returns every .go file of the tree at root, slash-separated
+// and relative to root.
+func trackedGoFiles(root string) (map[string]bool, error) {
+	files, err := gittree.Files(root)
 	if err != nil {
-		return false, err
+		return nil, fmt.Errorf("listing the Go files: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--is-inside-work-tree")
-	cmd.Env = env
-	return cmd.Run() == nil, nil
-}
-
-// gitEnv is the environment for git over root, as [gittree.Env] gives it.
-func gitEnv(root string) ([]string, error) {
-	env, err := gittree.Env(root)
-	if err != nil {
-		return nil, fmt.Errorf("the environment for git in %s: %w", root, err)
-	}
-	return env, nil
-}
-
-// trackedGoFiles returns every .go file git tracks under root, keyed by its
-// path as the walk spells it. The second result is false when there is no
-// tracked set to read — git is unavailable, or root is outside a work tree —
-// and the caller then walks the filesystem, which is what keeps the gate
-// runnable outside a checkout.
-func trackedGoFiles(ctx context.Context, root string) (tracked map[string]bool, ok bool, err error) {
-	if ok, err := gitTracks(ctx, root); err != nil || !ok {
-		return nil, false, err
-	}
-	gittree.MarkTrackedFiles()
-	env, err := gitEnv(root)
-	if err != nil {
-		return nil, false, err
-	}
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z", "--", "*.go")
-	cmd.Env = env
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, false, fmt.Errorf("listing the tracked files of %s: %w", root, err)
-	}
-	tracked = make(map[string]bool)
-	for name := range strings.SplitSeq(string(out), "\x00") {
-		if name == "" {
-			continue
+	tracked := make(map[string]bool)
+	for _, rel := range files {
+		if strings.HasSuffix(rel, ".go") {
+			tracked[rel] = true
 		}
-		tracked[filepath.ToSlash(filepath.Join(root, name))] = true
 	}
-	return tracked, true, nil
+	return tracked, nil
 }
 
 // loadDir parses dir's Go files, reporting false when it holds none.
@@ -262,6 +221,11 @@ func loadDir(fset *token.FileSet, root, dir string, tracked map[string]bool) (pk
 	if err != nil {
 		return nil, false, fmt.Errorf("reading %s: %w", dir, err)
 	}
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return nil, false, fmt.Errorf("relativizing %s: %w", dir, err)
+	}
+	rel = filepath.ToSlash(rel)
 	bctx := buildContext()
 	pkg = &Package{fset: fset, names: make(map[string]struct{})}
 	var testName, otherName string
@@ -272,7 +236,7 @@ func loadDir(fset *token.FileSet, root, dir string, tracked map[string]bool) (pk
 			continue
 		}
 		full := filepath.Join(dir, e.Name())
-		if tracked != nil && !tracked[filepath.ToSlash(full)] {
+		if !tracked[path.Join(rel, e.Name())] {
 			continue
 		}
 		if !isTestFile(e.Name()) {
@@ -321,11 +285,7 @@ func loadDir(fset *token.FileSet, root, dir string, tracked map[string]bool) (pk
 		pkg.Name = testName
 	}
 
-	rel, err := filepath.Rel(root, dir)
-	if err != nil {
-		return nil, false, fmt.Errorf("relativizing %s: %w", dir, err)
-	}
-	pkg.Dir = filepath.ToSlash(rel)
+	pkg.Dir = rel
 	return pkg, true, nil
 }
 

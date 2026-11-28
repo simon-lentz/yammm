@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -65,7 +66,7 @@ func AssertDependencyLines(t TB, root string) (checked, headings int) {
 				t.Errorf("%s: the dependency row names %q, which is no package in this module", file, row.subject)
 				continue
 			}
-			actual, err := nonStdImports(filepath.Join(root, filepath.FromSlash(subject.Dir)), m.Path, m.tracked)
+			actual, err := nonStdImports(filepath.Join(root, filepath.FromSlash(subject.Dir)), subject.Dir, m.Path, m.tracked)
 			if err != nil {
 				t.Errorf("%s: %v", file, err)
 				continue
@@ -101,10 +102,11 @@ func (m *Module) packageForSubject(subject, own string) (*Package, bool) {
 
 // nonStdImports returns the non-test imports outside the standard library of
 // the Go files in dir, whatever their build constraints save the bare
-// "ignore", since a row states what a directory imports on every host. Where
-// tracked is not nil it reads only the files tracked holds, as [Load] does. An
-// in-module path is spelled relative to the module, any other in full.
-func nonStdImports(dir, modulePath string, tracked map[string]bool) ([]string, error) {
+// "ignore", since a row states what a directory imports on every host. It
+// reads only the files tracked holds, keyed by rel, dir's path from the root,
+// as [Load] does. An in-module path is spelled relative to the module, any
+// other in full.
+func nonStdImports(dir, rel, modulePath string, tracked map[string]bool) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading imports of %s: %w", dir, err)
@@ -116,7 +118,7 @@ func nonStdImports(dir, modulePath string, tracked map[string]bool) ([]string, e
 		if e.IsDir() || !isSourceFile(name) {
 			continue
 		}
-		if tracked != nil && !tracked[filepath.ToSlash(filepath.Join(dir, name))] {
+		if !tracked[path.Join(rel, name)] {
 			continue
 		}
 		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ImportsOnly|parser.ParseComments)

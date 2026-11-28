@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -175,15 +174,9 @@ func TestSchemaPaths_ReachTheModuleThroughALink(t *testing.T) {
 func TestSchemaPaths_HoldEveryTrackedSchema(t *testing.T) {
 	t.Parallel()
 	root, paths := schemaPaths(t)
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("no git to list the tracked tree")
-	}
-	gittree.MarkTrackedFiles()
-	cmd := exec.CommandContext(t.Context(), "git", "ls-files", "-z", "--", "*.yammm")
-	cmd.Dir = root
-	out, err := cmd.Output()
+	files, err := gittree.Files(root)
 	if err != nil {
-		t.Skipf("%s is no git work tree to list: %v", root, err)
+		t.Fatal(err)
 	}
 	walked := make(map[string]bool, len(paths))
 	for _, path := range paths {
@@ -199,8 +192,8 @@ func TestSchemaPaths_HoldEveryTrackedSchema(t *testing.T) {
 	}
 	own = filepath.ToSlash(own) + "/"
 	tracked := 0
-	for rel := range strings.SplitSeq(strings.TrimSuffix(string(out), "\x00"), "\x00") {
-		if rel == "" || strings.HasPrefix(rel, own) {
+	for _, rel := range files {
+		if !strings.HasSuffix(rel, ".yammm") || strings.HasPrefix(rel, own) {
 			continue
 		}
 		// The index can name a file the work tree has deleted and not staged.

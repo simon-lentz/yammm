@@ -29,8 +29,6 @@ import (
 	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
-
-	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 const testWorkflow = "./.github/workflows/yammm_test.yml"
@@ -3156,36 +3154,11 @@ func TestTrackedWorkflows_ReadsWhatGitHubRuns(t *testing.T) {
 	}
 }
 
-// insideWorkTree asks about the root it is given, and a .git directory is no
-// work tree.
-func TestInsideWorkTree_AsksAboutItsRoot(t *testing.T) {
+// In a copy, as the module cache holds a release, the files on disk are the
+// tracked tree, and the same workflows are read.
+func TestTrackedWorkflows_ReadsTheFilesOfACopy(t *testing.T) {
 	t.Parallel()
 	f := newTree(t)
-	f.write("held.txt", "held\n")
-	f.index()
-	plain := t.TempDir()
-	for dir, want := range map[string]bool{
-		f.dir:                        true,
-		filepath.Join(f.dir, ".git"): false,
-		plain:                        false,
-	} {
-		if got := insideWorkTree(t, dir); got != want {
-			t.Errorf("insideWorkTree(%s) = %v, want %v", dir, got, want)
-		}
-	}
-}
-
-// Outside a git work tree, as in the module cache's copy of a release, the
-// files on disk are the tracked tree, and the same workflows are read.
-func TestTrackedWorkflows_ReadsTheFilesOutsideAWorkTree(t *testing.T) {
-	t.Parallel()
-	f := newTree(t)
-	probe := exec.CommandContext(t.Context(), "git", "rev-parse", "--is-inside-work-tree")
-	probe.Dir = f.dir
-	probe.Env = gittree.WithoutRepositoryVars(t, os.Environ())
-	if probe.Run() == nil {
-		t.Fatalf("the temporary directory %s lies inside a git work tree; set TMPDIR outside one", f.dir)
-	}
 	jobNamed := func(name string) string {
 		return "jobs:\n  " + name + ":\n    runs-on: ubuntu-24.04\n    steps:\n      - run: make\n"
 	}

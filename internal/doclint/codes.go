@@ -1,7 +1,6 @@
 package doclint
 
 import (
-	"context"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -11,6 +10,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // CodeCitations counts the diagnostic code names [AssertCitedCodesExist] read,
@@ -61,7 +62,7 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 			return n
 		}
 	}
-	files, err := trackedPaths(context.Background(), root)
+	files, err := gittree.Files(root)
 	if err != nil {
 		t.Errorf("listing the paths of %s: %v", root, err)
 		return n
@@ -81,7 +82,7 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 		if slices.Contains(strings.Split(rel, "/"), "testdata") {
 			continue
 		}
-		isGo, isMarkdown, isShell := strings.HasSuffix(rel, ".go"), strings.HasSuffix(rel, ".md"), strings.HasSuffix(rel, ".sh")
+		isGo, isMarkdown, isShell := strings.HasSuffix(rel, ".go"), isMarkdownFile(rel), strings.HasSuffix(rel, ".sh")
 		if !isGo && !isMarkdown && !isShell {
 			continue
 		}
@@ -91,15 +92,19 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 			}
 			continue
 		}
-		full := filepath.Join(root, filepath.FromSlash(rel))
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Errorf("reading %s: %v", rel, err)
+			continue
+		}
 		var cites []codeCitation
 		switch {
 		case isGo:
-			cites, err = goCommentCitations(fset, full)
+			cites, err = goCommentCitations(fset, rel, data)
 		case isMarkdown:
-			cites, err = markdownCitations(full)
+			cites = citationsIn(string(data), 1)
 		default:
-			cites, err = shellCitations(full)
+			cites = shellCitations(data)
 		}
 		if err != nil {
 			t.Errorf("%v", err)
@@ -225,10 +230,10 @@ func isCodeByte(c byte) bool {
 	return 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_'
 }
 
-func goCommentCitations(fset *token.FileSet, file string) ([]codeCitation, error) {
-	f, err := parser.ParseFile(fset, file, nil, parser.ParseComments|parser.SkipObjectResolution)
+func goCommentCitations(fset *token.FileSet, rel string, src []byte) ([]codeCitation, error) {
+	f, err := parser.ParseFile(fset, rel, src, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", file, err)
+		return nil, fmt.Errorf("parsing %s: %w", rel, err)
 	}
 	var out []codeCitation
 	for _, g := range f.Comments {
@@ -242,11 +247,7 @@ func goCommentCitations(fset *token.FileSet, file string) ([]codeCitation, error
 // shellCitations reads every line of a shell script whose first non-blank
 // character is "#", a heredoc's lines included, except a shebang: "#!" at the
 // very start of the first line.
-func shellCitations(file string) ([]codeCitation, error) {
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", file, err)
-	}
+func shellCitations(data []byte) []codeCitation {
 	var out []codeCitation
 	for i, l := range strings.Split(string(data), "\n") {
 		trimmed := strings.TrimLeft(l, " \t")
@@ -255,15 +256,14 @@ func shellCitations(file string) ([]codeCitation, error) {
 		}
 		out = append(out, citationsIn(trimmed, i+1)...)
 	}
-	return out, nil
+	return out
 }
 
-func markdownCitations(file string) ([]codeCitation, error) {
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", file, err)
-	}
-	return citationsIn(string(data), 1), nil
+// isMarkdownFile reports whether rel names a Markdown file: the extension .md
+// or .markdown, in any letter case.
+func isMarkdownFile(rel string) bool {
+	ext := strings.ToLower(path.Ext(rel))
+	return ext == ".md" || ext == ".markdown"
 }
 
 // codeSet answers whether a cited name exists: a whole name by equality, a
